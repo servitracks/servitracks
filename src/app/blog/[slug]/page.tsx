@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect } from "react";
 import { blogPosts } from "../../../lib/blog-data";
 import { useParams, Navigate, Link } from "react-router-dom";
@@ -111,7 +113,7 @@ export default function BlogPost() {
             <div className="rounded-2xl bg-neutral-50 p-8 text-center">
               <h3 className="text-xl font-bold text-neutral-900 mb-2">¿Listo para llevar tu taller al próximo nivel?</h3>
               <p className="text-neutral-600 mb-6">ServiTracks es el software todo-en-uno diseñado para talleres automotrices en República Dominicana.</p>
-              <Link to="/autocheck" className="inline-block rounded-full bg-black px-8 py-3.5 text-sm font-bold text-white shadow-sm hover:bg-neutral-800 transition-all cursor-pointer">
+              <Link href="/register" className="inline-block rounded-full bg-black px-8 py-3.5 text-sm font-bold text-white shadow-sm hover:bg-neutral-800 transition-all cursor-pointer">
                 Comenzar prueba gratis ahora
               </Link>
             </div>

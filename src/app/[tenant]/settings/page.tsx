@@ -2,6 +2,8 @@
 
 import { useState, useRef, useMemo } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
+import { supabaseAdmin } from "@/lib/supabase";
+import { waSendTestMessage } from "@/lib/wasender";
 import { Building2, Bell, Printer, Users, Shield, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,19 +16,19 @@ import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
 
 const TABS = [
-  { id: "taller",    label: "Taller",          icon: Building2 },
-  { id: "tenants",   label: "Sucursales",      icon: Store },
-  { id: "whatsapp",  label: "WhatsApp",         icon: Bell },
-  { id: "print",     label: "Impresión",        icon: Printer },
-  { id: "users",     label: "Usuarios y Roles", icon: Users },
-  { id: "security",  label: "Seguridad",        icon: Shield },
+  { id: "taller", label: "Taller", icon: Building2 },
+  { id: "tenants", label: "Sucursales", icon: Store },
+  { id: "whatsapp", label: "WhatsApp", icon: Bell },
+  { id: "print", label: "Impresión", icon: Printer },
+  { id: "users", label: "Usuarios y Roles", icon: Users },
+  { id: "security", label: "Seguridad", icon: Shield },
 ];
 
 const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
-  { value: "owner",        label: "Dueño",      color: "bg-black text-white" },
-  { value: "mechanic",     label: "Mecánico",   color: "bg-amber-100 text-amber-800" },
-  { value: "cashier",      label: "Cajero",     color: "bg-blue-100 text-blue-800" },
-  { value: "receptionist", label: "Recepción",  color: "bg-violet-100 text-violet-800" },
+  { value: "owner", label: "Dueño", color: "bg-black text-white" },
+  { value: "mechanic", label: "Mecánico", color: "bg-amber-100 text-amber-800" },
+  { value: "cashier", label: "Cajero", color: "bg-blue-100 text-blue-800" },
+  { value: "receptionist", label: "Recepción", color: "bg-violet-100 text-violet-800" },
 ];
 
 function roleLabel(r: TenantUser["role"]) {
@@ -38,11 +40,11 @@ function roleBadge(r: TenantUser["role"]) {
 
 export default function SettingsPage() {
   const { tenant } = useParams();
-  const { 
+  const {
     tenants, users, printSettings, updateTenant, addTenant, deleteTenant,
-    addUser, updateUser, deleteUser, updatePrintSettings 
+    addUser, updateUser, deleteUser, updatePrintSettings
   } = useStore();
-  
+
   const currentUserId = useStore((s) => s.currentUserId);
   const currentUser = useMemo(() => {
     return users.find((u) => u.id === currentUserId) || users[0];
@@ -126,7 +128,7 @@ export default function SettingsPage() {
       toast.error("El nombre y el slug comercial son obligatorios");
       return;
     }
-    
+
     // Check if slug is already taken by another tenant
     const slugTaken = tenants.some(t => t.slug === editBranchForm.slug && t.id !== editBranchTarget.id);
     if (slugTaken) {
@@ -215,26 +217,31 @@ export default function SettingsPage() {
   const [waVisible, setWaVisible] = useState(false);
   const [waTesting, setWaTesting] = useState(false);
 
-  const saveWa = () => {
+  const saveWa = async () => {
+    // 1. Update local store immediately
     updateTenant(taller.id, { wasenderApiKey: waKey, wasenderPhone: waPhone });
-    toast.success("Configuración de WhatsApp guardada");
+    // 2. Persist to Supabase
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ wasender_api_key: waKey, wasender_phone: waPhone })
+      .eq("id", taller.id);
+    if (error) {
+      console.error("Error saving WaSender to Supabase:", error);
+      toast.warning("Guardado localmente. Error al sincronizar con servidor.");
+    } else {
+      toast.success("Configuración de WhatsApp guardada");
+    }
   };
 
   const testWa = async () => {
     if (!waKey || !waPhone) { toast.error("Completa la API Key y el número"); return; }
     setWaTesting(true);
-    try {
-      const res = await fetch("/api/whatsapp", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Token": waKey 
-        },
-        body: JSON.stringify({ phone: waPhone, message: "✅ ServiTracks conectado correctamente con WaSender API.", apiKey: waKey }),
-      });
-      const data = await res.json();
-      res.ok ? toast.success("Mensaje de prueba enviado") : toast.error(data.error ?? "Error al enviar prueba");
-    } catch { toast.error("Sin conexión con el servidor"); }
+    const result = await waSendTestMessage(waKey, waPhone);
+    if (result.ok) {
+      toast.success("✅ Mensaje de prueba enviado correctamente");
+    } else {
+      toast.error(`Error WaSender: ${result.error}`);
+    }
     setWaTesting(false);
   };
 
@@ -510,7 +517,7 @@ export default function SettingsPage() {
                 <CardTitle>Administración de Sucursales</CardTitle>
                 <CardDescription>Visualiza, registra y gestiona las sedes comerciales y sus suscripciones.</CardDescription>
               </div>
-              <Button 
+              <Button
                 onClick={() => {
                   if (!canAddBranch) {
                     toast.error(`Tu plan ${currentPlan?.nombre} solo permite ${branchLimit} sucursal${branchLimit && branchLimit > 1 ? 'es' : ''}. Actualiza tu plan para añadir más.`);
@@ -521,8 +528,8 @@ export default function SettingsPage() {
                 disabled={!canAddBranch}
                 className={cn(
                   "rounded-xl font-bold cursor-pointer h-10 px-4",
-                  canAddBranch 
-                    ? "bg-black hover:bg-neutral-800 text-white" 
+                  canAddBranch
+                    ? "bg-black hover:bg-neutral-800 text-white"
                     : "bg-neutral-200 text-neutral-400 cursor-not-allowed hover:bg-neutral-200"
                 )}
               >
@@ -553,7 +560,7 @@ export default function SettingsPage() {
                               {isActive ? "Activa" : "Pendiente de Pago"}
                             </Badge>
                           </div>
-                          
+
                           {/* Folder slug link */}
                           <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-semibold bg-neutral-50 px-2 py-0.5 rounded-md w-fit">
                             <span className="text-neutral-300 font-normal">URL:</span>
@@ -590,7 +597,7 @@ export default function SettingsPage() {
                             Activar (Simular Pago)
                           </Button>
                         )}
-                        
+
                         <Button
                           onClick={() => handleEditBranch(t)}
                           variant="outline"
@@ -684,9 +691,9 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <Label>Opciones del Recibo</Label>
               {([
-                { key: "showLogo",   label: "Mostrar logo del taller" },
-                { key: "showNcf",    label: "Mostrar número NCF" },
-                { key: "showItbis",  label: "Mostrar ITBIS desglosado" },
+                { key: "showLogo", label: "Mostrar logo del taller" },
+                { key: "showNcf", label: "Mostrar número NCF" },
+                { key: "showItbis", label: "Mostrar ITBIS desglosado" },
                 { key: "showChange", label: "Mostrar cambio/vuelto" },
               ] as { key: keyof typeof ps; label: string }[]).map(opt => (
                 <div key={opt.key} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 bg-neutral-50">
@@ -777,9 +784,9 @@ export default function SettingsPage() {
                     </div>
                     <Badge className={cn("border-none rounded-full text-xs", roleBadge(u.role))}>{roleLabel(u.role)}</Badge>
                     <Badge className={cn("border-none rounded-full text-xs",
-                       u.status === "active" ? "bg-emerald-100 text-emerald-700"
-                      : u.status === "invited" ? "bg-amber-100 text-amber-700"
-                      : "bg-neutral-100 text-neutral-500")}>
+                      u.status === "active" ? "bg-emerald-100 text-emerald-700"
+                        : u.status === "invited" ? "bg-amber-100 text-amber-700"
+                          : "bg-neutral-100 text-neutral-500")}>
                       {u.status === "active" ? "Activo" : u.status === "invited" ? "Invitado" : "Inactivo"}
                     </Badge>
                     {u.role !== "owner" && (
@@ -803,7 +810,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             {[
               { key: "current", label: "Contraseña Actual" },
-              { key: "next",    label: "Nueva Contraseña" },
+              { key: "next", label: "Nueva Contraseña" },
               { key: "confirm", label: "Confirmar Nueva Contraseña" },
             ].map(f => (
               <div key={f.key} className="space-y-1.5">
@@ -836,18 +843,18 @@ export default function SettingsPage() {
           <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
             <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Invitar Usuario</DialogTitle>
           </DialogHeader>
-          
+
           <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
             <div className="space-y-1.5">
               <Label>Nombre Completo</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" 
+              <Input className="h-10 rounded-xl border-neutral-200"
                 placeholder="Ej. Juan Pérez"
                 value={inviteForm.name}
                 onChange={e => setInviteForm({ ...inviteForm, name: e.target.value })} />
             </div>
             <div className="space-y-1.5">
               <Label>Correo Electrónico</Label>
-              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+              <Input type="email" className="h-10 rounded-xl border-neutral-200"
                 placeholder="juan@taller.do"
                 value={inviteForm.email}
                 onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} />
@@ -865,7 +872,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-          
+
           <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
             <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setInviteOpen(false)}>Cancelar</Button>
             <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleInvite}>Enviar Invitación</Button>
@@ -879,21 +886,21 @@ export default function SettingsPage() {
           <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
             <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Registrar Nueva Sucursal</DialogTitle>
           </DialogHeader>
-          
+
           <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
             <div className="space-y-1.5">
               <Label>Nombre Comercial</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" 
+              <Input className="h-10 rounded-xl border-neutral-200"
                 placeholder="Ej. Servicentro Santiago Norte"
                 value={branchForm.name}
                 onChange={e => handleBranchNameChange(e.target.value)} />
             </div>
-            
+
             <div className="space-y-1.5">
               <Label>Slug Comercial (URL)</Label>
               <div className="flex items-center rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
                 <span className="px-3 py-2.5 text-[10px] font-mono text-neutral-400 bg-neutral-100 border-r border-neutral-200 whitespace-nowrap select-none">servitracks.com/</span>
-                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0" 
+                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0"
                   placeholder="servicentro-santiago-norte"
                   value={branchForm.slug}
                   onChange={e => setBranchForm({ ...branchForm, slug: e.target.value.replace(/\s+/g, "-").toLowerCase() })} />
@@ -904,14 +911,14 @@ export default function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>RNC / Cédula</Label>
-                <Input className="h-10 rounded-xl border-neutral-200" 
+                <Input className="h-10 rounded-xl border-neutral-200"
                   placeholder="1-32-12345-9"
                   value={branchForm.rnc}
                   onChange={e => setBranchForm({ ...branchForm, rnc: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label>Teléfono</Label>
-                <Input className="h-10 rounded-xl border-neutral-200" 
+                <Input className="h-10 rounded-xl border-neutral-200"
                   placeholder="809-555-0199"
                   value={branchForm.phone}
                   onChange={e => setBranchForm({ ...branchForm, phone: e.target.value })} />
@@ -920,7 +927,7 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <Label>Correo de la Sucursal</Label>
-              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+              <Input type="email" className="h-10 rounded-xl border-neutral-200"
                 placeholder="norte@tallergarcia.do"
                 value={branchForm.email}
                 onChange={e => setBranchForm({ ...branchForm, email: e.target.value })} />
@@ -928,7 +935,7 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <Label>Dirección Física</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" 
+              <Input className="h-10 rounded-xl border-neutral-200"
                 placeholder="Autopista Duarte Km 5, Santiago"
                 value={branchForm.address}
                 onChange={e => setBranchForm({ ...branchForm, address: e.target.value })} />
@@ -943,7 +950,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-          
+
           <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
             <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setBranchOpen(false)}>Cancelar</Button>
             <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleRegisterBranch}>
@@ -975,21 +982,21 @@ export default function SettingsPage() {
           <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
             <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Editar Sucursal</DialogTitle>
           </DialogHeader>
-          
+
           <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
             <div className="space-y-1.5">
               <Label>Nombre Comercial</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" 
+              <Input className="h-10 rounded-xl border-neutral-200"
                 placeholder="Ej. Servicentro Santiago Norte"
                 value={editBranchForm.name}
                 onChange={e => setEditBranchForm({ ...editBranchForm, name: e.target.value })} />
             </div>
-            
+
             <div className="space-y-1.5">
               <Label>Slug Comercial (URL)</Label>
               <div className="flex items-center rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
                 <span className="px-3 py-2.5 text-[10px] font-mono text-neutral-400 bg-neutral-100 border-r border-neutral-200 whitespace-nowrap select-none">servitracks.com/</span>
-                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0" 
+                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0"
                   placeholder="servicentro-santiago-norte"
                   value={editBranchForm.slug}
                   onChange={e => setEditBranchForm({ ...editBranchForm, slug: e.target.value.replace(/\s+/g, "-").toLowerCase() })} />
@@ -1000,14 +1007,14 @@ export default function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>RNC / Cédula</Label>
-                <Input className="h-10 rounded-xl border-neutral-200" 
+                <Input className="h-10 rounded-xl border-neutral-200"
                   placeholder="1-32-12345-9"
                   value={editBranchForm.rnc}
                   onChange={e => setEditBranchForm({ ...editBranchForm, rnc: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label>Teléfono</Label>
-                <Input className="h-10 rounded-xl border-neutral-200" 
+                <Input className="h-10 rounded-xl border-neutral-200"
                   placeholder="809-555-0199"
                   value={editBranchForm.phone}
                   onChange={e => setEditBranchForm({ ...editBranchForm, phone: e.target.value })} />
@@ -1016,7 +1023,7 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <Label>Correo de la Sucursal</Label>
-              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+              <Input type="email" className="h-10 rounded-xl border-neutral-200"
                 placeholder="norte@tallergarcia.do"
                 value={editBranchForm.email}
                 onChange={e => setEditBranchForm({ ...editBranchForm, email: e.target.value })} />
@@ -1024,13 +1031,13 @@ export default function SettingsPage() {
 
             <div className="space-y-1.5">
               <Label>Dirección Física</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" 
+              <Input className="h-10 rounded-xl border-neutral-200"
                 placeholder="Autopista Duarte Km 5, Santiago"
                 value={editBranchForm.address}
                 onChange={e => setEditBranchForm({ ...editBranchForm, address: e.target.value })} />
             </div>
           </div>
-          
+
           <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
             <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setEditBranchTarget(null)}>Cancelar</Button>
             <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleSaveEditBranch}>
@@ -1051,8 +1058,8 @@ export default function SettingsPage() {
           </p>
           <DialogFooter className="gap-2 pt-2">
             <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setDeleteBranchTarget(null)}>Cancelar</Button>
-            <Button 
-              className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700 cursor-pointer border-none" 
+            <Button
+              className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700 cursor-pointer border-none"
               onClick={confirmDeleteBranch}
             >
               <Trash2 className="h-4 w-4 mr-2" /> Eliminar Sucursal

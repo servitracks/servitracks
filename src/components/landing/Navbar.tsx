@@ -2,7 +2,7 @@
 
 import { Link, useRouter } from "@/lib/next-compat";
 import { useState, useEffect } from "react";
-import { Menu, X, ChevronDown, Wrench } from "lucide-react";
+import { Menu, X, ChevronDown, Wrench, Lock, Sparkles } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,45 @@ export function Navbar() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   
-  const { currentUserId, users, tenants } = useStore();
+  const { currentUserId, isAuthenticated, users, tenants } = useStore();
   const currentUser = users.find(u => u.id === currentUserId);
   const userTenant = currentUser ? tenants.find(t => t.id === currentUser.tenantId) : null;
 
+  // ── Leer sesión desde localStorage para detectar auth entre recargas ──
+  const [sessionDashboard, setSessionDashboard] = useState<string | null>(null);
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("servitracks-session") || sessionStorage.getItem("servitracks-session");
+    if (!raw) { setHasSession(false); return; }
+    try {
+      const s = JSON.parse(raw);
+      setHasSession(true);
+      // Superadmin
+      if (s.empleado_id === 'admin' || s.role === 'superadmin') {
+        setSessionDashboard('/admin');
+        return;
+      }
+      // Tenant user: usar slug directo de la sesión si está disponible
+      if (s.tenant_slug) {
+        setSessionDashboard(`/${s.tenant_slug}`);
+        return;
+      }
+      if (s.tenant_id) {
+        const t = tenants.find(t => t.id === s.tenant_id);
+        if (t?.slug) { setSessionDashboard(`/${t.slug}`); return; }
+        setSessionDashboard(`/login`);
+      }
+    } catch { setHasSession(false); }
+  }, [tenants]);
+
+  // El usuario está "logueado" si el store lo dice O si hay sesión en localStorage
+  const loggedIn = isAuthenticated || hasSession;
+
   const getDashboardPath = () => {
+    // Primero prioridad: sesión localStorage (más confiable tras recarga)
+    if (sessionDashboard && sessionDashboard !== '/login') return sessionDashboard;
+    // Fallback: store Zustand
     if (currentUserId === 'admin') return '/admin';
     if (currentUser && userTenant) return `/${userTenant.slug}`;
     return '/login';
@@ -76,7 +110,7 @@ export function Navbar() {
 
           {/* CTA */}
           <div className="hidden md:flex items-center gap-x-3">
-            {currentUserId ? (
+            {loggedIn ? (
               <Button
                 className="rounded-full px-6 bg-black text-white hover:bg-neutral-800 font-medium shadow-sm"
                 onClick={() => router.push(getDashboardPath())}
@@ -87,16 +121,18 @@ export function Navbar() {
               <>
                 <Button
                   variant="ghost"
-                  className="text-sm font-medium text-neutral-600 hover:text-black cursor-pointer"
+                  className="text-sm font-medium text-neutral-600 hover:text-black cursor-pointer gap-2"
                   onClick={() => router.push("/login")}
                 >
-                  Iniciar Sesión
+                  <Lock className="h-4 w-4" />
+                  Ingresar
                 </Button>
                 <Button
-                  className="rounded-full px-6 bg-black text-white hover:bg-neutral-800 font-medium shadow-sm"
-                  onClick={() => router.push("/autocheck")}
+                  className="rounded-full px-6 bg-black text-white hover:bg-neutral-800 font-semibold shadow-md gap-2"
+                  onClick={() => router.push("/register")}
                 >
-                  Empezar gratis
+                  <Sparkles className="h-4 w-4" />
+                  Registrarse →
                 </Button>
               </>
             )}
@@ -149,17 +185,19 @@ export function Navbar() {
                 </a>
               ))}
               <div className="pt-4 flex flex-col gap-3">
-                {currentUserId ? (
+                {loggedIn ? (
                   <Button className="w-full rounded-xl bg-black text-white" onClick={() => { setOpen(false); router.push(getDashboardPath()); }}>
                     Ir a mi cuenta →
                   </Button>
                 ) : (
                   <>
-                    <Button variant="outline" className="w-full rounded-xl" onClick={() => { setOpen(false); router.push("/login"); }}>
-                      Iniciar Sesión
+                    <Button variant="outline" className="w-full rounded-xl gap-2" onClick={() => { setOpen(false); router.push("/login"); }}>
+                      <Lock className="h-4 w-4" />
+                      Ingresar
                     </Button>
-                    <Button className="w-full rounded-xl bg-black text-white" onClick={() => { setOpen(false); router.push("/autocheck"); }}>
-                      Empezar gratis →
+                    <Button className="w-full rounded-xl bg-black text-white gap-2" onClick={() => { setOpen(false); router.push("/register"); }}>
+                      <Sparkles className="h-4 w-4" />
+                      Registrarse →
                     </Button>
                   </>
                 )}

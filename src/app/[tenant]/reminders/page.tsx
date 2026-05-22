@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useStore, WhatsAppLog } from "@/store/useStore";
 import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
+import { supabaseAdmin } from "@/lib/supabase";
+import { waSendText } from "@/lib/wasender";
 import {
   MessageSquare, Settings, Bell, CheckCircle2, AlertCircle,
   Smartphone, Plus, Send, Phone, Clock, Users, Zap, X, Trash2,
@@ -102,25 +104,11 @@ export default function RemindersPage() {
   const sentCount = whatsappLogs.filter((l) => l.status === "sent").length;
   const failedCount = whatsappLogs.filter((l) => l.status === "failed").length;
 
-  // Send via server-side proxy to avoid CORS
+  // Send via WaSender proxy Edge Function
   const sendWhatsApp = async (phone: string, message: string): Promise<{ ok: boolean; error?: string }> => {
     const key = taller?.wasenderApiKey;
     if (!key) return { ok: false, error: "API Key no configurada. Ve a Configurar Dispositivo." };
-    try {
-      const res = await fetch("/api/whatsapp", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Token": key
-        },
-        body: JSON.stringify({ phone, message, apiKey: key }),
-      });
-      const data = await res.json();
-      if (!res.ok) return { ok: false, error: data?.error ?? `Error ${res.status}` };
-      return { ok: true };
-    } catch (e: any) {
-      return { ok: false, error: e?.message ?? "Error de red" };
-    }
+    return waSendText(key, phone, message);
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -175,7 +163,7 @@ export default function RemindersPage() {
       const text = log.message;
       const cleanPhone = log.phone.replace(/[^0-9]/g, '');
       window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
-      
+
       // Update state to sent
       updateWhatsAppLog(log.id, { status: "sent", sentAt: new Date().toISOString() });
       toast.success(`✅ Redirigido a WhatsApp para ${log.customerName}`);
@@ -337,47 +325,47 @@ export default function RemindersPage() {
               {AUTOMATIONS.map((auto) => {
                 const state = autoStates[auto.id];
                 return (
-                <Card key={auto.id} className={cn("border-neutral-100 shadow-sm hover:border-neutral-200 transition-all", !state.active && "opacity-60")}>
-                  <CardContent className="p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-4">
-                        <div className={cn("h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5",
-                          state.active ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-400")}>
-                          <MessageSquare className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <h3 className="font-bold text-neutral-900 text-sm">{auto.title}</h3>
-                            <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">{auto.trigger}</Badge>
-                            {!state.active && <Badge className="rounded-full bg-neutral-100 text-neutral-400 border-none text-xs">Inactivo</Badge>}
+                  <Card key={auto.id} className={cn("border-neutral-100 shadow-sm hover:border-neutral-200 transition-all", !state.active && "opacity-60")}>
+                    <CardContent className="p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-4">
+                          <div className={cn("h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5",
+                            state.active ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-400")}>
+                            <MessageSquare className="h-5 w-5" />
                           </div>
-                          <p className="text-xs text-neutral-500 mb-2">{auto.desc}</p>
-                          {(state.kmThreshold || state.timeMonths) && (
-                            <div className="flex gap-2 mb-2 flex-wrap">
-                              {state.kmThreshold && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5">
-                                  🛣 Cada {Number(state.kmThreshold).toLocaleString("es-DO")} {state.kmUnit}
-                                </span>
-                              )}
-                              {state.timeMonths && (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-2 py-0.5">
-                                  🗓 Cada {state.timeMonths} {Number(state.timeMonths) === 1 ? "mes" : "meses"}
-                                </span>
-                              )}
+                          <div>
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <h3 className="font-bold text-neutral-900 text-sm">{auto.title}</h3>
+                              <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">{auto.trigger}</Badge>
+                              {!state.active && <Badge className="rounded-full bg-neutral-100 text-neutral-400 border-none text-xs">Inactivo</Badge>}
                             </div>
-                          )}
-                          <div className="bg-neutral-50 rounded-lg p-3 text-xs text-neutral-600 font-mono border border-neutral-100">
-                            {state.template}
+                            <p className="text-xs text-neutral-500 mb-2">{auto.desc}</p>
+                            {(state.kmThreshold || state.timeMonths) && (
+                              <div className="flex gap-2 mb-2 flex-wrap">
+                                {state.kmThreshold && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5">
+                                    🛣 Cada {Number(state.kmThreshold).toLocaleString("es-DO")} {state.kmUnit}
+                                  </span>
+                                )}
+                                {state.timeMonths && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-2 py-0.5">
+                                    🗓 Cada {state.timeMonths} {Number(state.timeMonths) === 1 ? "mes" : "meses"}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="bg-neutral-50 rounded-lg p-3 text-xs text-neutral-600 font-mono border border-neutral-100">
+                              {state.template}
+                            </div>
                           </div>
                         </div>
+                        <Button variant="ghost" size="icon" className="rounded-full h-8 w-8 flex-shrink-0"
+                          onClick={() => setEditAuto({ ...auto, template: state.template, active: state.active, kmThreshold: state.kmThreshold, timeMonths: state.timeMonths, kmUnit: state.kmUnit })}>
+                          <Settings className="h-4 w-4 text-neutral-400" />
+                        </Button>
                       </div>
-                      <Button variant="ghost" size="icon" className="rounded-full h-8 w-8 flex-shrink-0"
-                        onClick={() => setEditAuto({ ...auto, template: state.template, active: state.active, kmThreshold: state.kmThreshold, timeMonths: state.timeMonths, kmUnit: state.kmUnit })}>
-                        <Settings className="h-4 w-4 text-neutral-400" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
                 );
               })}
               <button
@@ -585,10 +573,21 @@ export default function RemindersPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsApiOpen(false)} className="rounded-xl">Cancelar</Button>
-            <Button className="rounded-xl bg-black text-white hover:bg-neutral-800" onClick={() => {
+            <Button className="rounded-xl bg-black text-white hover:bg-neutral-800" onClick={async () => {
               if (!apiKey.trim()) { toast.error("Ingresa tu API Key"); return; }
+              // 1. Update local store for immediate reactivity
               updateTenant(taller.id, { wasenderApiKey: apiKey.trim(), wasenderPhone: apiPhone.trim() });
-              toast.success("Configuración de WaSender guardada correctamente");
+              // 2. Persist to Supabase so it survives across devices
+              const { error } = await supabaseAdmin
+                .from("tenants")
+                .update({ wasender_api_key: apiKey.trim(), wasender_phone: apiPhone.trim() })
+                .eq("id", taller.id);
+              if (error) {
+                console.error("Error saving WaSender to Supabase:", error);
+                toast.warning("Guardado localmente. Error al sincronizar con servidor.");
+              } else {
+                toast.success("Configuración de WaSender guardada correctamente");
+              }
               setIsApiOpen(false);
             }}>
               Guardar Configuración

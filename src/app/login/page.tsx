@@ -8,56 +8,162 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowRight, Lock, Mail, Loader2 } from "lucide-react";
-
 import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { saveSession } from "@/lib/session";
+import { ADMIN_EMAILS } from "@/lib/storage";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { users, tenants, setCurrentUserId } = useStore();
+  const { setCurrentUserId, setAuthenticated, setTenants, setCurrentTenant } = useStore();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate login
-    setTimeout(() => {
-      setIsLoading(false);
-      
-      const emailLower = email.toLowerCase().trim();
-      if (emailLower === "admin@servitracks.com" || emailLower === "admin@klynn.com") {
-        if (password !== "Rptorres2017@") {
+
+    try {
+      const trimmedEmail = email.trim().toLowerCase();
+      const isAdminEmail = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(trimmedEmail);
+
+      // ── Ruta Superadmin: primero intentar Supabase Auth, con fallback local ──
+      if (isAdminEmail) {
+        // Intentar con Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+
+        // Si Supabase Auth falla (cuenta no existe), usar contraseña local de env
+        const adminOk = !authError && authData.user
+          ? true
+          : (import.meta.env.VITE_ADMIN_PASSWORD && password === import.meta.env.VITE_ADMIN_PASSWORD);
+
+        if (!adminOk) {
           toast.error("Contraseña de administrador incorrecta");
+          setIsLoading(false);
           return;
         }
-        setCurrentUserId('admin');
-        localStorage.setItem("servitracks-session", JSON.stringify({ empleado_id: 'admin', iniciado_en: new Date().toISOString() }));
+
+        const userId = authData?.user?.id || 'superadmin';
+        setCurrentUserId(userId);
+        setAuthenticated(true);
+
+        const adminSession = {
+          empleado_id: 'admin',
+          user_id: userId,
+          email: trimmedEmail,
+          role: 'superadmin',
+          iniciado_en: new Date().toISOString(),
+          remember_me: rememberMe
+        };
+        localStorage.setItem("servitracks-session", JSON.stringify(adminSession));
+        sessionStorage.setItem("servitracks-session", JSON.stringify(adminSession));
+
         toast.success("¡Bienvenido, Super Administrador!");
         navigate("/admin");
+        setIsLoading(false);
         return;
       }
 
-      // Lookup user in global store
-      const foundUser = users.find((u) => u.email.toLowerCase().trim() === emailLower);
-      if (foundUser) {
-        const tenant = tenants.find((t) => t.id === foundUser.tenantId) || tenants[0];
-        setCurrentUserId(foundUser.id);
-        localStorage.setItem("servitracks-session", JSON.stringify({ empleado_id: foundUser.id, iniciado_en: new Date().toISOString() }));
-        toast.success(`¡Bienvenido de nuevo, ${foundUser.name}!`);
-        navigate(`/${tenant.slug}`);
-      } else {
-        // Fallback for new registration simulation if not found, or let's log in to autocheck
-        const defaultUser = users[0];
-        const tenant = tenants[0];
-        setCurrentUserId(defaultUser.id);
-        localStorage.setItem("servitracks-session", JSON.stringify({ empleado_id: defaultUser.id, iniciado_en: new Date().toISOString() }));
-        toast.info(`Usuario demo temporal. Redirigiendo a ${tenant.slug}...`);
-        navigate(`/${tenant.slug}`);
+      // ── Ruta Usuario/Tenant: Supabase Auth normal ──
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (authError) {
+        if (authError.message.includes("Invalid login credentials")) {
+          toast.error("Correo o contraseña incorrectos");
+        } else if (authError.message.includes("Email not confirmed")) {
+          toast.error("Confirma tu correo electrónico antes de iniciar sesión");
+        } else {
+          toast.error("Error al iniciar sesión. Intenta de nuevo.");
+        }
+        setIsLoading(false);
+        return;
       }
-    }, 1500);
+
+      if (!authData.user) {
+        toast.error("Error al iniciar sesión");
+        setIsLoading(false);
+        return;
+      }
+
+      const userId = authData.user.id;
+      const userEmail = authData.user.email || "";
+
+      // Buscar el tenant asociado al usuario (por UUID primero, luego por email)
+      let { data: tenantUsers, error: tenantUserError } = await supabaseAdmin
+        .from("tenant_users")
+        .select("id, tenant_id, user_id, name, email, role, status, tenants(*)")
+        .eq("user_id", userId)
+        .limit(1);
+
+      // Fallback: buscar por email si no se encontró por UUID
+      if ((!tenantUsers || tenantUsers.length === 0) && userEmail) {
+        const fallback = await supabaseAdmin
+          .from("tenant_users")
+          .select("id, tenant_id, user_id, name, email, role, status, tenants(*)")
+          .eq("email", userEmail)
+          .limit(1);
+        if (!fallback.error && fallback.data && fallback.data.length > 0) {
+          tenantUsers = fallback.data;
+          tenantUserError = null;
+        }
+      }
+
+      if (tenantUserError || !tenantUsers || tenantUsers.length === 0) {
+        toast.info("No tienes un taller configurado. Completa tu registro.", { duration: 5000 });
+        navigate("/register?step=taller&from=login");
+        setIsLoading(false);
+        return;
+      }
+
+      const tenantUser = tenantUsers[0];
+      const tenantRaw = tenantUser.tenants as any;
+      const tenant = Array.isArray(tenantRaw) ? tenantRaw[0] : tenantRaw;
+
+      if (!tenant) {
+        toast.info("Tu cuenta está registrada pero el taller no fue encontrado. Contacta soporte.", { duration: 6000 });
+        navigate("/register?step=taller&from=login");
+        setIsLoading(false);
+        return;
+      }
+
+      // Guardar en el store
+      setCurrentUserId(userId);
+      setAuthenticated(true);
+      setTenants([tenant]);
+      setCurrentTenant(tenant);
+
+      // Guardar sesión
+      const sessionData = {
+        user_id: userId,
+        tenant_id: tenant.id,
+        tenant_slug: tenant.slug,
+        email: userEmail,
+        role: tenantUser.role,
+        iniciado_en: new Date().toISOString(),
+        remember_me: rememberMe
+      };
+      localStorage.setItem("servitracks-session", JSON.stringify(sessionData));
+      if (!rememberMe) {
+        sessionStorage.setItem("servitracks-session", JSON.stringify(sessionData));
+      }
+
+      toast.success(`¡Bienvenido de nuevo, ${tenantUser.name}!`);
+      navigate(`/${tenant.slug}`);
+    } catch (error: any) {
+      console.error("Error en login:", error);
+      toast.error("Error al iniciar sesión. Intenta de nuevo.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -117,7 +223,12 @@ export default function LoginPage() {
               </div>
 
               <div className="flex items-center space-x-2">
-                <Checkbox id="remember" className="rounded-md border-neutral-300" />
+                <Checkbox 
+                  id="remember" 
+                  checked={rememberMe}
+                  onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                  className="rounded-md border-neutral-300" 
+                />
                 <Label htmlFor="remember" className="text-sm font-medium text-neutral-600">Mantener sesión iniciada</Label>
               </div>
 

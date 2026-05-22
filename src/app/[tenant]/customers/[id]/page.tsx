@@ -1,8 +1,7 @@
-"use client";
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "@/store/useStore";
 import { useParams, useRouter } from "@/lib/next-compat";
+import { supabaseAdmin } from "@/lib/supabase";
 import {
   ArrowLeft, Car, Plus, Settings, Phone, Mail, MapPin,
   History, ShieldCheck, Wrench, Clock,
@@ -28,20 +27,58 @@ export default function CustomerDetailPage() {
   const tenantId = currentTenant?.id || "1";
 
   const customer = customers.find(c => c.id === id);
-  const customerVehicles = vehicles.filter(v => v.customerId === id);
+  const [supaVehicles, setSupaVehicles] = useState<any[]>([]);
+  const storeCustomerVehicles = vehicles.filter(v => v.customerId === id);
+  // Merge: Supabase + store (Supabase tiene prioridad, evita duplicados por id)
+  const customerVehicles = [
+    ...supaVehicles,
+    ...storeCustomerVehicles.filter(v => !supaVehicles.some(sv => sv.id === v.id))
+  ];
   const customerOrders = orders.filter(o => o.customerId === id);
   const totalSpent = customerOrders.reduce((s, o) => s + (o.total || 0), 0);
+
+  // Cargar vehículos del cliente desde Supabase
+  useEffect(() => {
+    if (!id || !tenantId || tenantId === '1') return;
+    supabaseAdmin
+      .from("vehicles")
+      .select("*")
+      .eq("customer_id", id)
+      .eq("tenant_id", tenantId)
+      .then(({ data, error }) => {
+        if (error) { console.error("[Vehicles] load error:", error); return; }
+        if (data && data.length > 0) {
+          const mapped = data.map((row: any) => ({
+            id: row.id,
+            tenantId: row.tenant_id,
+            customerId: row.customer_id,
+            brand: row.brand,
+            model: row.model,
+            year: row.year,
+            plate: row.plate,
+            color: row.color,
+            km: row.km ?? 0,
+          }));
+          setSupaVehicles(mapped);
+          // Sync al store para que maintenance y orders los vean
+          mapped.forEach(v => {
+            if (!vehicles.some(sv => sv.id === v.id)) addVehicle(v);
+          });
+        }
+      });
+  }, [id, tenantId]);
+
 
   const [addVehicleOpen, setAddVehicleOpen] = useState(false);
   const [vForm, setVForm] = useState({ brand: "", model: "", year: "", plate: "", color: "Blanco", km: "", kmUnit: "km" as "km" | "mi" });
 
-  const handleAddVehicle = (e: React.FormEvent) => {
+  const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vForm.brand || !vForm.model || !vForm.plate) {
       toast.error("Marca, modelo y placa son obligatorios");
       return;
     }
-    addVehicle({
+    const newVehicle = {
       id: `v${Date.now()}`,
       tenantId: tenantId,
       customerId: id as string,
@@ -51,7 +88,26 @@ export default function CustomerDetailPage() {
       plate: vForm.plate.toUpperCase(),
       color: vForm.color,
       km: vForm.km ? (vForm.kmUnit === "mi" ? Math.round(Number(vForm.km) * 1.60934) : Number(vForm.km)) : 0,
+    };
+
+    // 1. Guardar en el store local (inmediato)
+    addVehicle(newVehicle);
+
+    // 2. Persistir en Supabase (en segundo plano)
+    supabaseAdmin.from("vehicles").insert({
+      id: newVehicle.id,
+      tenant_id: tenantId,
+      customer_id: newVehicle.customerId,
+      brand: newVehicle.brand,
+      model: newVehicle.model,
+      year: newVehicle.year,
+      plate: newVehicle.plate,
+      color: newVehicle.color,
+      km: newVehicle.km,
+    }).then(({ error }) => {
+      if (error) console.error("[Vehicles] Error saving to Supabase:", error);
     });
+
     toast.success(`${vForm.brand} ${vForm.model} agregado`);
     setAddVehicleOpen(false);
     setVForm({ brand: "", model: "", year: "", plate: "", color: "Blanco", km: "", kmUnit: "km" });
@@ -290,10 +346,33 @@ export default function CustomerDetailPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Kilometraje actual</Label>
-              <div className="relative">
-                <Input type="number" placeholder="Ej: 45000" className="h-10 rounded-xl border-neutral-200 pr-10"
-                  value={vForm.km} onChange={e => setVForm({ ...vForm, km: e.target.value })} />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral-400 font-medium">km</span>
+              <div className="relative flex items-center">
+                <Input
+                  type="number"
+                  placeholder="Ej: 45000"
+                  className="h-10 rounded-xl border-neutral-200 pr-16 flex-1"
+                  value={vForm.km}
+                  onChange={e => setVForm({ ...vForm, km: e.target.value })}
+                />
+                {/* Toggle km / mi */}
+                <div className="absolute right-1 flex rounded-lg overflow-hidden border border-neutral-200 bg-neutral-50 text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setVForm({ ...vForm, kmUnit: 'km' })}
+                    className={cn(
+                      "px-2 py-1 transition-all",
+                      vForm.kmUnit === 'km' ? "bg-black text-white" : "text-neutral-400 hover:bg-neutral-100"
+                    )}
+                  >km</button>
+                  <button
+                    type="button"
+                    onClick={() => setVForm({ ...vForm, kmUnit: 'mi' })}
+                    className={cn(
+                      "px-2 py-1 transition-all",
+                      vForm.kmUnit === 'mi' ? "bg-black text-white" : "text-neutral-400 hover:bg-neutral-100"
+                    )}
+                  >mi</button>
+                </div>
               </div>
             </div>
             <DialogFooter className="gap-2 pt-2">

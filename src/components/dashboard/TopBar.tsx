@@ -40,7 +40,9 @@ export function TopBar() {
   const pendingMessagesCount = whatsappLogs.filter((l: any) => l.status === 'failed' || l.status === 'pending').length;
 
   // Current user (dynamic)
-  const currentUser = users.find((u) => u.id === currentUserId) || users[0];
+  const currentUser = currentUserId === 'admin'
+    ? { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' }
+    : users.find((u) => u.id === currentUserId);
 
   // Profile dialog
   const [profileOpen, setProfileOpen] = useState(false);
@@ -73,6 +75,7 @@ export function TopBar() {
 
   const handleLogout = () => {
     setCurrentUserId(null);
+    useStore.getState().setAuthenticated(false);
     localStorage.removeItem("servitracks-session");
     toast.success("Sesión cerrada correctamente");
     navigate("/login");

@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useMemo, useEffect, memo, Suspense } from "react";
+import { useState, useMemo, useEffect, memo, Suspense, useRef } from "react";
 import { useRouter, useSearchParams, useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
+import { supabaseAdmin } from "@/lib/supabase";
+import {
+  loadCustomersFromSupabase, loadVehiclesFromSupabase,
+  loadMaintenanceItemsFromSupabase, syncStoreToSupabase,
+} from "@/lib/supabaseSync";
 import { MaintenanceDetailModal } from "@/components/maintenance/MaintenanceDetailModal";
 import { VehicleMaintenanceHistoryModal } from "@/components/maintenance/VehicleMaintenanceHistoryModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,13 +55,81 @@ function MaintenanceContent() {
   const { tenant } = useParams();
   const searchParams = useSearchParams();
   const initialSearch = searchParams.get("search") || "";
-  
-  const vehicles = useStore((s) => s.vehicles);
-  const customers = useStore((s) => s.customers);
-  const maintenanceItems = useStore((s) => s.maintenanceItems);
+
+  const storeCustomers = useStore((s) => s.customers);
+  const storeVehicles = useStore((s) => s.vehicles);
+  const storeMaintenanceItems = useStore((s) => s.maintenanceItems);
+  const storeOrders = useStore((s) => s.orders);
+  const storeServices = useStore((s) => s.services);
+  const setCustomers = useStore((s) => s.setCustomers as any);
+  const setVehicles = useStore((s) => s.setVehicles as any);
+  const setMaintenanceItems = useStore((s) => s.setMaintenanceItems as any);
   const calculateMaintenanceHealth = useStore((s) => s.calculateMaintenanceHealth);
   const deleteVehicle = useStore((s) => s.deleteVehicle);
   const deleteMaintenanceItem = useStore((s) => s.deleteMaintenanceItem);
+  const tenants = useStore((s) => s.tenants);
+
+  const [customers, setLocalCustomers] = useState(storeCustomers);
+  const [vehicles, setLocalVehicles] = useState(storeVehicles);
+  const [maintenanceItems, setLocalItems] = useState(storeMaintenanceItems);
+  const [loading, setLoading] = useState(true);
+  const syncedRef = useRef(false);
+
+  // ── Load from Supabase, fallback to store ─────────────────────────────────
+  useEffect(() => {
+    if (syncedRef.current) return;
+    syncedRef.current = true;
+
+    const slug = tenant;
+    if (!slug) { setLoading(false); return; }
+
+    supabaseAdmin.from("tenants").select("id").eq("slug", slug).single()
+      .then(async ({ data: tenantRow }) => {
+        if (!tenantRow) {
+          // No Supabase tenant — use store data
+          setLocalCustomers(storeCustomers);
+          setLocalVehicles(storeVehicles);
+          setLocalItems(storeMaintenanceItems);
+          setLoading(false);
+          return;
+        }
+        const tid = tenantRow.id;
+
+        // Load from Supabase
+        const [dbCustomers, dbVehicles, dbItems] = await Promise.all([
+          loadCustomersFromSupabase(tid),
+          loadVehiclesFromSupabase(tid),
+          loadMaintenanceItemsFromSupabase(tid),
+        ]);
+
+        if (dbCustomers.length > 0 || dbVehicles.length > 0) {
+          // Use DB data
+          setLocalCustomers(dbCustomers);
+          setLocalVehicles(dbVehicles);
+          setLocalItems(dbItems);
+        } else if (storeVehicles.length > 0) {
+          // DB empty but store has data — push store data up to Supabase
+          console.log("[Maintenance] Syncing local store to Supabase...");
+          await syncStoreToSupabase(tid, storeCustomers, storeVehicles, storeMaintenanceItems);
+          setLocalCustomers(storeCustomers);
+          setLocalVehicles(storeVehicles);
+          setLocalItems(storeMaintenanceItems);
+        } else {
+          setLocalCustomers([]);
+          setLocalVehicles([]);
+          setLocalItems([]);
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error("[Maintenance] load error:", e);
+        setLocalCustomers(storeCustomers);
+        setLocalVehicles(storeVehicles);
+        setLocalItems(storeMaintenanceItems);
+        setLoading(false);
+      });
+  }, [tenant]);
+
   const [search, setSearch] = useState(initialSearch);
   const [filter, setFilter] = useState<'all' | 'critical' | 'preventive' | 'healthy'>('all');
   const [selectedData, setSelectedData] = useState<any>(null);
@@ -64,6 +137,8 @@ function MaintenanceContent() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyVehicle, setHistoryVehicle] = useState<any>(null);
   const [vehicleToDelete, setVehicleToDelete] = useState<string | null>(null);
+  // IDs de vehículos ocultos instantáneamente en la UI al eliminar mantenimiento
+  const [hiddenVehicleIds, setHiddenVehicleIds] = useState<Set<string>>(new Set());
 
   const openHistory = (vehicle: any) => {
     setHistoryVehicle(vehicle);
@@ -76,11 +151,17 @@ function MaintenanceContent() {
 
   const confirmDeleteVehicle = () => {
     if (vehicleToDelete) {
-      deleteVehicle(vehicleToDelete);
-      // Clean up associated maintenance items
+      // 1. Ocultar INMEDIATAMENTE del UI (realtime visual)
+      setHiddenVehicleIds(prev => new Set([...prev, vehicleToDelete]));
+
+      // 2. Limpiar items de mantenimiento del store
       const itemsToDelete = maintenanceItems.filter(item => item.vehicleId === vehicleToDelete);
       itemsToDelete.forEach(item => deleteMaintenanceItem(item.id));
-      toast.success("Vehículo y datos de mantenimiento eliminados correctamente");
+
+      // 3. Limpiar items sintéticos del state local
+      setLocalItems(prev => prev.filter(item => item.vehicleId !== vehicleToDelete));
+
+      toast.success("Mantenimiento eliminado correctamente.", { duration: 3000 });
       setVehicleToDelete(null);
     }
   };
@@ -98,12 +179,88 @@ function MaintenanceContent() {
     setIsModalOpen(true);
   };
 
+  /**
+   * Genera items de mantenimiento sintéticos a partir de las órdenes de trabajo entregadas.
+   * Esto garantiza que cada orden entregada aparezca en el módulo de mantenimiento.
+   */
+  const derivedMaintenanceItems = useMemo(() => {
+    // Filtrar solo las órdenes del tenant actual para garantizar aislamiento por taller
+    const deliveredOrders = storeOrders.filter((o) => {
+      const statusOk = o.status === 'delivered' || o.status === 'invoiced';
+      // Verificar que la orden pertenece al tenant actual (por slug en URL o por tenantId)
+      const tenantOk = !o.tenantId || !tenant || (
+        o.tenantId === tenant ||          // match por slug (si se guarda así)
+        vehicles.some(v => v.id === o.vehicleId)  // match por vehículo cargado del tenant
+      );
+      return statusOk && tenantOk;
+    });
+
+    const syntheticItems: any[] = [];
+
+    deliveredOrders.forEach((order) => {
+      const daysSince = Math.floor(
+        (Date.now() - new Date(order.updatedAt || order.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      // Each service in the order becomes a maintenance item
+      const services = (order.serviceIds || [])
+        .map((sid) => storeServices.find((s) => s.id === sid))
+        .filter(Boolean);
+
+      if (services.length > 0) {
+        services.forEach((svc: any) => {
+          const lifespanDays = svc?.lifespanDays || 90;
+          const lifespanKm = svc?.lifespanKm || 5000;
+          const pct = Math.max(0, Math.round(((lifespanDays - daysSince) / lifespanDays) * 100));
+          syntheticItems.push({
+            id: `synth_${order.id}_${svc.id}`,
+            vehicleId: order.vehicleId,
+            tenantId: order.tenantId,
+            name: svc.name,
+            category: svc.maintenanceCategory || 'others',
+            lastServiceDate: order.updatedAt || order.createdAt,
+            lastServiceKm: order.km || 0,
+            lifespanKm,
+            lifespanDays,
+            currentPercentage: pct,
+            _fromOrder: order.id,
+          });
+        });
+      } else {
+        // No services mapped — create a generic maintenance item from the order description
+        const lifespanDays = 90;
+        const pct = Math.max(0, Math.round(((lifespanDays - daysSince) / lifespanDays) * 100));
+        syntheticItems.push({
+          id: `synth_${order.id}`,
+          vehicleId: order.vehicleId,
+          tenantId: order.tenantId,
+          name: order.description || 'Servicio realizado',
+          category: 'others',
+          lastServiceDate: order.updatedAt || order.createdAt,
+          lastServiceKm: order.km || 0,
+          lifespanKm: 5000,
+          lifespanDays,
+          currentPercentage: pct,
+          _fromOrder: order.id,
+        });
+      }
+    });
+
+    // Merge: real items take priority, then synthetics for vehicles without any real items
+    const allItems = [...maintenanceItems];
+    const vehiclesWithRealItems = new Set(maintenanceItems.map((m) => m.vehicleId));
+    syntheticItems.forEach((s) => {
+      if (!vehiclesWithRealItems.has(s.vehicleId)) allItems.push(s);
+    });
+    return allItems;
+  }, [storeOrders, storeServices, maintenanceItems]);
+
   const maintenanceData = useMemo(() => {
     return vehicles.map(vehicle => {
       const customer = customers.find(c => c.id === vehicle.customerId);
-      const items = maintenanceItems.filter(m => m.vehicleId === vehicle.id);
-      
-      const minPercentage = items.length > 0 
+      const items = derivedMaintenanceItems.filter(m => m.vehicleId === vehicle.id);
+
+      const minPercentage = items.length > 0
         ? Math.min(...items.map(i => i.currentPercentage))
         : 100;
 
@@ -111,26 +268,21 @@ function MaintenanceContent() {
       if (minPercentage <= 10) status = 'critical';
       else if (minPercentage <= 30) status = 'preventive';
 
-      return {
-        vehicle,
-        customer,
-        items,
-        minPercentage,
-        status
-      };
+      return { vehicle, customer, items, minPercentage, status };
     }).filter(data => {
+      // Ocultar inmediatamente los vehículos marcados para eliminación
+      if (hiddenVehicleIds.has(data.vehicle.id)) return false;
       if (data.items.length === 0) return false;
-      
-      const matchesSearch = 
+
+      const matchesSearch =
         data.customer?.name.toLowerCase().includes(search.toLowerCase()) ||
         data.vehicle.plate.toLowerCase().includes(search.toLowerCase()) ||
         `${data.vehicle.brand} ${data.vehicle.model}`.toLowerCase().includes(search.toLowerCase());
-      
+
       const matchesFilter = filter === 'all' || data.status === filter;
-      
       return matchesSearch && matchesFilter;
     }).sort((a, b) => a.minPercentage - b.minPercentage);
-  }, [vehicles, customers, maintenanceItems, search, filter]);
+  }, [vehicles, customers, derivedMaintenanceItems, search, filter, hiddenVehicleIds]);
 
   return (
     <div className="space-y-8 pb-20">
@@ -138,7 +290,9 @@ function MaintenanceContent() {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-black tracking-tight text-neutral-900">Control de Mantenimiento</h1>
-          <p className="text-neutral-500 mt-1">Gestión inteligente de vida útil y alertas preventivas.</p>
+          <p className="text-neutral-500 mt-1">
+            {loading ? "Cargando datos desde Supabase..." : "Gestión inteligente de vida útil y alertas preventivas."}
+          </p>
         </div>
         
         <div className="flex items-center gap-2">

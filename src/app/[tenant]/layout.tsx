@@ -5,9 +5,10 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { HydrationGuard } from "@/components/dashboard/HydrationGuard";
 import { TourController } from "@/components/dashboard/TourController";
-import { Outlet } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
+import { useHydration } from "@/store/useHydration";
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -16,25 +17,19 @@ import { motion } from "framer-motion";
 
 export default function DashboardLayout() {
   const params = useParams();
-  const { tenants, updateTenant, deleteTenant, users, updateUser } = useStore();
+  const navigate = useNavigate();
+  const hydrated = useHydration();
+  const { tenants, updateTenant, currentUserId } = useStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
 
-  // Auto-purge legacy tenants from user's persistent storage and update user info
+  // Redirigir a login si no está autenticado (una vez hidratado el store)
   useEffect(() => {
-    const legacyIds = ['1', '2'];
-    legacyIds.forEach(id => {
-      const legacy = tenants.find(t => t.id === id);
-      if (legacy && (legacy.name.includes("García") || legacy.name.includes("Santiago") || legacy.name.includes("Taller"))) {
-        deleteTenant(id);
-      }
-    });
-
-    const userToUpdate = users.find(u => u.id === 'u1' && (u.name.includes("Yeri") || u.email.includes("tallergarcia")));
-    if (userToUpdate) {
-      updateUser('u1', { name: 'Rubén Polanco', email: 'autocheck.do@gmail.com' });
+    if (hydrated && !currentUserId) {
+      navigate("/login");
     }
-  }, [tenants, deleteTenant, users, updateUser]);
+  }, [hydrated, currentUserId, navigate]);
+
 
   const tenantSlug =
     params.tenant && params.tenant !== "undefined"

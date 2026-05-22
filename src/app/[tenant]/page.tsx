@@ -52,20 +52,51 @@ export default function DashboardPage() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - 7);
+
+  const lastWeekStart = new Date(weekStart);
+  lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+
   const todayInvoices = invoices.filter((inv) => new Date(inv.createdAt) >= today);
+  const yesterdayInvoices = invoices.filter((inv) => {
+    const d = new Date(inv.createdAt);
+    return d >= yesterday && d < today;
+  });
   const todaySales = todayInvoices.reduce((acc, inv) => acc + inv.total, 0);
+  const yesterdaySales = yesterdayInvoices.reduce((acc, inv) => acc + inv.total, 0);
+
   const activeOrders = orders.filter((o) => !["delivered"].includes(o.status));
   const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
-  const newCustomersToday = customers.filter((c) => new Date(c.createdAt) >= today).length;
+
+  const newCustomersThisWeek = customers.filter((c) => new Date(c.createdAt) >= weekStart).length;
+  const newCustomersLastWeek = customers.filter((c) => {
+    const d = new Date(c.createdAt);
+    return d >= lastWeekStart && d < weekStart;
+  }).length;
+
+  // Sales delta vs yesterday
+  const salesDelta = yesterdaySales === 0
+    ? todaySales > 0 ? "+100%" : "Sin ventas"
+    : `${yesterdaySales > 0 ? (((todaySales - yesterdaySales) / yesterdaySales) * 100 > 0 ? "+" : "") + (((todaySales - yesterdaySales) / yesterdaySales) * 100).toFixed(1) + "%" : "—"}`;
+
+  // Customers delta vs last week
+  const customersDelta = newCustomersLastWeek === 0
+    ? newCustomersThisWeek > 0 ? `+${newCustomersThisWeek} esta semana` : "Sin nuevos"
+    : `${newCustomersThisWeek > newCustomersLastWeek ? "+" : ""}${newCustomersThisWeek - newCustomersLastWeek} vs semana anterior`;
 
   const stats = [
     {
       title: "Ventas del Día",
-      value: `RD$ ${todaySales.toLocaleString("es-DO")}`,
-      change: "+12.5%",
-      trend: "up" as const,
+      value: todaySales > 0 ? `RD$ ${todaySales.toLocaleString("es-DO")}` : "RD$ 0",
+      change: salesDelta,
+      trend: todaySales >= yesterdaySales ? "up" as const : "down" as const,
       icon: TrendingUp,
-      sub: `${todayInvoices.length} facturas hoy`,
+      sub: `${todayInvoices.length} factura${todayInvoices.length !== 1 ? "s" : ""} hoy`,
     },
     {
       title: "Órdenes Activas",
@@ -77,9 +108,9 @@ export default function DashboardPage() {
     },
     {
       title: "Clientes Nuevos",
-      value: newCustomersToday || customers.length,
-      change: "+3 esta semana",
-      trend: "up" as const,
+      value: newCustomersThisWeek || customers.length,
+      change: customersDelta,
+      trend: newCustomersThisWeek >= newCustomersLastWeek ? "up" as const : "down" as const,
       icon: Users,
       sub: "Total registrados",
     },
@@ -157,7 +188,7 @@ export default function DashboardPage() {
           <Card className="lg:col-span-3 border-neutral-100 shadow-sm"><CardContent className="h-[340px]" /></Card>
         </div>
       }>
-        <DashboardCharts orders={orders} statusColors={statusColors} statusLabels={statusLabels} />
+        <DashboardCharts orders={orders} invoices={invoices} statusColors={statusColors} statusLabels={statusLabels} />
       </Suspense>
 
       {/* Bottom row */}
@@ -171,40 +202,48 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="divide-y divide-neutral-50">
-              {invoices.slice().reverse().slice(0, 5).map((inv) => {
-                const customer = customers.find((c) => c.id === inv.customerId);
-                return (
-                  <div 
-                    key={inv.id} 
-                    onClick={() => setSelectedInvoice(inv)}
-                    className="flex items-center justify-between p-5 hover:bg-neutral-50/50 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-bold text-neutral-600">
-                        {customer ? customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2) : "??"}
+            {invoices.length === 0 ? (
+              <div className="flex flex-col items-center py-12 text-center px-5">
+                <ReceiptText className="h-10 w-10 text-neutral-200 mb-3" />
+                <p className="text-sm font-medium text-neutral-500">Aún no hay facturas registradas.</p>
+                <p className="text-xs text-neutral-400 mt-1">Las facturas aparecerán aquí cuando uses el POS.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-neutral-50">
+                {invoices.slice().reverse().slice(0, 5).map((inv) => {
+                  const customer = customers.find((c) => c.id === inv.customerId);
+                  return (
+                    <div 
+                      key={inv.id} 
+                      onClick={() => setSelectedInvoice(inv)}
+                      className="flex items-center justify-between p-5 hover:bg-neutral-50/50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-bold text-neutral-600">
+                          {customer ? customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2) : "??"}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-neutral-900">{customer?.name || "Cliente"}</p>
+                          <p className="text-xs text-neutral-400">{inv.ncf || "Sin NCF"} · {new Date(inv.createdAt).toLocaleDateString("es-DO")}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-neutral-900">{customer?.name || "Cliente"}</p>
-                        <p className="text-xs text-neutral-400">{inv.ncf || "Sin NCF"} · {new Date(inv.createdAt).toLocaleDateString("es-DO")}</p>
+                      <div className="text-right">
+                        <p className="text-sm font-black">RD$ {inv.total.toLocaleString("es-DO")}</p>
+                        <Badge className={cn("text-[10px] border-none", 
+                          inv.status === "paid" ? "bg-emerald-100 text-emerald-700" : 
+                          inv.status === "cancelled" ? "bg-rose-100 text-rose-700" :
+                          "bg-amber-100 text-amber-700"
+                        )}>
+                          {inv.status === "paid" ? "Pagada" : 
+                           inv.status === "cancelled" ? "Cancelada" :
+                           "Pendiente"}
+                        </Badge>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-black">RD$ {inv.total.toLocaleString("es-DO")}</p>
-                      <Badge className={cn("text-[10px] border-none", 
-                        inv.status === "paid" ? "bg-emerald-100 text-emerald-700" : 
-                        inv.status === "cancelled" ? "bg-rose-100 text-rose-700" :
-                        "bg-amber-100 text-amber-700"
-                      )}>
-                        {inv.status === "paid" ? "Pagada" : 
-                         inv.status === "cancelled" ? "Cancelada" :
-                         "Pendiente"}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 

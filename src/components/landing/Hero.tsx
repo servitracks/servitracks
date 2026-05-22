@@ -85,7 +85,7 @@ export function Hero({ city }: { city?: string | null }) {
             <Button
               size="lg"
               className="w-full sm:w-auto rounded-full px-8 h-14 text-base font-semibold bg-black text-white hover:bg-neutral-800 shadow-lg hover:shadow-xl transition-all gap-2"
-              onClick={() => router.push("/autocheck")}
+              onClick={() => router.push("/register")}
             >
               Empezar gratis — es fácil
               <ArrowRight className="h-4 w-4" />

@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
@@ -6,106 +7,291 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Sparkles, ShieldCheck, ArrowRightLeft, Plus, Mic, Image, FileText, Paperclip,
-  Trash2, StopCircle, Search, Bot, User, Clock, Send, AlertTriangle, Check, 
-  CheckCheck, Loader2, Reply, X, Smile, Zap, Hand, Brain, ToggleLeft, ToggleRight, MessageCircle
+  Sparkles, ShieldCheck, ArrowRightLeft, Mic, Image, FileText, Paperclip,
+  Trash2, StopCircle, Search, Bot, User, Clock, Send, Check,
+  CheckCheck, Loader2, Reply, X, Smile, Hand, MessageCircle
 } from "lucide-react";
-import EmojiPicker, { Theme } from 'emoji-picker-react';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import EmojiPicker, { Theme } from "emoji-picker-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { useStore, Conversation, ChatMessage } from "@/store/useStore";
+import { useStore } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
+
+interface WaConversation {
+  id: string;
+  tenant_id: string;
+  phone: string;
+  name: string | null;
+  last_message: string | null;
+  last_message_at: string;
+  unread_count: number;
+  status: string;
+  agent: string;
+  created_at: string;
+}
+
+interface WaMessage {
+  id: string;
+  conversation_id: string;
+  tenant_id: string;
+  role: "user" | "assistant";
+  content: string;
+  message_type: string;
+  status: string;
+  created_at: string;
+}
 
 export default function Conversations() {
   const location = useLocation();
   const { tenant } = useParams();
-  const locationConvId = (location.state as any)?.conversationId as string | undefined;
-  
-  const { 
-    tenants, 
-    conversations: allConversations, 
-    chatMessages: allMessages, 
-    addChatMessage,
-    updateConversation
-  } = useStore();
-
+  const { tenants } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const conversations = allConversations.filter(c => c.tenantId === currentTenant?.id);
 
+  const [supabaseTenantId, setSupabaseTenantId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<WaConversation[]>([]);
+  const [messages, setMessages] = useState<WaMessage[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [messageText, setMessageText] = useState("");
-  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
-  const [switchingAgent, setSwitchingAgent] = useState(false);
-  const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
-  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
-  
-  const scrollRef = useRef<HTMLDivElement>(null);
-  
-  // Media Recording States
+  const [sending, setSending] = useState(false);
+  const [loadingConvs, setLoadingConvs] = useState(true);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<WaMessage | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Seleccionar la conversación inicial
+  const locationConvId = (location.state as any)?.conversationId as string | undefined;
+  const resolvedRef = useRef(false); // prevent double-resolution
+
+  // ── Resolve real Supabase tenant UUID by slug (only once) ────────────
   useEffect(() => {
-    if (locationConvId && conversations.find(c => c.id === locationConvId)) {
+    const slug = tenant || currentTenant?.slug;
+    if (!slug || resolvedRef.current) return;
+    resolvedRef.current = true;
+    supabaseAdmin
+      .from("tenants")
+      .select("id")
+      .eq("slug", slug)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data) {
+          console.warn("[Conversaciones] tenant not found:", slug);
+          if (currentTenant?.id) setSupabaseTenantId(currentTenant.id);
+          return;
+        }
+        console.log("[Conversaciones] tenant ID resolved:", data.id);
+        setSupabaseTenantId(data.id);
+      });
+  }, [tenant]); // only depend on tenant slug from URL
+
+  // ── Load conversations + polling every 30s (fallback si webhook falla) ──
+  useEffect(() => {
+    if (!supabaseTenantId) return;
+    loadConversations();
+    const interval = setInterval(loadConversations, 30_000);
+    return () => clearInterval(interval);
+  }, [supabaseTenantId]);
+
+  async function loadConversations() {
+    setLoadingConvs(true);
+    const { data, error } = await supabaseAdmin
+      .from("wa_conversations")
+      .select("*")
+      .eq("tenant_id", supabaseTenantId!)
+      .order("last_message_at", { ascending: false });
+    if (!error && data) setConversations(data);
+    else if (error) console.error("[loadConversations] error:", error);
+    setLoadingConvs(false);
+  }
+
+  // ── Real-time: nuevas conversaciones (supabaseAdmin bypasea RLS) ───
+  useEffect(() => {
+    if (!supabaseTenantId) return;
+    const ch = supabaseAdmin
+      .channel(`wa_conv_${supabaseTenantId}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_conversations",
+        filter: `tenant_id=eq.${supabaseTenantId}`,
+      }, (payload) => {
+        console.log("[RT conv]", payload.eventType, payload.new);
+        if (payload.eventType === "INSERT") {
+          setConversations((prev) => [payload.new as WaConversation, ...prev]);
+          toast.info(`💬 Nuevo mensaje de ${(payload.new as WaConversation).name || (payload.new as WaConversation).phone}`);
+        } else if (payload.eventType === "UPDATE") {
+          setConversations((prev) =>
+            prev.map((c) => c.id === payload.new.id ? payload.new as WaConversation : c)
+              .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+          );
+        }
+      })
+      .subscribe((status, err) => {
+        console.log("[RT conversations]", status, err || "");
+      });
+    return () => { supabaseAdmin.removeChannel(ch); };
+  }, [supabaseTenantId]);
+
+  // ── Select first conv or from location state ────────────────────────
+  useEffect(() => {
+    if (locationConvId && conversations.find((c) => c.id === locationConvId)) {
       setSelectedConvId(locationConvId);
     } else if (conversations.length > 0 && !selectedConvId) {
       setSelectedConvId(conversations[0].id);
     }
-  }, [conversations, locationConvId]);
+  }, [conversations]);
 
-  const messages = allMessages.filter(m => m.conversation_id === selectedConvId);
+  // ── Load messages for selected conversation ─────────────────────────
+  useEffect(() => {
+    if (!selectedConvId) { setMessages([]); return; }
+    // Mark as read
+    supabaseAdmin.from("wa_conversations").update({ unread_count: 0 }).eq("id", selectedConvId);
+  }, [selectedConvId]);
 
-  // --- AUDIO RECORDING LOGIC ---
+  async function loadMessages(convId: string) {
+    setLoadingMsgs(true);
+    const { data, error } = await supabaseAdmin
+      .from("wa_messages")
+      .select("*")
+      .eq("conversation_id", convId)
+      .order("created_at", { ascending: true });
+    if (!error && data) setMessages(data);
+    setLoadingMsgs(false);
+  }
+
+  // ── Real-time: mensajes de la conversación activa (supabaseAdmin bypasea RLS) ──
+  useEffect(() => {
+    if (!selectedConvId) return;
+    // Reload messages immediately on selection
+    loadMessages(selectedConvId);
+    // Polling each 8s as fallback
+    const poll = setInterval(() => loadMessages(selectedConvId), 8_000);
+    // Realtime subscription
+    const ch = supabaseAdmin
+      .channel(`wa_msgs_${selectedConvId}`)
+      .on("postgres_changes", {
+        event: "INSERT",
+        schema: "public",
+        table: "wa_messages",
+        filter: `conversation_id=eq.${selectedConvId}`,
+      }, (payload) => {
+        console.log("[RT msg]", payload.new);
+        setMessages((prev) => {
+          if (prev.find((m) => m.id === payload.new.id)) return prev;
+          return [...prev, payload.new as WaMessage];
+        });
+        setTimeout(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }, 50);
+      })
+      .subscribe((status, err) => console.log("[RT messages]", status, err || ""));
+    return () => {
+      clearInterval(poll);
+      supabaseAdmin.removeChannel(ch);
+    };
+  }, [selectedConvId]);
+
+  // ── Scroll on new messages ──────────────────────────────────────────
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  // ── Send message ────────────────────────────────────────────────────
+  const handleSend = async (type = "text", mediaContent?: string) => {
+    if (type === "text" && !messageText.trim()) return;
+    if (!selectedConvId || !supabaseTenantId) return;
+    const conv = conversations.find((c) => c.id === selectedConvId);
+    if (!conv) return;
+
+    const text = type === "text" ? messageText.trim() : (mediaContent || "[Media]");
+    if (type === "text") setMessageText("");
+    setReplyingTo(null);
+    setSending(true);
+
+    const { data: msg, error: msgErr } = await supabaseAdmin.from("wa_messages").insert({
+      conversation_id: selectedConvId,
+      tenant_id: supabaseTenantId,
+      role: "assistant",
+      content: text,
+      message_type: type,
+      status: "sent",
+    }).select().single();
+
+    if (!msgErr && msg) {
+      setMessages((prev) => [...prev, msg]);
+      // Update conversation last message
+      await supabaseAdmin.from("wa_conversations").update({
+        last_message: text,
+        last_message_at: new Date().toISOString(),
+      }).eq("id", selectedConvId);
+    }
+
+    // 2. Send via WaSender API
+    if (currentTenant.wasenderApiKey) {
+      try {
+        const res = await fetch("/api/whatsapp", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${currentTenant.wasenderApiKey}`,
+          },
+          body: JSON.stringify({ to: conv.phone.replace("+", ""), text }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          console.warn("WaSender error:", data);
+          // Still saved to DB, just notify
+          toast.warning(`Guardado en DB. WaSender: ${data?.message ?? res.status}`);
+        } else {
+          // Update message status to delivered
+          if (msg) {
+            await supabaseAdmin.from("wa_messages").update({ status: "delivered" }).eq("id", msg.id);
+            setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, status: "delivered" } : m));
+          }
+        }
+      } catch (e: any) {
+        toast.warning("Mensaje guardado. Sin conexión a WaSender.");
+      }
+    }
+    setSending(false);
+  };
+
+  // ── Toggle agent ────────────────────────────────────────────────────
+  const toggleAgent = async (convId: string, current: string) => {
+    const next = current === "ia" ? "humano" : "ia";
+    await supabaseAdmin.from("wa_conversations").update({ agent: next }).eq("id", convId);
+    setConversations((prev) => prev.map((c) => c.id === convId ? { ...c, agent: next } : c));
+    toast.success(next === "ia" ? "🤖 IA Activada" : "👤 Modo Humano Activado");
+  };
+
+  // ── Audio recording ─────────────────────────────────────────────────
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg; codecs=opus' });
-        await uploadAndSendMedia(audioBlob, 'audio');
-        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/ogg; codecs=opus" });
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onload = () => handleSend("audio", reader.result as string);
+        stream.getTracks().forEach((t) => t.stop());
       };
-
       recorder.start();
       setIsRecording(true);
       setRecordingTime(0);
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => prev + 1);
-      }, 1000);
-    } catch (err: any) {
-      console.error("Error accessing microphone:", err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        toast.error("❌ Permiso denegado. Haz clic en el candado junto a la URL para permitir el micrófono.");
-      } else {
-        toast.error("❌ No se pudo acceder al micrófono. Asegúrate de estar en un sitio seguro (HTTPS).");
-      }
-    }
+      timerRef.current = setInterval(() => setRecordingTime((p) => p + 1), 1000);
+    } catch { toast.error("No se pudo acceder al micrófono"); }
   };
-
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
@@ -113,160 +299,25 @@ export default function Conversations() {
       clearInterval(timerRef.current);
     }
   };
-
   const cancelRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.onstop = null;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       clearInterval(timerRef.current);
-      toast.info("🎙️ Grabación cancelada");
     }
   };
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // --- MEDIA UPLOAD LOGIC ---
-  const fileToBase64 = (file: File | Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const type = file.type.startsWith('image/') ? 'image' : 
-                 file.type.startsWith('video/') ? 'video' : 'document';
-    
-    await uploadAndSendMedia(file, type);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const uploadAndSendMedia = async (file: File | Blob, type: string) => {
-    setUploading(true);
-    try {
-      const base64Data = await fileToBase64(file);
-      // Para simular la subida y envío local sin backend complejo:
-      await handleSend(type, base64Data, file instanceof File ? file.name : 'audio.ogg');
-    } catch (err: any) {
-      console.error("Upload error:", err);
-      toast.error(`❌ Error al procesar archivo`);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleSend = async (type = 'text', mediaUrl?: string, filename?: string) => {
-    if ((type === 'text' && !messageText.trim()) || !selectedConvId) return;
-
-    const currentMsg = messageText;
-    if (type === 'text') setMessageText('');
-    setReplyingTo(null);
-
-    const newMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      conversation_id: selectedConvId,
-      role: 'assistant', // "nosotros" somos el assistant/agente en este contexto
-      content: type === 'text' ? currentMsg : `[${type}] ${filename || 'Media'}`,
-      time: new Date().toISOString(),
-      status: 'delivered'
-    };
-
-    // Añadir mensaje a store
-    addChatMessage(newMsg);
-    updateConversation(selectedConvId, {
-      last_msg: newMsg.content,
-      time: newMsg.time
-    });
-
-    // Enviar a WaSender si hay API key configurada
-    if (currentTenant?.wasenderApiKey && currentTenant?.wasenderPhone) {
-      try {
-        const res = await fetch("/api/whatsapp", {
-          method: "POST",
-          headers: { 
-            "Content-Type": "application/json",
-            "Token": currentTenant.wasenderApiKey 
-          },
-          body: JSON.stringify({ 
-            phone: conversations.find(c => c.id === selectedConvId)?.phone || '', 
-            message: newMsg.content, 
-            apiKey: currentTenant.wasenderApiKey 
-          }),
-        });
-        if (!res.ok) {
-          toast.error("Error al enviar mensaje vía WaSender API");
-        }
-      } catch (err) {
-        toast.error("No se pudo conectar a WaSender API");
-      }
-    }
-  };
-
-  const toggleAgent = async (convId: string, currentAgent: string) => {
-    setSwitchingAgent(true);
-    const newAgent = currentAgent === 'ia' ? 'humano' : 'ia';
-    
-    setTimeout(() => {
-      updateConversation(convId, { agent: newAgent });
-      if (newAgent === 'ia') {
-        toast.success("🤖 IA Activada");
-      } else {
-        toast.success("👤 Modo Humano Activado");
-      }
-      setSwitchingAgent(false);
-    }, 500);
-  };
-
-  const getAiSuggestion = async () => {
-    if (!selectedConvId) return;
-    setLoadingSuggestion(true);
-    
-    setTimeout(() => {
-      setAiSuggestion("Hola, ¿en qué te puedo ayudar hoy con tu vehículo?");
-      toast.success("✨ Sugerencia generada");
-      setLoadingSuggestion(false);
-    }, 1500);
-  };
-
-  const useSuggestion = () => {
-    if (aiSuggestion) {
-      setMessageText(aiSuggestion);
-      setAiSuggestion(null);
-    }
-  };
-
-  const onEmojiClick = (emojiData: any) => {
-    setMessageText(prev => prev + emojiData.emoji);
-  };
-
-  // Scroll to bottom on new message
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const filtered = conversations.filter((c) =>
-    (c.name || "").toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone || "").includes(search)
+  const selectedConv = conversations.find((c) => c.id === selectedConvId);
+  const isAiMode = selectedConv?.agent === "ia";
+  const filtered = conversations.filter(
+    (c) => (c.name || c.phone).toLowerCase().includes(search.toLowerCase())
   );
-
-  const selectedConversation = conversations.find(c => c.id === selectedConvId);
-  const isAiMode = selectedConversation?.agent === 'ia';
 
   return (
     <div className="flex h-[calc(100vh-5rem)] -m-6">
-      {/* Contact list */}
+      {/* Sidebar */}
       <div className="w-80 border-r border-border flex flex-col bg-card shrink-0">
         <div className="p-3 border-b border-border">
           <div className="relative">
@@ -280,35 +331,40 @@ export default function Conversations() {
           </div>
         </div>
         <div className="flex-1 overflow-auto">
-          {filtered.length === 0 ? (
-            <div className="p-4 text-center text-xs text-muted-foreground">No hay conversaciones aún</div>
+          {loadingConvs ? (
+            <div className="p-8 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="p-6 text-center text-xs text-muted-foreground space-y-2">
+              <MessageCircle className="h-8 w-8 mx-auto opacity-20" />
+              <p>No hay conversaciones aún</p>
+              <p className="text-[10px] leading-relaxed opacity-70">Los mensajes de WhatsApp aparecerán aquí automáticamente cuando alguien escriba a tu número.</p>
+            </div>
           ) : (
             filtered.map((conv) => (
               <div
                 key={conv.id}
                 onClick={() => setSelectedConvId(conv.id)}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 transition-colors ${conv.id === selectedConvId ? "bg-accent" : "hover:bg-muted/50"
-                  }`}
+                className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 transition-colors ${conv.id === selectedConvId ? "bg-accent" : "hover:bg-muted/50"}`}
               >
-                <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center text-xs font-medium text-accent-foreground shrink-0 mt-0.5">
-                  {(conv.name || "U").split(" ").map((n: string) => n[0]).join("").toUpperCase()}
+                <div className="h-9 w-9 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0 mt-0.5">
+                  {(conv.name || conv.phone).charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center">
                     <p className="text-sm font-medium text-foreground truncate">{conv.name || conv.phone}</p>
-                    <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
-                      {conv.time ? formatDistanceToNow(new Date(conv.time), { addSuffix: false, locale: es }) : ""}
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: es })}
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.last_msg}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.last_message || ""}</p>
                   <div className="flex items-center gap-1.5 mt-1">
-                    <Badge variant="secondary" className={`text-[10px] h-4 px-1.5 border-0 ${conv.agent === 'ia' ? 'bg-primary/10 text-primary' : 'bg-amber-100 text-amber-700'}`}>
+                    <Badge variant="secondary" className={`text-[10px] h-4 px-1.5 border-0 ${conv.agent === "ia" ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700"}`}>
                       {conv.agent === "ia" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <User className="h-2.5 w-2.5 mr-0.5" />}
-                      {conv.agent === 'ia' ? 'IA' : 'HUMANO'}
+                      {conv.agent === "ia" ? "IA" : "HUMANO"}
                     </Badge>
-                    {conv.unread > 0 && (
-                      <span className="ml-auto h-4 w-4 rounded-full bg-primary text-primary-foreground text-[10px] flex items-center justify-center font-medium">
-                        {conv.unread}
+                    {conv.unread_count > 0 && (
+                      <span className="ml-auto h-4 w-4 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold">
+                        {conv.unread_count}
                       </span>
                     )}
                   </div>
@@ -321,346 +377,161 @@ export default function Conversations() {
 
       {/* Chat area */}
       <div className="flex-1 flex flex-col bg-white">
-        {selectedConversation ? (
+        {selectedConv ? (
           <>
-            {/* Header with agent controls */}
+            {/* Header */}
             <div className="border-b border-border bg-card shrink-0">
               <div className="h-14 px-5 flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-medium text-accent-foreground">
-                  {(selectedConversation.name || "U").split(" ").map((n: string) => n[0]).join("").toUpperCase()}
+                <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700">
+                  {(selectedConv.name || selectedConv.phone).charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{selectedConversation.name || selectedConversation.phone}</p>
+                  <p className="text-sm font-semibold">{selectedConv.name || selectedConv.phone}</p>
                   <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <span className={`h-1.5 w-1.5 rounded-full inline-block ${selectedConversation.status === 'activa' ? 'bg-emerald-500' : 'bg-muted-foreground'}`} />
-                    {selectedConversation.status === 'activa' ? 'En línea' : 'Desconectado'}
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                    {selectedConv.phone}
                   </p>
                 </div>
-
-                {/* Agent mode controls */}
-                <div className="flex items-center gap-2">
-                  {/* AI Suggestion button (only in human mode) */}
-                  {!isAiMode && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs rounded-xl"
-                      onClick={getAiSuggestion}
-                      disabled={loadingSuggestion || messages.length === 0}
-                    >
-                      {loadingSuggestion ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5 text-primary" />
-                      )}
-                      Sugerir respuesta
-                    </Button>
-                  )}
-
-                  {/* Toggle AI/Human button */}
-                  <Button
-                    variant={isAiMode ? "default" : "outline"}
-                    size="sm"
-                    className={`h-8 gap-1.5 text-xs transition-all rounded-xl ${isAiMode
-                      ? "bg-primary hover:bg-primary/90 text-primary-foreground"
-                      : "border-amber-300 text-amber-700 hover:bg-amber-50"
-                      }`}
-                    onClick={() => toggleAgent(selectedConvId!, selectedConversation.agent)}
-                    disabled={switchingAgent}
-                  >
-                    {switchingAgent ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : isAiMode ? (
-                      <>
-                        <Bot className="h-3.5 w-3.5" />
-                        IA activa
-                        <ArrowRightLeft className="h-3 w-3 ml-0.5 opacity-60" />
-                      </>
-                    ) : (
-                      <>
-                        <Hand className="h-3.5 w-3.5" />
-                        Modo humano
-                        <ArrowRightLeft className="h-3 w-3 ml-0.5 opacity-60" />
-                      </>
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  variant={isAiMode ? "default" : "outline"}
+                  size="sm"
+                  className={`h-8 gap-1.5 text-xs rounded-xl ${isAiMode ? "bg-primary hover:bg-primary/90" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
+                  onClick={() => toggleAgent(selectedConv.id, selectedConv.agent)}
+                >
+                  {isAiMode ? <><Bot className="h-3.5 w-3.5" />IA activa<ArrowRightLeft className="h-3 w-3" /></> : <><Hand className="h-3.5 w-3.5" />Humano<ArrowRightLeft className="h-3 w-3" /></>}
+                </Button>
               </div>
-
-              {/* Agent mode indicator bar */}
-              <div className={`h-10 px-5 flex items-center gap-3 text-sm font-medium transition-colors ${isAiMode
-                ? 'bg-primary/5 text-primary border-t border-primary/10'
-                : 'bg-amber-50 text-amber-700 border-t border-amber-100'
-                }`}>
-                {isAiMode ? (
-                  <>
-                    <Bot className="h-4 w-4" />
-                    <span>La IA responde automáticamente a este cliente</span>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs ml-auto px-3 hover:bg-amber-100 hover:text-amber-700 font-semibold"
-                      onClick={() => toggleAgent(selectedConvId!, 'ia')}>
-                      <Hand className="h-4 w-4 mr-1.5" />
-                      Intervenir
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="h-4 w-4" />
-                    <span>Tú controlas esta conversación</span>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs ml-auto px-3 hover:bg-primary/10 hover:text-primary font-semibold"
-                      onClick={() => toggleAgent(selectedConvId!, 'humano')}>
-                      <Bot className="h-4 w-4 mr-1.5" />
-                      Delegar a IA
-                    </Button>
-                  </>
-                )}
+              <div className={`h-8 px-5 flex items-center gap-2 text-xs font-medium ${isAiMode ? "bg-primary/5 text-primary border-t border-primary/10" : "bg-amber-50 text-amber-700 border-t border-amber-100"}`}>
+                {isAiMode ? <><Bot className="h-3.5 w-3.5" />IA responde automáticamente</> : <><ShieldCheck className="h-3.5 w-3.5" />Tú controlas esta conversación</>}
               </div>
             </div>
 
             {/* Messages */}
             <div
               ref={scrollRef}
-              className="flex-1 overflow-auto p-5 space-y-2 bg-[#efeae2] dark:bg-[#0b141a]"
-              style={{
-                backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')`,
-                backgroundBlendMode: 'overlay',
-                backgroundSize: '400px',
-              }}
+              className="flex-1 overflow-auto p-5 space-y-2"
+              style={{ background: "#efeae2", backgroundImage: "url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')", backgroundBlendMode: "overlay", backgroundSize: "400px" }}
             >
-              {messages.map((msg, idx) => {
-                const isSentByMe = msg.role === "assistant";
-                const showTail = idx === 0 || messages[idx - 1].role !== msg.role;
-                const repliedMsg = msg.reply_to_id ? messages.find(m => m.id === msg.reply_to_id) : null;
-
-                return (
-                  <div key={msg.id} className={`flex ${isSentByMe ? "justify-end" : "justify-start"} mb-1 group`}>
-                    <div
-                      className={`max-w-[85%] relative rounded-lg px-3 py-1.5 text-[14.2px] shadow-sm ${isSentByMe
-                        ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-none"
-                        : "bg-white text-[#111b21] rounded-tl-none"
-                        } ${!showTail ? "rounded-tr-lg rounded-tl-lg" : ""}`}
-                    >
-                      {/* Reply Bubble */}
-                      {repliedMsg && (
-                        <div
-                          className="bg-black/5 rounded-md border-l-4 border-primary/50 p-2 mb-1.5 cursor-pointer hover:bg-black/10 transition-colors"
-                          onClick={() => {
-                            const el = document.getElementById(`msg-${repliedMsg.id}`);
-                            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            el?.classList.add('animate-pulse');
-                            setTimeout(() => el?.classList.remove('animate-pulse'), 2000);
-                          }}
-                        >
-                          <p className="text-[11px] font-bold text-primary truncate">
-                            {repliedMsg.role === 'user' ? (selectedConversation?.name || 'Usuario') : 'Tú'}
-                          </p>
-                          <p className="text-[12px] text-[#667781] truncate line-clamp-1">{repliedMsg.content}</p>
-                        </div>
-                      )}
-
-                      {/* Reply Button */}
-                      <button
-                        onClick={() => setReplyingTo(msg)}
-                        className={`absolute top-2 ${isSentByMe ? "-left-10" : "-right-10"} p-1.5 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md hover:bg-gray-50`}
-                      >
-                        <Reply className="h-3.5 w-3.5 text-[#667781]" />
-                      </button>
-
-                      {/* Bubble Tail */}
-                      {showTail && (
-                        <div className={`absolute top-0 w-2 h-2.5 ${isSentByMe
-                          ? " -right-2 bg-[#d9fdd3]"
-                          : " -left-2 bg-white"
-                          }`}
-                          style={{
-                            clipPath: isSentByMe
-                              ? 'polygon(0 0, 0% 100%, 100% 0)'
-                              : 'polygon(100% 0, 0 0, 100% 100%)'
-                          }} />
-                      )}
-
-                      <p id={`msg-${msg.id}`} className="leading-normal">{msg.content}</p>
-
-                      <div className="flex items-center justify-end gap-1 mt-0.5">
-                        <span className="text-[10px] text-[#667781] uppercase">
-                          {new Date(msg.time).toLocaleTimeString('es-DO', {
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true,
-                            hourCycle: 'h12'
-                          }).toUpperCase()}
-                        </span>
-                        {isSentByMe && (
-                          <div className="ml-1">
-                            {msg.status === 'read' ? (
-                              <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" />
-                            ) : msg.status === 'delivered' ? (
-                              <CheckCheck className="h-3.5 w-3.5 text-[#667781]" />
-                            ) : (
-                              <Check className="h-3.5 w-3.5 text-[#667781]" />
-                            )}
-                          </div>
+              {loadingMsgs ? (
+                <div className="flex justify-center pt-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              ) : messages.length === 0 ? (
+                <div className="flex justify-center pt-8">
+                  <span className="bg-white/70 rounded-full px-3 py-1 text-xs text-muted-foreground">No hay mensajes aún</span>
+                </div>
+              ) : (
+                messages.map((msg, idx) => {
+                  const isSent = msg.role === "assistant";
+                  const showTail = idx === 0 || messages[idx - 1].role !== msg.role;
+                  return (
+                    <div key={msg.id} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-1 group`}>
+                      <div className={`max-w-[80%] relative rounded-lg px-3 py-1.5 text-[14px] shadow-sm ${isSent ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-none" : "bg-white text-[#111b21] rounded-tl-none"}`}>
+                        {showTail && (
+                          <div className={`absolute top-0 w-2 h-2.5 ${isSent ? "-right-2 bg-[#d9fdd3]" : "-left-2 bg-white"}`}
+                            style={{ clipPath: isSent ? "polygon(0 0, 0% 100%, 100% 0)" : "polygon(100% 0, 0 0, 100% 100%)" }} />
                         )}
+                        <button
+                          onClick={() => setReplyingTo(msg)}
+                          className={`absolute top-2 ${isSent ? "-left-9" : "-right-9"} p-1.5 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md`}
+                        >
+                          <Reply className="h-3.5 w-3.5 text-[#667781]" />
+                        </button>
+                        <p className="leading-normal">{msg.content}</p>
+                        <div className="flex items-center justify-end gap-1 mt-0.5">
+                          <span className="text-[10px] text-[#667781]">
+                            {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "numeric", minute: "2-digit", hour12: true })}
+                          </span>
+                          {isSent && (
+                            msg.status === "read" ? <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" /> :
+                            msg.status === "delivered" ? <CheckCheck className="h-3.5 w-3.5 text-[#667781]" /> :
+                            <Check className="h-3.5 w-3.5 text-[#667781]" />
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-
-              {isAiMode && messages.length > 0 && messages[messages.length - 1].role === 'user' && (
-                <div className="flex justify-end mb-4 pr-3">
-                  <div className="bg-[#d9fdd3] border-none rounded-2xl rounded-tr-none px-4 py-2.5 shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <Bot className="h-4 w-4 text-[#111b21] animate-bounce opacity-70" />
-                      <span className="text-xs text-[#111b21] animate-pulse font-medium">La IA está pensando...</span>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })
               )}
             </div>
 
-            {/* AI Suggestion Box */}
-            {aiSuggestion && (
-              <div className="px-4 py-3 bg-primary/5 border-t border-primary/10 animate-in slide-in-from-bottom-2">
-                <div className="flex items-start gap-3">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-semibold text-primary mb-1">Sugerencia de IA</p>
-                    <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{aiSuggestion}</p>
-                  </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <Button size="sm" className="h-7 text-xs gap-1" onClick={useSuggestion}>
-                      <Send className="h-3 w-3" />
-                      Usar
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setAiSuggestion(null)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Input Area - DEMO Pill Style */}
+            {/* Input */}
             <div className="border-t border-border bg-card shrink-0 p-3 px-4">
               {replyingTo && (
-                <div className="px-4 py-2 mb-3 border-l-4 border-primary bg-muted/20 rounded-md flex gap-3 items-center animate-in slide-in-from-bottom-2">
+                <div className="px-4 py-2 mb-2 border-l-4 border-primary bg-muted/20 rounded-md flex gap-3 items-center">
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-bold text-primary">
-                      Respondiendo a {replyingTo.role === 'user' ? (selectedConversation?.name || 'Usuario') : 'Tú'}
-                    </p>
+                    <p className="text-[11px] font-bold text-primary">Respondiendo</p>
                     <p className="text-xs text-muted-foreground truncate">{replyingTo.content}</p>
                   </div>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => setReplyingTo(null)}>
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => setReplyingTo(null)}><X className="h-3.5 w-3.5" /></Button>
                 </div>
               )}
-
               <div className="flex items-center gap-2">
                 {!isRecording ? (
                   <>
                     <div className="flex-1 flex items-center gap-1 bg-muted/40 rounded-full px-3 border border-border/40 h-12">
                       <Popover>
                         <PopoverTrigger>
-                          <div className="flex h-9 w-9 items-center justify-center shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors cursor-pointer">
-                            <Smile className="h-5 w-5" strokeWidth={2} />
+                          <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
+                            <Smile className="h-5 w-5" />
                           </div>
                         </PopoverTrigger>
                         <PopoverContent className="w-[350px] p-0 border-none shadow-2xl mb-4 ml-4 rounded-3xl overflow-hidden" align="start">
-                          <EmojiPicker 
-                            onEmojiClick={onEmojiClick}
-                            theme={Theme.LIGHT}
-                            width="100%"
-                            height="400px"
-                            lazyLoadEmojis={true}
-                            searchPlaceholder="Buscar..."
-                            skinTonesDisabled
-                            previewConfig={{ showPreview: false }}
-                          />
+                          <EmojiPicker onEmojiClick={(e) => setMessageText((p) => p + e.emoji)} theme={Theme.LIGHT} width="100%" height="400px" lazyLoadEmojis skinTonesDisabled previewConfig={{ showPreview: false }} />
                         </PopoverContent>
                       </Popover>
-
                       <DropdownMenu>
                         <DropdownMenuTrigger>
-                          <div className="flex h-9 w-9 items-center justify-center shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors cursor-pointer">
-                            <Paperclip className="h-5 w-5" strokeWidth={2} />
+                          <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
+                            <Paperclip className="h-5 w-5" />
                           </div>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-52 mb-4 ml-6 p-1 rounded-2xl shadow-2xl border-none bg-white animate-in slide-in-from-bottom-2">
+                        <DropdownMenuContent className="w-52 mb-4 ml-6 p-1 rounded-2xl shadow-2xl border-none bg-white">
                           <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                              <FileText className="h-5 w-5" />
-                            </div>
-                            <span className="font-semibold text-[15px]">Documento</span>
+                            <div className="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><FileText className="h-4 w-4" /></div>
+                            <span className="font-semibold text-sm">Documento</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
-                              <Image className="h-5 w-5" />
-                            </div>
-                            <span className="font-semibold text-[15px]">Fotos y videos</span>
+                            <div className="h-9 w-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-600"><Image className="h-4 w-4" /></div>
+                            <span className="font-semibold text-sm">Foto / Video</span>
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-
-                      <input 
-                        type="file" 
-                        ref={fileInputRef} 
-                        className="hidden" 
-                        onChange={handleFileSelect}
-                        accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx"
+                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*,application/pdf" onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) { const r = new FileReader(); r.readAsDataURL(f); r.onload = () => handleSend("image", r.result as string); }
+                      }} />
+                      <Input
+                        placeholder={isAiMode ? "IA responde automáticamente..." : "Escribe un mensaje..."}
+                        className="h-9 text-[14px] border-none focus-visible:ring-0 bg-transparent px-2 shadow-none"
+                        value={messageText}
+                        onChange={(e) => setMessageText(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                        disabled={sending}
                       />
-
-                      <div className="flex-1 relative flex items-center">
-                        <Input
-                          placeholder={isAiMode ? "La IA responde automáticamente..." : "Escribe un mensaje..."}
-                          className="h-9 text-[14px] border-none focus-visible:ring-0 bg-transparent px-2 placeholder:text-muted-foreground/60 w-full shadow-none"
-                          value={messageText}
-                          onChange={e => setMessageText(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && handleSend()}
-                          disabled={uploading}
-                        />
-                        {uploading && (
-                          <div className="absolute right-2 text-primary animate-spin">
-                            <Loader2 className="h-4 w-4" />
-                          </div>
-                        )}
-                      </div>
                     </div>
-
                     <div className="shrink-0">
                       {messageText.trim() ? (
-                        <Button 
-                          className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md flex items-center justify-center p-0 transition-all active:scale-90 border-0" 
-                          onClick={() => handleSend('text')}
-                        >
-                          <Send className="h-5 w-5 text-white ml-0.5" strokeWidth={2.5} />
+                        <Button className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md p-0" onClick={() => handleSend()} disabled={sending}>
+                          {sending ? <Loader2 className="h-5 w-5 text-white animate-spin" /> : <Send className="h-5 w-5 text-white ml-0.5" />}
                         </Button>
                       ) : (
-                        <Button 
-                          className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md flex items-center justify-center p-0 transition-all active:scale-90 border-0"
-                          onClick={startRecording}
-                        >
-                          <Mic className="h-5 w-5 text-white" strokeWidth={2.5} />
+                        <Button className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md p-0" onClick={startRecording}>
+                          <Mic className="h-5 w-5 text-white" />
                         </Button>
                       )}
                     </div>
                   </>
                 ) : (
-                  <div className="flex-1 flex items-center justify-between bg-red-50/50 rounded-full px-4 h-12 border border-red-200/30 animate-in slide-in-from-right-4">
+                  <div className="flex-1 flex items-center justify-between bg-red-50/50 rounded-full px-4 h-12 border border-red-200/30">
                     <div className="flex items-center gap-3">
                       <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
                       <span className="text-sm font-bold font-mono text-red-600">{formatTime(recordingTime)}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm" className="h-8 text-red-600 hover:text-red-700 hover:bg-red-100/50 font-bold px-3 rounded-full" onClick={cancelRecording}>
-                        <Trash2 className="h-4 w-4 mr-1.5" />
-                        Cancelar
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" className="h-8 text-red-600 hover:bg-red-100/50 font-bold px-3 rounded-full" onClick={cancelRecording}>
+                        <Trash2 className="h-4 w-4 mr-1" />Cancelar
                       </Button>
-                      <Button size="sm" className="h-8 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold px-4 shadow-sm" onClick={stopRecording}>
-                        <Check className="h-4 w-4 mr-1.5" />
-                        Enviar
+                      <Button size="sm" className="h-8 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold px-4" onClick={stopRecording}>
+                        <Check className="h-4 w-4 mr-1" />Enviar
                       </Button>
                     </div>
                   </div>
@@ -674,9 +545,7 @@ export default function Conversations() {
               <MessageCircle className="h-10 w-10 opacity-20" />
             </div>
             <h3 className="text-lg font-medium text-foreground">Selecciona un chat</h3>
-            <p className="text-sm max-w-xs mt-2">
-              Haz clic en una conversación para ver los mensajes e interactuar a través de WhatsApp.
-            </p>
+            <p className="text-sm max-w-xs mt-2">Haz clic en una conversación para ver los mensajes e interactuar a través de WhatsApp.</p>
           </div>
         )}
       </div>

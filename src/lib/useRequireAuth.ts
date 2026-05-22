@@ -4,28 +4,35 @@ export function useRequireAuth() {
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
   const setCurrentUserId = useStore((s) => s.setCurrentUserId);
-  
-  // Buscar si hay una sesión activa en localStorage o en el store
-  const sessionStr = typeof window !== 'undefined' ? localStorage.getItem("servitracks-session") : null;
+
+  // Buscar sesión en ambos storages
+  const sessionStr = typeof window !== 'undefined'
+    ? (localStorage.getItem("servitracks-session") || sessionStorage.getItem("servitracks-session"))
+    : null;
+
   let activeUser = users.find(u => u.id === currentUserId) || users[0];
-  
+
   if (sessionStr) {
     try {
       const session = JSON.parse(sessionStr);
-      if (session.empleado_id === 'admin') {
+
+      // ── Superadmin: formato legacy (empleado_id:'admin') O nuevo (role:'superadmin') ──
+      if (session.empleado_id === 'admin' || session.role === 'superadmin') {
         return {
           empleado: {
             id: "admin_super",
             name: "Super Administrador",
-            email: "admin@servitracks.com",
+            email: session.email || "admin@servitracks.com",
             role: "superadmin"
           }
         };
-      } else {
+      }
+
+      // ── Tenant user: formato legacy (empleado_id) ──
+      if (session.empleado_id) {
         const found = users.find(u => u.id === session.empleado_id);
         if (found) {
           activeUser = found;
-          // Sincronizar el store de Zustand con la sesión persistida
           setTimeout(() => setCurrentUserId(found.id), 0);
         }
       }

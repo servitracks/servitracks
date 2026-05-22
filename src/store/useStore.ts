@@ -152,6 +152,10 @@ interface AppState {
   currentUserId: string | null;
   setCurrentUserId: (id: string | null) => void;
 
+  // Auth State
+  isAuthenticated: boolean;
+  setAuthenticated: (auth: boolean) => void;
+
   // Demo Tour State
   isDemoActive: boolean;
   setDemoActive: (active: boolean) => void;
@@ -160,109 +164,24 @@ interface AppState {
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
+      isAuthenticated: false,
+      setAuthenticated: (auth) => set({ isAuthenticated: auth }),
       isDemoActive: false,
       setDemoActive: (active) => set({ isDemoActive: active }),
-      tenants: [
-        {
-          id: '1',
-          name: 'Autocheck',
-          slug: 'autocheck',
-          logo: '/logo.servitracks.png',
-          address: 'C/Terminal Esso #49, Los Mameyes, Santo Domingo Este, RD.',
-          phone: '829-774-0320',
-          email: 'autocheck.do@gmail.com',
-          rnc: '',
-          status: 'active',
-          plan_id: 'pro',
-          estado: 'ACTIVO',
-          color_primario: '#0f172a',
-          color_secundario: '#475569'
-        }
-      ],
-      plans: [
-        {
-          id: 'basico',
-          nombre: 'Básico',
-          precio_mensual: 2500,
-          precio_anual: 24000,
-          limite_empleados: 5,
-          limite_ordenes_mes: 300,
-          limite_whatsapp_mes: 200,
-          limite_sucursales: 1,
-          precio_sucursal_adicional: 1500,
-          modulos: { whatsapp: true, facturacion_fiscal: false, multisucursal: false, logistica: false },
-          destacado: false
-        },
-        {
-          id: 'pro',
-          nombre: 'Pro',
-          precio_mensual: 5000,
-          precio_anual: 48000,
-          limite_empleados: 15,
-          limite_ordenes_mes: 1000,
-          limite_whatsapp_mes: 800,
-          limite_sucursales: 3,
-          precio_sucursal_adicional: 2500,
-          modulos: { whatsapp: true, facturacion_fiscal: true, multisucursal: true, logistica: false },
-          destacado: true
-        },
-        {
-          id: 'enterprise',
-          nombre: 'Enterprise',
-          precio_mensual: 10000,
-          precio_anual: 96000,
-          limite_empleados: 50,
-          limite_ordenes_mes: null,
-          limite_whatsapp_mes: 3000,
-          limite_sucursales: null,
-          precio_sucursal_adicional: 4000,
-          modulos: { whatsapp: true, facturacion_fiscal: true, multisucursal: true, logistica: true },
-          destacado: false
-        }
-      ],
+      tenants: [],
+      plans: [],
       globalConfig: {
         requirePlanOnRegistration: true,
         trialDays: 14,
         defaultPlanId: 'basico',
-        bankDetails: {
-          banco: 'Banreservas',
-          titular: 'ServiTracks SRL',
-          rnc: '1-32-12345-6',
-          tipo_cuenta: 'Corriente',
-          numero_cuenta: '9601482012'
-        }
       },
-      licencias: [
-        {
-          id: 'lic1',
-          codigo: 'KLYNN-A7B8-9C2D',
-          nombre_lavanderia: 'Taller Central Las Praderas',
-          estado: 'ACTIVO',
-          es_anual: true,
-          expira_en: new Date(Date.now() + 86400000 * 180).toISOString(),
-          whatsapp_activo: true,
-          facturacion_activa: false
-        }
-      ],
-      currentUserId: 'u1',
+      licencias: [],
+      currentUserId: null,
       currentTenant: null,
 
-      users: [
-        {
-          id: 'u1', tenantId: '1', name: 'Rubén Polanco', email: 'autocheck.do@gmail.com',
-          role: 'owner', status: 'active', createdAt: new Date().toISOString()
-        },
-        {
-          id: 'u2', tenantId: '1', name: 'Carlos Méndez', email: 'carlos@autocheck.do',
-          role: 'mechanic', status: 'active', createdAt: new Date(Date.now() - 86400000 * 30).toISOString()
-        },
-      ],
+      users: [],
 
-      technicians: [
-        { id: 'tech1', tenantId: '1', name: 'Gregorio', phone: '809-555-0201', status: 'active', createdAt: new Date().toISOString() },
-        { id: 'tech2', tenantId: '1', name: 'Carlos Méndez', phone: '809-555-0202', status: 'active', createdAt: new Date().toISOString() },
-        { id: 'tech3', tenantId: '1', name: 'Juan Pérez', phone: '809-555-0203', status: 'inactive', createdAt: new Date().toISOString() },
-      ],
+      technicians: [],
 
       printSettings: {
         paperSize: '80mm',
@@ -274,435 +193,32 @@ export const useStore = create<AppState>()(
         footer: '¡Gracias por su preferencia!',
       },
 
-      customers: [
-        {
-          id: 'c1',
-          tenantId: '1',
-          name: 'Yeri Orlando',
-          phone: '809-555-0123',
-          email: 'yeri@example.com',
-          address: 'Santo Domingo, RD',
-          tags: ['VIP'],
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'c2',
-          tenantId: '1',
-          name: 'María Garcia',
-          phone: '829-555-4567',
-          email: 'maria@example.com',
-          tags: ['Regular'],
-          createdAt: new Date(Date.now() - 86400000 * 3).toISOString()
-        },
-        {
-          id: 'c3',
-          tenantId: '1',
-          name: 'Pedro Ramírez',
-          phone: '849-555-7890',
-          email: 'pedro@example.com',
-          createdAt: new Date(Date.now() - 86400000 * 10).toISOString()
-        },
-      ],
+      customers: [],
 
-      vehicles: [
-        {
-          id: 'v1',
-          customerId: 'c1',
-          tenantId: '1',
-          brand: 'Toyota',
-          model: 'Hilux',
-          year: 2022,
-          plate: 'G123456',
-          color: 'Blanco',
-          km: 45000,
-          fuel: 'Gasolina',
-          transmission: 'Manual',
-          lastService: new Date(Date.now() - 86400000 * 90).toISOString(),
-        },
-        {
-          id: 'v2',
-          customerId: 'c1',
-          tenantId: '1',
-          brand: 'Honda',
-          model: 'Civic',
-          year: 2020,
-          plate: 'A987654',
-          color: 'Gris',
-          km: 62000,
-          fuel: 'Gasolina',
-          transmission: 'Automático',
-          lastService: new Date(Date.now() - 86400000 * 45).toISOString(),
-        },
-        {
-          id: 'v3',
-          customerId: 'c2',
-          tenantId: '1',
-          brand: 'Hyundai',
-          model: 'Tucson',
-          year: 2021,
-          plate: 'M654321',
-          color: 'Azul',
-          km: 30000,
-          fuel: 'Gasolina',
-          transmission: 'Automático',
-          lastService: new Date(Date.now() - 86400000 * 180).toISOString(),
-        },
-      ],
+      vehicles: [],
 
-      orders: [
-        {
-          id: 'o1',
-          tenantId: '1',
-          customerId: 'c1',
-          vehicleId: 'v1',
-          mechanicId: 'm1',
-          status: 'repairing',
-          description: 'Cambio de banda de distribución y bomba de agua.',
-          estimatedTime: '4h',
-          checklist: [
-            { item: 'Diagnóstico inicial', completed: true },
-            { item: 'Desmontaje motor', completed: true },
-            { item: 'Cambio de banda', completed: false },
-            { item: 'Cambio bomba de agua', completed: false },
-            { item: 'Montaje y prueba', completed: false },
-          ],
-          total: 8500,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        {
-          id: 'o2',
-          tenantId: '1',
-          customerId: 'c2',
-          vehicleId: 'v3',
-          status: 'pending',
-          description: 'Mantenimiento preventivo de los 30,000km.',
-          total: 4200,
-          createdAt: new Date(Date.now() - 3600000).toISOString(),
-          updatedAt: new Date(Date.now() - 3600000).toISOString(),
-        },
-        {
-          id: 'o3',
-          tenantId: '1',
-          customerId: 'c3',
-          vehicleId: 'v2',
-          status: 'finished',
-          description: 'Cambio de aceite y filtros.',
-          estimatedTime: '1h',
-          // Reemplazo de aceite + filtros de aceite, aire y cabina
-          serviceIds: ['s_m1', 's_m2', 's_m3', 's_m4'],
-          total: 3200,
-          createdAt: new Date(Date.now() - 86400000).toISOString(),
-          updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-        }
-      ],
+      orders: [],
 
-      products: [
-        {
-          id: 'p1',
-          tenantId: '1',
-          name: 'Aceite Castrol Magnatec',
-          sku: 'CAS-MAG-01',
-          category: 'Lubricantes',
-          brand: 'Castrol',
-          costPrice: 450,
-          salePrice: 650,
-          stock: 24,
-          minStock: 5,
-          tax: 18,
-          serviceIds: ['s_m1', 's_m2', 's_m6'],
-          maintenanceCategory: 'engine',
-          lifespanKm: 10000,
-          lifespanDays: 365,
-          variants: [
-            { id: 'pv1', productId: 'p1', name: '5W30 Full Synthetic', sku: 'CAS-5W30', stock: 12 },
-            { id: 'pv2', productId: 'p1', name: '10W40 Semi Synthetic', sku: 'CAS-10W40', stock: 12 },
-          ]
-        },
-        {
-          id: 'p2',
-          tenantId: '1',
-          name: 'Filtro de Aceite Bosch',
-          sku: 'BOS-FIL-77',
-          category: 'Filtros',
-          brand: 'Bosch',
-          costPrice: 200,
-          salePrice: 350,
-          stock: 3,
-          minStock: 10,
-          tax: 18,
-          serviceIds: ['s_m1', 's_m2', 's_m3', 's_m4'],
-        },
-        {
-          id: 'p3',
-          tenantId: '1',
-          name: 'Pastilla de Freno Wagner',
-          sku: 'WAG-PAS-32',
-          category: 'Frenos',
-          brand: 'Wagner',
-          costPrice: 800,
-          salePrice: 1200,
-          stock: 8,
-          minStock: 4,
-          tax: 18,
-          serviceIds: ['s_f1', 's_f2', 's_f4', 's_f5'],
-          maintenanceCategory: 'brakes',
-          lifespanKm: 25000,
-          lifespanDays: 365,
-        },
-        {
-          id: 'p4',
-          tenantId: '1',
-          name: 'Batería Fullriver 12V',
-          sku: 'FUL-BAT-12',
-          category: 'Eléctrico',
-          brand: 'Fullriver',
-          costPrice: 3500,
-          salePrice: 5200,
-          stock: 0,
-          minStock: 2,
-          tax: 18,
-          serviceIds: ['s_el1', 's_el2'],
-          maintenanceCategory: 'battery',
-          lifespanKm: 60000,
-          lifespanDays: 1095,
-        }
-      ],
+      products: [],
 
-      services: [
-        // Motor
-        { id: 's_m1', tenantId: '1', name: 'Cambio de Aceite de Motor', price: 0, duration: '45min', category: 'Motor', maintenanceCategory: 'engine', lifespanKm: 5000, lifespanDays: 180 },
-        { id: 's_m2', tenantId: '1', name: 'Reemplazo de Filtro de Aceite', price: 0, duration: '30min', category: 'Motor', maintenanceCategory: 'engine', lifespanKm: 5000, lifespanDays: 180 },
-        { id: 's_m3', tenantId: '1', name: 'Reemplazo de Filtro de Aire', price: 0, duration: '20min', category: 'Motor' },
-        { id: 's_m4', tenantId: '1', name: 'Reemplazo de Filtro de Cabina', price: 0, duration: '20min', category: 'Motor', maintenanceCategory: 'ac', lifespanKm: 15000, lifespanDays: 365 },
-        { id: 's_m5', tenantId: '1', name: 'Reemplazo de Bujías', price: 0, duration: '1h', category: 'Motor', maintenanceCategory: 'engine', lifespanKm: 40000, lifespanDays: 730 },
-        { id: 's_m6', tenantId: '1', name: 'Limpieza de Inyectores', price: 0, duration: '1.5h', category: 'Motor' },
-        { id: 's_m7', tenantId: '1', name: 'Limpieza de Cuerpo de Aceleración', price: 0, duration: '1h', category: 'Motor' },
-        
-        // Frenos
-        { id: 's_f1', tenantId: '1', name: 'Reemplazo de Pastillas Delanteras', price: 0, duration: '1h', category: 'Frenos', maintenanceCategory: 'brakes', lifespanKm: 25000, lifespanDays: 365 },
-        { id: 's_f2', tenantId: '1', name: 'Reemplazo de Pastillas Traseras', price: 0, duration: '1h', category: 'Frenos', maintenanceCategory: 'brakes', lifespanKm: 25000, lifespanDays: 365 },
-        { id: 's_f3', tenantId: '1', name: 'Cambio de Líquido de Frenos', price: 0, duration: '45min', category: 'Frenos', maintenanceCategory: 'brakes', lifespanKm: 40000, lifespanDays: 730 },
-        { id: 's_f4', tenantId: '1', name: 'Rectificación de Discos', price: 0, duration: '1.5h', category: 'Frenos' },
-        { id: 's_f5', tenantId: '1', name: 'Reemplazo de Discos de Freno', price: 0, duration: '2h', category: 'Frenos', maintenanceCategory: 'brakes', lifespanKm: 50000, lifespanDays: 1095 },
-        
-        // Neumáticos
-        { id: 's_n1', tenantId: '1', name: 'Rotación de Neumáticos', price: 0, duration: '30min', category: 'Neumáticos' },
-        { id: 's_n2', tenantId: '1', name: 'Balanceo de Ruedas', price: 0, duration: '45min', category: 'Neumáticos' },
-        { id: 's_n3', tenantId: '1', name: 'Alineación Computarizada', price: 0, duration: '1h', category: 'Neumáticos' },
-        { id: 's_n4', tenantId: '1', name: 'Reemplazo de Neumáticos', price: 0, duration: '30min', category: 'Neumáticos' },
-        { id: 's_n5', tenantId: '1', name: 'Calibración de Presión', price: 0, duration: '10min', category: 'Neumáticos' },
-        
-        // Suspensión
-        { id: 's_s1', tenantId: '1', name: 'Reemplazo de Amortiguadores', price: 0, duration: '2h', category: 'Suspensión' },
-        { id: 's_s2', tenantId: '1', name: 'Reemplazo de Terminales', price: 0, duration: '1.5h', category: 'Suspensión' },
-        { id: 's_s3', tenantId: '1', name: 'Reemplazo de Rótulas', price: 0, duration: '1.5h', category: 'Suspensión' },
-        { id: 's_s4', tenantId: '1', name: 'Inspección de Suspensión', price: 0, duration: '30min', category: 'Suspensión' },
-        
-        // Transmisión
-        { id: 's_t1', tenantId: '1', name: 'Cambio de Aceite de Transmisión', price: 0, duration: '1h', category: 'Transmisión' },
-        { id: 's_t2', tenantId: '1', name: 'Flush de Transmisión', price: 0, duration: '2h', category: 'Transmisión' },
-        { id: 's_t3', tenantId: '1', name: 'Cambio de Aceite CVT', price: 0, duration: '1h', category: 'Transmisión' },
-        
-        // Enfriamiento
-        { id: 's_e1', tenantId: '1', name: 'Cambio de Refrigerante', price: 0, duration: '45min', category: 'Enfriamiento' },
-        { id: 's_e2', tenantId: '1', name: 'Flush de Radiador', price: 0, duration: '1h', category: 'Enfriamiento' },
-        { id: 's_e3', tenantId: '1', name: 'Reemplazo de Termostato', price: 0, duration: '1h', category: 'Enfriamiento' },
-        
-        // Aire Acondicionado
-        { id: 's_ac1', tenantId: '1', name: 'Servicio de Aire Acondicionado', price: 0, duration: '2h', category: 'Aire Acondicionado' },
-        { id: 's_ac2', tenantId: '1', name: 'Recarga de Gas A/C', price: 0, duration: '1h', category: 'Aire Acondicionado' },
-        
-        // Sistema Eléctrico
-        { id: 's_el1', tenantId: '1', name: 'Reemplazo de Batería', price: 0, duration: '20min', category: 'Sistema Eléctrico' },
-        { id: 's_el2', tenantId: '1', name: 'Diagnóstico Electrónico', price: 0, duration: '1h', category: 'Sistema Eléctrico' },
-        { id: 's_el3', tenantId: '1', name: 'Escaneo OBDII', price: 0, duration: '30min', category: 'Sistema Eléctrico' },
-      ],
+      services: [],
 
       movements: [],
       cajas: [],
       cajaMovements: [],
-      invoices: [
-        {
-          id: 'inv1',
-          tenantId: '1',
-          customerId: 'c1',
-          items: [
-            { id: 'ii1', productId: 'p1', name: 'Aceite Castrol Magnatec 5W30', quantity: 4, unitPrice: 650, tax: 18 },
-            { id: 'ii2', serviceId: 's1', name: 'Cambio de Aceite', quantity: 1, unitPrice: 800, tax: 18 },
-          ],
-          subtotal: 3400,
-          tax: 612,
-          total: 4012,
-          paymentMethod: 'cash',
-          status: 'paid',
-          ncf: 'B02-00000001',
-          createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-        },
-        {
-          id: 'inv2',
-          tenantId: '1',
-          customerId: 'c2',
-          items: [
-            { id: 'ii3', serviceId: 's2', name: 'Alineación y Balanceo', quantity: 1, unitPrice: 1500, tax: 18 },
-          ],
-          subtotal: 1500,
-          tax: 270,
-          total: 1770,
-          paymentMethod: 'card',
-          status: 'paid',
-          ncf: 'B02-00000002',
-          createdAt: new Date(Date.now() - 86400000).toISOString(),
-        },
-      ],
+      invoices: [],
 
-      whatsappLogs: [
-        {
-          id: 'wl1',
-          tenantId: '1',
-          customerId: 'c1',
-          customerName: 'Yeri Orlando',
-          phone: '809-555-0123',
-          type: 'reminder',
-          message: 'Hola Yeri, tu Toyota Hilux tiene un cambio de aceite pendiente para esta semana.',
-          status: 'sent',
-          sentAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-        },
-        {
-          id: 'wl2',
-          tenantId: '1',
-          customerId: 'c2',
-          customerName: 'María Garcia',
-          phone: '829-555-4567',
-          type: 'notification',
-          message: 'Tu vehículo Hyundai Tucson está listo para ser retirado. ¡Gracias por tu confianza!',
-          status: 'sent',
-          sentAt: new Date(Date.now() - 86400000).toISOString(),
-        },
-        {
-          id: 'wl3',
-          tenantId: '1',
-          customerId: 'c3',
-          customerName: 'Pedro Ramírez',
-          phone: '849-555-7890',
-          type: 'reminder',
-          message: 'Recordatorio de mantenimiento preventivo para tu Honda Civic.',
-          status: 'failed',
-          sentAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-        },
-      ],
+      whatsappLogs: [],
 
-      maintenanceItems: [
-        {
-          id: 'm1', vehicleId: 'v1', tenantId: '1', name: 'Cambio de Aceite',
-          lastServiceDate: new Date(Date.now() - 86400000 * 90).toISOString(),
-          lastServiceKm: 40000, lifespanKm: 5000, lifespanDays: 180,
-          currentPercentage: 80, category: 'engine'
-        },
-        {
-          id: 'm2', vehicleId: 'v1', tenantId: '1', name: 'Frenos Delanteros',
-          lastServiceDate: new Date(Date.now() - 86400000 * 200).toISOString(),
-          lastServiceKm: 35000, lifespanKm: 20000, lifespanDays: 730,
-          currentPercentage: 90, category: 'brakes'
-        },
-        {
-          id: 'm3', vehicleId: 'v2', tenantId: '1', name: 'Cambio de Aceite',
-          lastServiceDate: new Date(Date.now() - 86400000 * 120).toISOString(),
-          lastServiceKm: 58000, lifespanKm: 5000, lifespanDays: 180,
-          currentPercentage: 30, category: 'engine'
-        },
-        {
-          id: 'm4', vehicleId: 'v3', tenantId: '1', name: 'Batería',
-          lastServiceDate: new Date(Date.now() - 86400000 * 600).toISOString(),
-          lastServiceKm: 15000, lifespanKm: 50000, lifespanDays: 730,
-          currentPercentage: 10, category: 'battery'
-        },
-      ],
+      maintenanceItems: [],
 
-      maintenanceHistory: [
-        {
-          id: 'mh1', vehicleId: 'v1', tenantId: '1', name: 'Cambio de Aceite',
-          serviceDate: new Date(Date.now() - 86400000 * 180).toISOString(),
-          serviceKm: 35000,
-          completedAt: new Date(Date.now() - 86400000 * 90).toISOString(),
-          notes: 'Mantenimiento preventivo periódico: Aceite sintético 5W-30 y filtro de aceite original.'
-        },
-        {
-          id: 'mh2', vehicleId: 'v1', tenantId: '1', name: 'Frenos Delanteros',
-          serviceDate: new Date(Date.now() - 86400000 * 400).toISOString(),
-          serviceKm: 20000,
-          completedAt: new Date(Date.now() - 86400000 * 200).toISOString(),
-          notes: 'Reemplazo de pastillas de freno delanteras y rectificado de discos.'
-        },
-        {
-          id: 'mh3', vehicleId: 'v2', tenantId: '1', name: 'Cambio de Aceite',
-          serviceDate: new Date(Date.now() - 86400000 * 240).toISOString(),
-          serviceKm: 53000,
-          completedAt: new Date(Date.now() - 86400000 * 120).toISOString(),
-          notes: 'Cambio periódico de aceite de motor y filtro de aire del habitáculo.'
-        },
-        {
-          id: 'mh4', vehicleId: 'v3', tenantId: '1', name: 'Batería',
-          serviceDate: new Date(Date.now() - 86400000 * 1000).toISOString(),
-          serviceKm: 5000,
-          completedAt: new Date(Date.now() - 86400000 * 600).toISOString(),
-          notes: 'Reemplazo de batería de 12V debido a pérdida de capacidad de arranque en frío.'
-        }
-      ],
+      maintenanceHistory: [],
 
       maintenanceAlerts: [],
 
-      conversations: [
-        {
-          id: 'conv1',
-          tenantId: '1',
-          name: 'Yeri Orlando',
-          phone: '809-555-0123',
-          last_msg: 'Hola, ¿mi vehículo está listo?',
-          time: new Date().toISOString(),
-          unread: 1,
-          status: 'activa',
-          agent: 'humano'
-        },
-        {
-          id: 'conv2',
-          tenantId: '1',
-          name: 'María Garcia',
-          phone: '829-555-4567',
-          last_msg: 'Confirmado, estaré a las 3pm.',
-          time: new Date(Date.now() - 3600000).toISOString(),
-          unread: 0,
-          status: 'activa',
-          agent: 'ia'
-        }
-      ],
+      conversations: [],
 
-      chatMessages: [
-        {
-          id: 'msg1',
-          conversation_id: 'conv1',
-          role: 'user',
-          content: 'Hola, ¿mi vehículo está listo?',
-          time: new Date().toISOString(),
-          status: 'read'
-        },
-        {
-          id: 'msg2',
-          conversation_id: 'conv2',
-          role: 'assistant',
-          content: 'Hola María, te recordamos tu cita de mañana a las 3pm.',
-          time: new Date(Date.now() - 7200000).toISOString(),
-          status: 'read'
-        },
-        {
-          id: 'msg3',
-          conversation_id: 'conv2',
-          role: 'user',
-          content: 'Confirmado, estaré a las 3pm.',
-          time: new Date(Date.now() - 3600000).toISOString(),
-          status: 'read'
-        }
-      ],
+      chatMessages: [],
 
       // Actions
       setCurrentUserId: (id) => set({ currentUserId: id }),
@@ -1118,6 +634,37 @@ export const useStore = create<AppState>()(
     }),
     { 
       name: 'servitracks-storage',
+      version: 2,
+      migrate: (_persistedState: any, fromVersion: number) => {
+        // Version 2: wipe all operational data (orders, customers, etc.) that may have dev/mock data
+        // Preserve only printSettings and auth state
+        if (fromVersion < 2) {
+          return {
+            tenants: [],
+            currentTenant: null,
+            customers: [],
+            vehicles: [],
+            orders: [],
+            products: [],
+            services: [],
+            invoices: [],
+            users: [],
+            technicians: [],
+            maintenanceItems: [],
+            maintenanceHistory: [],
+            whatsappLogs: [],
+            cajas: [],
+            cajaMovements: [],
+            plans: [],
+            licencias: [],
+            globalConfig: { requirePlanOnRegistration: true, trialDays: 14, defaultPlanId: 'basico' },
+            printSettings: _persistedState?.printSettings ?? { paperSize: '80mm', showLogo: true, showNcf: true, showItbis: true, showChange: true, copies: 1, footer: '¡Gracias por su preferencia!' },
+            currentUserId: null,
+            isAuthenticated: false,
+          };
+        }
+        return _persistedState;
+      },
       partialize: (state: AppState) => ({
         tenants: state.tenants,
         currentTenant: state.currentTenant,
@@ -1138,6 +685,8 @@ export const useStore = create<AppState>()(
         plans: state.plans,
         globalConfig: state.globalConfig,
         licencias: state.licencias,
+        currentUserId: state.currentUserId,
+        isAuthenticated: state.isAuthenticated,
       }),
     }
   )

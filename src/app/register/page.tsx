@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import type { Tenant, TenantUser } from "@/store/types";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 
 // Dominican Republic provinces list
 const PROVINCIAS_RD = [
@@ -146,12 +147,49 @@ function formatRD(value: number) {
   }).format(value);
 }
 
-// Simple Base64 FileReader helper
-function compressImage(file: File): Promise<string> {
+// Real image compressor: resizes to max 512x512 and converts to WebP (or JPEG fallback)
+function compressToWebP(file: File, maxSize = 512, quality = 0.85): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        // Calculate new dimensions maintaining aspect ratio
+        let { width, height } = img;
+        if (width > maxSize || height > maxSize) {
+          if (width > height) {
+            height = Math.round((height * maxSize) / width);
+            width = maxSize;
+          } else {
+            width = Math.round((width * maxSize) / height);
+            height = maxSize;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { reject(new Error("Canvas no disponible")); return; }
+
+        // White background (for transparent PNGs)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Try WebP first, fallback to JPEG
+        const webpData = canvas.toDataURL("image/webp", quality);
+        if (webpData.startsWith("data:image/webp")) {
+          resolve(webpData);
+        } else {
+          // Safari/old browsers that don't support WebP output
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        }
+      };
+      img.src = e.target?.result as string;
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -161,6 +199,9 @@ export default function RegisterPage() {
   const addTenant = useStore((s) => s.addTenant);
   const addUser = useStore((s) => s.addUser);
   const setCurrentUserId = useStore((s) => s.setCurrentUserId);
+  const setAuthenticated = useStore((s) => s.setAuthenticated);
+  const setTenants = useStore((s) => s.setTenants);
+  const setCurrentTenant = useStore((s) => s.setCurrentTenant);
   const tenants = useStore((s) => s.tenants);
 
   const [step, setStep] = useState(1);
@@ -172,20 +213,30 @@ export default function RegisterPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [provisioningStep, setProvisioningStep] = useState(0);
+  const [slugChecking, setSlugChecking] = useState(false);
+  const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 3 * 1024 * 1024) { 
-      toast.error("El archivo supera el tamaño máximo permitido de 3MB"); 
-      return; 
+    if (f.size > 5 * 1024 * 1024) {
+      toast.error("El archivo supera el tamaño máximo permitido de 5MB");
+      return;
     }
     try {
-      const compressed = await compressImage(f);
-      update("logo_url", compressed);
-      toast.success("Logotipo cargado exitosamente");
+      const originalKB = Math.round(f.size / 1024);
+      const webpDataUrl = await compressToWebP(f, 512, 0.85);
+      // Calculate output size from base64 string
+      const outputBytes = Math.round((webpDataUrl.length * 3) / 4);
+      const outputKB = Math.round(outputBytes / 1024);
+      const isWebP = webpDataUrl.startsWith("data:image/webp");
+      update("logo_url", webpDataUrl);
+      toast.success(
+        `Logotipo optimizado: ${originalKB}KB → ${outputKB}KB ${isWebP ? "(WebP)" : "(JPEG)"}`,
+        { duration: 4000 }
+      );
     } catch {
       toast.error("Ocurrió un error al procesar la imagen");
     }
@@ -201,11 +252,37 @@ export default function RegisterPage() {
     ];
   }, []);
 
-  const slugOk = useMemo(() => {
+  const slugFormatOk = useMemo(() => {
     if (form.slug.length < 3) return false;
-    const isSlugTaken = tenants.some(t => t.slug === form.slug);
-    return /^[a-z0-9-]+$/.test(form.slug) && !isSlugTaken;
-  }, [form.slug, tenants]);
+    return /^[a-z0-9-]+$/.test(form.slug);
+  }, [form.slug]);
+
+  // Async slug check against Supabase
+  useEffect(() => {
+    if (!slugFormatOk) {
+      setSlugAvailable(null);
+      return;
+    }
+    setSlugChecking(true);
+    setSlugAvailable(null);
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase
+          .from("tenants")
+          .select("id")
+          .eq("slug", form.slug)
+          .maybeSingle();
+        setSlugAvailable(!error && data === null);
+      } catch {
+        setSlugAvailable(true); // optimistic on network error
+      } finally {
+        setSlugChecking(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [form.slug, slugFormatOk]);
+
+  const slugOk = slugFormatOk && slugAvailable === true;
 
   function update<K extends keyof FormState>(k: K, v: FormState[K]) {
     setForm((f) => {
@@ -226,7 +303,10 @@ export default function RegisterPage() {
       if (!form.provincia) e.provincia = "Debes seleccionar una provincia";
     }
     if (step === 2) {
-      if (!slugOk) e.slug = "Este subdominio ya está tomado o tiene caracteres inválidos";
+      if (!slugFormatOk) e.slug = "El subdominio debe tener al menos 3 caracteres y solo letras, números o guiones";
+      else if (slugChecking) e.slug = "Verificando disponibilidad, espera un momento...";
+      else if (slugAvailable === false) e.slug = "Este subdominio ya está en uso, elige otro";
+      else if (slugAvailable === null) e.slug = "Verificando disponibilidad del subdominio...";
     }
     if (step === 4) {
       if (!form.admin_nombre.trim()) e.admin_nombre = "El nombre del administrador es obligatorio";
@@ -242,54 +322,149 @@ export default function RegisterPage() {
     setIsProvisioning(true);
     setProvisioningStep(0);
 
-    const tenantId = `ten_${Date.now()}`;
-    const newTenant: Tenant = {
-      id: tenantId,
-      name: form.nombre,
-      slug: form.slug,
-      logo: form.logo_url || undefined,
-      phone: form.telefono,
-      address: `Provincia ${form.provincia}, República Dominicana`,
-      email: form.admin_email,
-      status: "active",
-      config: {
-        umbral_diferencia_caja: 500,
-        formato_ticket: "80mm",
-        formato_ticket_default: "80mm"
+    try {
+      // 1. Crear usuario en Supabase Auth (client normal)
+      setProvisioningStep(0);
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: form.admin_email,
+        password: form.admin_password,
+        options: { data: { name: form.admin_nombre } }
+      });
+
+      if (authError) {
+        if (authError.message.toLowerCase().includes("already registered") ||
+            authError.message.toLowerCase().includes("already exists")) {
+          throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
+        }
+        throw new Error(`Error de autenticación: ${authError.message}`);
       }
-    };
 
-    const newUser: TenantUser = {
-      id: `usr_${Date.now()}`,
-      tenantId: tenantId,
-      name: form.admin_nombre,
-      email: form.admin_email,
-      role: "owner",
-      status: "active",
-      createdAt: new Date().toISOString()
-    };
-
-    // Simulated intervals for premium setup screen
-    let current = 0;
-    const interval = setInterval(() => {
-      current++;
-      setProvisioningStep(current);
-      if (current >= provisioningSteps.length - 1) {
-        clearInterval(interval);
-        setTimeout(() => {
-           // Register inside the Zustand store
-          addTenant(newTenant);
-          addUser(newUser);
-          setCurrentUserId(newUser.id);
-          localStorage.setItem("servitracks-session", JSON.stringify({ empleado_id: newUser.id, iniciado_en: new Date().toISOString() }));
-
-          setCreatedTenant(newTenant);
-          setIsProvisioning(false);
-          setStep(5);
-          toast.success("¡Taller creado con éxito!");
-        }, 1000);
+      if (!authData.user) {
+        throw new Error("No se pudo crear el usuario.");
       }
-    }, 1100);
+
+      const userId = authData.user.id;
+
+      // 2. Insertar Tenant usando supabaseAdmin (bypasea RLS con service_role)
+      setProvisioningStep(1);
+      const { data: tenantData, error: tenantError } = await supabaseAdmin
+        .from("tenants")
+        .insert({
+          name: form.nombre,
+          slug: form.slug,
+          logo: form.logo_url || null,
+          phone: form.telefono,
+          address: `Provincia ${form.provincia}, República Dominicana`,
+          email: form.admin_email,
+          status: "active",
+          config: {
+            umbral_diferencia_caja: 500,
+            formato_ticket: "80mm",
+            formato_ticket_default: "80mm"
+          },
+          plan_id: form.plan_id,
+          estado: "ACTIVO"
+        })
+        .select()
+        .single();
+
+      if (tenantError) {
+        throw new Error(`Error al crear el taller: ${tenantError.message}`);
+      }
+
+      const tenantId = tenantData.id;
+
+      // 3. Vincular usuario al tenant (supabaseAdmin)
+      setProvisioningStep(2);
+      const { error: tenantUserError } = await supabaseAdmin
+        .from("tenant_users")
+        .insert({
+          tenant_id: tenantId,
+          user_id: userId,
+          name: form.admin_nombre,
+          email: form.admin_email,
+          role: "owner",
+          status: "active"
+        });
+
+      if (tenantUserError) {
+        throw new Error(`Error de vinculación de usuario: ${tenantUserError.message}`);
+      }
+
+      // 4. Crear empleado principal (supabaseAdmin)
+      setProvisioningStep(3);
+      const { error: empleadoError } = await supabaseAdmin
+        .from("empleados")
+        .insert({
+          tenant_id: tenantId,
+          nombre: form.admin_nombre.split(" ")[0],
+          apellido: form.admin_nombre.split(" ").slice(1).join(" ") || "",
+          rol: "ADMIN",
+          pin: "1234"
+        });
+
+      if (empleadoError) {
+        throw new Error(`Error al crear empleado: ${empleadoError.message}`);
+      }
+
+      // 5. Iniciar sesión para establecer JWT en el cliente (best-effort)
+      setProvisioningStep(4);
+      await supabase.auth.signInWithPassword({
+        email: form.admin_email,
+        password: form.admin_password,
+      });
+
+      await new Promise((r) => setTimeout(r, 800));
+
+      // Actualizar store local de Zustand
+      const localTenant: Tenant = {
+        id: tenantId,
+        name: tenantData.name,
+        slug: tenantData.slug,
+        logo: tenantData.logo || undefined,
+        phone: tenantData.phone || undefined,
+        address: tenantData.address || undefined,
+        email: tenantData.email || undefined,
+        status: "active",
+        config: tenantData.config,
+        plan_id: tenantData.plan_id || undefined,
+        estado: tenantData.estado || undefined
+      };
+
+      const localUser: TenantUser = {
+        id: userId,
+        tenantId: tenantId,
+        name: form.admin_nombre,
+        email: form.admin_email,
+        role: "owner",
+        status: "active",
+        createdAt: new Date().toISOString()
+      };
+
+      addTenant(localTenant);
+      addUser(localUser);
+      setCurrentUserId(localUser.id);
+      setAuthenticated(true);
+      setTenants([localTenant]);
+      setCurrentTenant(localTenant);
+
+      localStorage.setItem(
+        "servitracks-session",
+        JSON.stringify({
+          empleado_id: localUser.id,
+          iniciado_en: new Date().toISOString()
+        })
+      );
+
+      setCreatedTenant(localTenant);
+      setIsProvisioning(false);
+      setStep(5);
+      toast.success("¡Taller registrado exitosamente!");
+    } catch (err: any) {
+      setIsProvisioning(false);
+      toast.error(err.message || "Ocurrió un error inesperado al registrar el taller.");
+      console.error(err);
+    }
   }
 
   function next() {
@@ -311,7 +486,7 @@ export default function RegisterPage() {
       {/* ═══════════════ HEADER ═══════════════ */}
       <header className="flex pt-6 pb-4 flex-col items-center justify-center px-6 relative border-b border-neutral-200/40 bg-white/40 backdrop-blur-md">
         <div className="flex flex-col items-center justify-center gap-1">
-          <Link to="/" className="h-20 w-auto flex items-center justify-center overflow-hidden mb-1 hover:opacity-85 transition-opacity active:scale-[0.98]">
+          <Link to="/" className="h-28 w-auto flex items-center justify-center overflow-hidden mb-1 hover:opacity-85 transition-opacity active:scale-[0.98]">
             <img src="/logo.servitracks.png" alt="ServiTracks" className="h-full w-auto object-contain" />
           </Link>
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">El control de tu taller, simplificado</span>
@@ -489,7 +664,39 @@ export default function RegisterPage() {
                         </div>
                       </div>
 
-
+                      {/* Subdominio slug field */}
+                      <Field label="Subdominio de tu Taller *" error={errors.slug}>
+                        <div className="relative">
+                          <div className="flex h-11 w-full items-center rounded-xl border border-neutral-200 bg-white shadow-xs overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 transition-all">
+                            <span className="pl-3.5 pr-1 text-xs font-bold text-neutral-400 whitespace-nowrap shrink-0">servitracks.com/</span>
+                            <input
+                              value={form.slug}
+                              onChange={(e) => {
+                                update("slug", slugify(e.target.value));
+                                update("slugTouched", true);
+                              }}
+                              placeholder="mi-taller"
+                              className="flex-1 bg-transparent py-2 pr-10 text-sm font-medium text-neutral-900 placeholder:text-neutral-300 outline-none"
+                              spellCheck={false}
+                              autoComplete="off"
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                              {slugChecking && (
+                                <div className="h-4 w-4 rounded-full border-2 border-emerald-500/30 border-t-emerald-600 animate-spin" />
+                              )}
+                              {!slugChecking && slugAvailable === true && slugFormatOk && (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                              )}
+                              {!slugChecking && slugAvailable === false && (
+                                <AlertCircle className="h-4 w-4 text-rose-500" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        {slugAvailable === true && slugFormatOk && !errors.slug && (
+                          <p className="mt-1 text-[10px] font-bold text-emerald-600">✓ Subdominio disponible</p>
+                        )}
+                      </Field>
 
                       {/* Color chooser */}
                       <div className="flex flex-col items-center justify-center mt-2">

@@ -46,7 +46,7 @@ export function CTASection({ city }: { city?: string | null }) {
               <Button
                 size="lg"
                 className="w-full sm:w-auto rounded-full px-10 h-14 text-base font-bold bg-white text-black hover:bg-neutral-100 shadow-xl gap-2"
-                onClick={() => router.push("/autocheck")}
+                onClick={() => router.push("/register")}
               >
                 Empezar gratis — 07 días
                 <ArrowRight className="h-4 w-4" />
