@@ -61,9 +61,6 @@ function MaintenanceContent() {
   const storeMaintenanceItems = useStore((s) => s.maintenanceItems);
   const storeOrders = useStore((s) => s.orders);
   const storeServices = useStore((s) => s.services);
-  const setCustomers = useStore((s) => s.setCustomers as any);
-  const setVehicles = useStore((s) => s.setVehicles as any);
-  const setMaintenanceItems = useStore((s) => s.setMaintenanceItems as any);
   const calculateMaintenanceHealth = useStore((s) => s.calculateMaintenanceHealth);
   const deleteVehicle = useStore((s) => s.deleteVehicle);
   const deleteMaintenanceItem = useStore((s) => s.deleteMaintenanceItem);
@@ -81,11 +78,20 @@ function MaintenanceContent() {
     syncedRef.current = true;
 
     const slug = tenant;
-    if (!slug) { setLoading(false); return; }
+    if (!slug) {
+      setLoading(false);
+      return;
+    }
 
-    supabaseAdmin.from("tenants").select("id").eq("slug", slug).single()
-      .then(async ({ data: tenantRow }) => {
-        if (!tenantRow) {
+    async function loadData() {
+      try {
+        const { data: tenantRow, error: tenantError } = await supabaseAdmin
+          .from("tenants")
+          .select("id")
+          .eq("slug", slug)
+          .single();
+
+        if (tenantError || !tenantRow) {
           // No Supabase tenant — use store data
           setLocalCustomers(storeCustomers);
           setLocalVehicles(storeVehicles);
@@ -120,15 +126,17 @@ function MaintenanceContent() {
           setLocalItems([]);
         }
         setLoading(false);
-      })
-      .catch((e) => {
-        console.error("[Maintenance] load error:", e);
+      } catch (error: any) {
+        console.error("[Maintenance] load error:", error);
         setLocalCustomers(storeCustomers);
         setLocalVehicles(storeVehicles);
         setLocalItems(storeMaintenanceItems);
         setLoading(false);
-      });
-  }, [tenant]);
+      }
+    }
+
+    loadData();
+  }, [tenant, storeCustomers, storeVehicles, storeMaintenanceItems]);
 
   const [search, setSearch] = useState(initialSearch);
   const [filter, setFilter] = useState<'all' | 'critical' | 'preventive' | 'healthy'>('all');
