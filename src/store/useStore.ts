@@ -4,7 +4,7 @@ import type {
   Tenant, TenantUser, PrintSettings, Customer, Vehicle,
   Service, Product, InventoryMovement, WorkOrder, Invoice,
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
-  Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal
+  Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage
 } from './types';
 
 // Re-export types for backward compatibility

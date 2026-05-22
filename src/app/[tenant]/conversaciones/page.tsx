@@ -291,7 +291,7 @@ export default function Conversations() {
                   }`}
               >
                 <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center text-xs font-medium text-accent-foreground shrink-0 mt-0.5">
-                  {(conv.name || "U").split(" ").map((n) => n[0]).join("").toUpperCase()}
+                  {(conv.name || "U").split(" ").map((n: string) => n[0]).join("").toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center">
@@ -327,7 +327,7 @@ export default function Conversations() {
             <div className="border-b border-border bg-card shrink-0">
               <div className="h-14 px-5 flex items-center gap-3">
                 <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center text-xs font-medium text-accent-foreground">
-                  {(selectedConversation.name || "U").split(" ").map((n) => n[0]).join("").toUpperCase()}
+                  {(selectedConversation.name || "U").split(" ").map((n: string) => n[0]).join("").toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground">{selectedConversation.name || selectedConversation.phone}</p>
@@ -563,10 +563,10 @@ export default function Conversations() {
                   <>
                     <div className="flex-1 flex items-center gap-1 bg-muted/40 rounded-full px-3 border border-border/40 h-12">
                       <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors">
+                        <PopoverTrigger>
+                          <div className="flex h-9 w-9 items-center justify-center shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors cursor-pointer">
                             <Smile className="h-5 w-5" strokeWidth={2} />
-                          </Button>
+                          </div>
                         </PopoverTrigger>
                         <PopoverContent className="w-[350px] p-0 border-none shadow-2xl mb-4 ml-4 rounded-3xl overflow-hidden" align="start">
                           <EmojiPicker 
@@ -583,10 +583,10 @@ export default function Conversations() {
                       </Popover>
 
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors">
+                        <DropdownMenuTrigger>
+                          <div className="flex h-9 w-9 items-center justify-center shrink-0 rounded-full text-muted-foreground hover:text-foreground hover:bg-transparent p-0 transition-colors cursor-pointer">
                             <Paperclip className="h-5 w-5" strokeWidth={2} />
-                          </Button>
+                          </div>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent className="w-52 mb-4 ml-6 p-1 rounded-2xl shadow-2xl border-none bg-white animate-in slide-in-from-bottom-2">
                           <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
