@@ -1,0 +1,1065 @@
+"use client";
+
+import { useState, useRef, useMemo } from "react";
+import { useStore, TenantUser } from "@/store/useStore";
+import { Building2, Bell, Printer, Users, Shield, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { useParams } from "@/lib/next-compat";
+
+const TABS = [
+  { id: "taller",    label: "Taller",          icon: Building2 },
+  { id: "tenants",   label: "Sucursales",      icon: Store },
+  { id: "whatsapp",  label: "WhatsApp",         icon: Bell },
+  { id: "print",     label: "Impresión",        icon: Printer },
+  { id: "users",     label: "Usuarios y Roles", icon: Users },
+  { id: "security",  label: "Seguridad",        icon: Shield },
+];
+
+const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
+  { value: "owner",        label: "Dueño",      color: "bg-black text-white" },
+  { value: "mechanic",     label: "Mecánico",   color: "bg-amber-100 text-amber-800" },
+  { value: "cashier",      label: "Cajero",     color: "bg-blue-100 text-blue-800" },
+  { value: "receptionist", label: "Recepción",  color: "bg-violet-100 text-violet-800" },
+];
+
+function roleLabel(r: TenantUser["role"]) {
+  return ROLES.find(x => x.value === r)?.label ?? r;
+}
+function roleBadge(r: TenantUser["role"]) {
+  return ROLES.find(x => x.value === r)?.color ?? "";
+}
+
+export default function SettingsPage() {
+  const { tenant } = useParams();
+  const { 
+    tenants, users, printSettings, updateTenant, addTenant, deleteTenant,
+    addUser, updateUser, deleteUser, updatePrintSettings 
+  } = useStore();
+  
+  const currentUserId = useStore((s) => s.currentUserId);
+  const currentUser = useMemo(() => {
+    return users.find((u) => u.id === currentUserId) || users[0];
+  }, [users, currentUserId]);
+
+  const allowedTenants = useMemo(() => {
+    if (!currentUser) return tenants;
+    if (currentUser.email === "admin@servitracks.com") return tenants;
+    const sameEmailUsers = users.filter((u) => u.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim());
+    const allowedIds = new Set(sameEmailUsers.map((u) => u.tenantId));
+    return tenants.filter((t) => allowedIds.has(t.id));
+  }, [currentUser, users, tenants]);
+
+  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
+  const taller = currentTenant ?? { id: "1", name: "", address: "", phone: "", email: "", rnc: "", logo: "" };
+  const [tab, setTab] = useState("taller");
+
+  // ── Taller tab state ──
+  const [tallerForm, setTallerForm] = useState({
+    name: taller?.name ?? "", address: taller?.address ?? "",
+    phone: taller?.phone ?? "", email: taller?.email ?? "", rnc: taller?.rnc ?? "",
+  });
+  const [logoPreview, setLogoPreview] = useState<string>(taller?.logo ?? "");
+  const logoRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500_000) { toast.error("El logo debe pesar menos de 500 KB"); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = reader.result as string;
+      setLogoPreview(b64);
+      updateTenant(taller.id, { logo: b64 });
+      toast.success("Logo actualizado");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveTaller = () => {
+    updateTenant(taller.id, tallerForm);
+    toast.success("Información del taller guardada");
+  };
+
+  // ── Tenants tab state ──
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [deleteBranchTarget, setDeleteBranchTarget] = useState<any>(null);
+  const [branchForm, setBranchForm] = useState({
+    name: "",
+    rnc: "",
+    address: "",
+    phone: "",
+    email: "",
+    slug: "",
+  });
+
+  const [editBranchTarget, setEditBranchTarget] = useState<any>(null);
+  const [editBranchForm, setEditBranchForm] = useState({
+    name: "",
+    rnc: "",
+    address: "",
+    phone: "",
+    email: "",
+    slug: "",
+  });
+
+  const handleEditBranch = (t: any) => {
+    setEditBranchTarget(t);
+    setEditBranchForm({
+      name: t.name,
+      rnc: t.rnc || "",
+      address: t.address || "",
+      phone: t.phone || "",
+      email: t.email || "",
+      slug: t.slug,
+    });
+  };
+
+  const handleSaveEditBranch = () => {
+    if (!editBranchForm.name || !editBranchForm.slug) {
+      toast.error("El nombre y el slug comercial son obligatorios");
+      return;
+    }
+    
+    // Check if slug is already taken by another tenant
+    const slugTaken = tenants.some(t => t.slug === editBranchForm.slug && t.id !== editBranchTarget.id);
+    if (slugTaken) {
+      toast.error("Este slug comercial ya está registrado por otra sucursal");
+      return;
+    }
+
+    updateTenant(editBranchTarget.id, {
+      name: editBranchForm.name,
+      slug: editBranchForm.slug,
+      rnc: editBranchForm.rnc,
+      phone: editBranchForm.phone,
+      email: editBranchForm.email,
+      address: editBranchForm.address,
+    });
+    toast.success(`Sucursal "${editBranchForm.name}" actualizada correctamente`);
+    setEditBranchTarget(null);
+  };
+
+  const handleBranchNameChange = (val: string) => {
+    const slug = val
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // remove accents
+      .replace(/[^a-z0-9\s-]/g, "") // remove special characters
+      .trim()
+      .replace(/\s+/g, "-");
+    setBranchForm({ ...branchForm, name: val, slug });
+  };
+
+  const handleRegisterBranch = () => {
+    if (!branchForm.name || !branchForm.slug) {
+      toast.error("El nombre y el slug comercial son obligatorios");
+      return;
+    }
+    if (tenants.some(t => t.slug === branchForm.slug)) {
+      toast.error("Este slug comercial ya está registrado");
+      return;
+    }
+
+    const newTenantId = `t-${Date.now()}`;
+    addTenant({
+      id: newTenantId,
+      name: branchForm.name,
+      slug: branchForm.slug,
+      logo: "/logo.servitracks.png",
+      address: branchForm.address || "Dirección no especificada",
+      phone: branchForm.phone || "Sin teléfono",
+      email: branchForm.email || "info@taller.do",
+      rnc: branchForm.rnc || "N/A",
+      status: "pending",
+    });
+
+    if (currentUser) {
+      addUser({
+        id: `u-${Date.now()}`,
+        tenantId: newTenantId,
+        name: currentUser.name,
+        email: currentUser.email,
+        role: currentUser.role,
+        status: "active",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    toast.success(`🎉 Sucursal "${branchForm.name}" registrada con membresía pendiente.`);
+    setBranchOpen(false);
+    setBranchForm({ name: "", rnc: "", address: "", phone: "", email: "", slug: "" });
+  };
+
+  const confirmDeleteBranch = () => {
+    if (!deleteBranchTarget) return;
+    deleteTenant(deleteBranchTarget.id);
+    toast.success(`Sucursal "${deleteBranchTarget.name}" eliminada de forma permanente`);
+    setDeleteBranchTarget(null);
+  };
+
+  const handleSimulatePayment = (branchId: string, branchName: string) => {
+    updateTenant(branchId, { status: "active" });
+    toast.success(`💳 Membresía activada. La sucursal "${branchName}" ya se encuentra operativa.`);
+  };
+
+  // ── WhatsApp tab state ──
+  const [waKey, setWaKey] = useState(taller?.wasenderApiKey ?? "");
+  const [waPhone, setWaPhone] = useState(taller?.wasenderPhone ?? "");
+  const [waVisible, setWaVisible] = useState(false);
+  const [waTesting, setWaTesting] = useState(false);
+
+  const saveWa = () => {
+    updateTenant(taller.id, { wasenderApiKey: waKey, wasenderPhone: waPhone });
+    toast.success("Configuración de WhatsApp guardada");
+  };
+
+  const testWa = async () => {
+    if (!waKey || !waPhone) { toast.error("Completa la API Key y el número"); return; }
+    setWaTesting(true);
+    try {
+      const res = await fetch("/api/whatsapp", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Token": waKey 
+        },
+        body: JSON.stringify({ phone: waPhone, message: "✅ ServiTracks conectado correctamente con WaSender API.", apiKey: waKey }),
+      });
+      const data = await res.json();
+      res.ok ? toast.success("Mensaje de prueba enviado") : toast.error(data.error ?? "Error al enviar prueba");
+    } catch { toast.error("Sin conexión con el servidor"); }
+    setWaTesting(false);
+  };
+
+  // ── Print tab state ──
+  const ps = printSettings;
+
+  // ── Users tab state ──
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<TenantUser | null>(null);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "mechanic" as TenantUser["role"] });
+
+  const handleInvite = () => {
+    if (!inviteForm.name || !inviteForm.email) { toast.error("Nombre y correo son requeridos"); return; }
+    addUser({ id: `u${Date.now()}`, tenantId: taller.id, status: "invited", createdAt: new Date().toISOString(), ...inviteForm });
+    toast.success(`Invitación enviada a ${inviteForm.email}`);
+    setInviteOpen(false);
+    setInviteForm({ name: "", email: "", role: "mechanic" });
+  };
+
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    deleteUser(deleteTarget.id);
+    toast.success(`Usuario "${deleteTarget.name}" eliminado`);
+    setDeleteTarget(null);
+  };
+
+  // ── Security tab state ──
+  const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [showPw, setShowPw] = useState(false);
+
+  const changePassword = () => {
+    if (!pwForm.current) { toast.error("Escribe tu contraseña actual"); return; }
+    if (pwForm.next.length < 8) { toast.error("La nueva contraseña debe tener al menos 8 caracteres"); return; }
+    if (pwForm.next !== pwForm.confirm) { toast.error("Las contraseñas no coinciden"); return; }
+    toast.success("Contraseña actualizada correctamente");
+    setPwForm({ current: "", next: "", confirm: "" });
+  };
+
+  // Statistics for sucursales
+  const totalBranches = allowedTenants.length;
+  const activeBranches = allowedTenants.filter(t => t.status === "active" || !t.status).length;
+  const pendingBranches = allowedTenants.filter(t => t.status === "pending").length;
+
+  // Plan-based branch limits
+  const plans = useStore((s) => s.plans);
+  const primaryTenant = allowedTenants[0];
+  const currentPlan = plans.find(p => p.id === primaryTenant?.plan_id) || plans[0];
+  const branchLimit = currentPlan?.limite_sucursales;
+  const canAddBranch = branchLimit === null || branchLimit === undefined || totalBranches < branchLimit;
+  const nextPlan = !canAddBranch
+    ? plans.find(p => (p.limite_sucursales === null || (p.limite_sucursales ?? 0) > (branchLimit ?? 0)) && p.id !== currentPlan?.id)
+    : null;
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900">Configuración</h1>
+        <p className="text-neutral-500">Personaliza tu taller y gestiona los parámetros del sistema.</p>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl w-fit flex-wrap">
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
+              tab === t.id ? "bg-white shadow-sm text-neutral-900" : "text-neutral-500 hover:text-neutral-700")}>
+            <t.icon className="h-4 w-4" /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TALLER ── */}
+      {tab === "taller" && (
+        <div className="space-y-6">
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader><CardTitle>Logo del Taller</CardTitle><CardDescription>Se mostrará en facturas y recibos de impresión.</CardDescription></CardHeader>
+            <CardContent className="flex items-center gap-6">
+              <div className="h-24 w-24 rounded-2xl border-2 border-dashed border-neutral-200 bg-neutral-50 flex items-center justify-center overflow-hidden">
+                {logoPreview ? <img src={logoPreview} alt="logo" className="object-contain h-full w-full" /> : <Upload className="h-6 w-6 text-neutral-300" />}
+              </div>
+              <div className="space-y-2">
+                <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
+                <Button variant="outline" className="rounded-lg cursor-pointer" onClick={() => logoRef.current?.click()}>
+                  <Upload className="h-4 w-4 mr-2" /> Subir Logo
+                </Button>
+                {logoPreview && (
+                  <Button variant="ghost" size="sm" className="text-rose-500 hover:text-rose-600 block cursor-pointer"
+                    onClick={() => { setLogoPreview(""); updateTenant(taller.id, { logo: "" }); toast.success("Logo eliminado"); }}>
+                    <X className="h-3 w-3 mr-1 inline" /> Eliminar logo
+                  </Button>
+                )}
+                <p className="text-xs text-neutral-400">PNG, JPG · Máx. 500 KB</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader><CardTitle>Información del Taller</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[
+                  { label: "Nombre del Taller", key: "name", placeholder: "Taller García" },
+                  { label: "RNC / Cédula Fiscal", key: "rnc", placeholder: "1-32-12345-6" },
+                  { label: "Teléfono", key: "phone", placeholder: "809-555-0100" },
+                  { label: "Correo Electrónico", key: "email", placeholder: "info@taller.do" },
+                ].map(f => (
+                  <div key={f.key} className="space-y-1.5">
+                    <Label>{f.label}</Label>
+                    <Input className="h-10 rounded-xl border-neutral-200"
+                      placeholder={f.placeholder}
+                      value={(tallerForm as any)[f.key]}
+                      onChange={e => setTallerForm({ ...tallerForm, [f.key]: e.target.value })} />
+                  </div>
+                ))}
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label>Dirección</Label>
+                  <Input className="h-10 rounded-xl border-neutral-200" placeholder="Av. 27 de Febrero #123..."
+                    value={tallerForm.address}
+                    onChange={e => setTallerForm({ ...tallerForm, address: e.target.value })} />
+                </div>
+              </div>
+              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer" onClick={saveTaller}>
+                <Check className="h-4 w-4 mr-2" /> Guardar Cambios
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── SUCURSALES (MULTITENANT) ── */}
+      {tab === "tenants" && (
+        <div className="space-y-6">
+          {/* Quick Metrics */}
+          {(() => {
+            const pricePerExtra = currentPlan?.precio_sucursal_adicional || 0;
+            const extraBranches = Math.max(0, totalBranches - 1);
+            const extraCost = extraBranches * pricePerExtra;
+            const baseCost = currentPlan?.precio_mensual || 0;
+            const totalMonthlyCost = baseCost + extraCost;
+            const pendingCost = pendingBranches * pricePerExtra;
+            const formatMoney = (n: number) => `RD$ ${n.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+            return (
+              <>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="bg-white border border-neutral-100 p-5 rounded-2xl shadow-sm">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest block">Total Sucursales</span>
+                    <div className="flex items-baseline gap-1.5 mt-1">
+                      <span className="text-3xl font-black text-neutral-900">{totalBranches}</span>
+                      <span className="text-sm font-bold text-neutral-400">/ {branchLimit ?? '∞'}</span>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-neutral-100 p-5 rounded-2xl shadow-sm">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest block">Activas</span>
+                    <span className="text-3xl font-black text-emerald-600 mt-1 block">{activeBranches}</span>
+                  </div>
+                  <div className="bg-white border border-neutral-100 p-5 rounded-2xl shadow-sm">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest block">Pago Pendiente</span>
+                    <span className={cn("text-3xl font-black mt-1 block", pendingBranches > 0 ? "text-rose-600" : "text-neutral-300")}>{pendingBranches > 0 ? formatMoney(pendingCost) : '$0'}</span>
+                    {pendingBranches > 0 && (
+                      <span className="text-[10px] text-rose-500 font-semibold">{pendingBranches} sucursal{pendingBranches > 1 ? 'es' : ''} sin activar</span>
+                    )}
+                  </div>
+                  <div className="bg-white border border-neutral-100 p-5 rounded-2xl shadow-sm">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-widest block">Plan Actual</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xl font-black text-neutral-900">{currentPlan?.nombre || 'Sin plan'}</span>
+                    </div>
+                    {pricePerExtra > 0 ? (
+                      <span className="text-[10px] text-neutral-400 font-semibold">Taller principal · +{formatMoney(pricePerExtra)}/extra</span>
+                    ) : (
+                      <span className="text-[10px] text-neutral-400 font-semibold">Sucursales adicionales sin costo</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Billing Breakdown Card */}
+                <Card className="border-neutral-100 shadow-sm overflow-hidden">
+                  <div className="bg-gradient-to-r from-neutral-900 to-neutral-800 p-4 flex items-center gap-3">
+                    <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center">
+                      <Store className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-white tracking-tight">Facturación Estimada Mensual</h4>
+                      <p className="text-[10px] text-neutral-400 font-medium">Desglose de costos por sucursales</p>
+                    </div>
+                  </div>
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-neutral-50">
+                      <div className="flex items-center justify-between px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-md bg-neutral-100 flex items-center justify-center">
+                            <span className="text-[10px] font-black text-neutral-600">📋</span>
+                          </div>
+                          <div>
+                            <span className="text-sm font-semibold text-neutral-800">Plan {currentPlan?.nombre}</span>
+                            <span className="text-[10px] text-neutral-400 block">Cargo base mensual</span>
+                          </div>
+                        </div>
+                        <span className="text-sm font-bold text-neutral-900">{formatMoney(baseCost)}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-6 w-6 rounded-md bg-neutral-100 flex items-center justify-center">
+                            <span className="text-[10px] font-black text-neutral-600">🏪</span>
+                          </div>
+                          <div>
+                            <span className="text-sm font-semibold text-neutral-800">Taller Principal</span>
+                            <span className="text-[10px] text-neutral-400 block">Sede original incluida en el precio base</span>
+                          </div>
+                        </div>
+                        <Badge className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full border-none bg-emerald-100 text-emerald-700">
+                          Base
+                        </Badge>
+                      </div>
+
+                      {extraBranches > 0 && (
+                        <div className="flex items-center justify-between px-5 py-3 bg-amber-50/50">
+                          <div className="flex items-center gap-2">
+                            <div className="h-6 w-6 rounded-md bg-amber-100 flex items-center justify-center">
+                              <span className="text-[10px] font-black text-amber-600">➕</span>
+                            </div>
+                            <div>
+                              <span className="text-sm font-semibold text-neutral-800">Sucursales adicionales</span>
+                              <span className="text-[10px] text-neutral-500 block">{extraBranches} extra × {formatMoney(pricePerExtra)}/mes</span>
+                            </div>
+                          </div>
+                          <span className="text-sm font-bold text-amber-700">+{formatMoney(extraCost)}</span>
+                        </div>
+                      )}
+
+                      {/* Total */}
+                      <div className="flex items-center justify-between px-5 py-4 bg-neutral-50">
+                        <span className="text-sm font-black text-neutral-900 uppercase tracking-wider">Total Mensual Estimado</span>
+                        <span className="text-xl font-black text-neutral-900">{formatMoney(totalMonthlyCost)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Upgrade Banner - shown when limit is reached */}
+                {!canAddBranch && (
+                  <div className="rounded-2xl border-2 border-amber-200 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center flex-shrink-0">
+                        <Crown className="h-5 w-5 text-amber-600" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-neutral-900 tracking-tight">Límite de sucursales alcanzado</h4>
+                        <p className="text-xs text-neutral-600 mt-0.5 leading-relaxed">
+                          Tu plan <strong>{currentPlan?.nombre}</strong> permite hasta <strong>{branchLimit}</strong> sucursal{branchLimit && branchLimit > 1 ? 'es' : ''}.
+                          {nextPlan && <> Actualiza a <strong>{nextPlan.nombre}</strong> para obtener {nextPlan.limite_sucursales === null ? 'sucursales ilimitadas' : `hasta ${nextPlan.limite_sucursales} sucursales`}.</>}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      className="bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl font-bold h-10 px-5 text-xs flex items-center gap-1.5 shadow-sm whitespace-nowrap cursor-pointer border-none"
+                      onClick={() => toast.info('Contacta a soporte para actualizar tu plan: hola@servitracks.com')}
+                    >
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                      Actualizar Plan
+                    </Button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+              <div>
+                <CardTitle>Administración de Sucursales</CardTitle>
+                <CardDescription>Visualiza, registra y gestiona las sedes comerciales y sus suscripciones.</CardDescription>
+              </div>
+              <Button 
+                onClick={() => {
+                  if (!canAddBranch) {
+                    toast.error(`Tu plan ${currentPlan?.nombre} solo permite ${branchLimit} sucursal${branchLimit && branchLimit > 1 ? 'es' : ''}. Actualiza tu plan para añadir más.`);
+                    return;
+                  }
+                  setBranchOpen(true);
+                }}
+                disabled={!canAddBranch}
+                className={cn(
+                  "rounded-xl font-bold cursor-pointer h-10 px-4",
+                  canAddBranch 
+                    ? "bg-black hover:bg-neutral-800 text-white" 
+                    : "bg-neutral-200 text-neutral-400 cursor-not-allowed hover:bg-neutral-200"
+                )}
+              >
+                <Plus className="h-4 w-4 mr-2" /> Registrar Sucursal
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-neutral-100">
+                {allowedTenants.map(t => {
+                  const isActive = t.status === "active" || !t.status;
+                  return (
+                    <div key={t.id} className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-6 hover:bg-neutral-50/50 transition-colors">
+                      <div className="flex items-start gap-4">
+                        {/* Custom Branch Avatar Badge */}
+                        <div className={cn(
+                          "h-12 w-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-inner border",
+                          isActive ? "bg-emerald-50 border-emerald-100 text-emerald-600" : "bg-rose-50 border-rose-100 text-rose-600"
+                        )}>
+                          <Store className="h-6 w-6" />
+                        </div>
+
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-base font-bold text-neutral-900 tracking-tight">{t.name}</h4>
+                            <Badge className={cn("text-[9px] font-black uppercase px-2 py-0.5 rounded-full border-none",
+                              isActive ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                            )}>
+                              {isActive ? "Activa" : "Pendiente de Pago"}
+                            </Badge>
+                          </div>
+                          
+                          {/* Folder slug link */}
+                          <div className="flex items-center gap-1.5 text-xs text-neutral-400 font-semibold bg-neutral-50 px-2 py-0.5 rounded-md w-fit">
+                            <span className="text-neutral-300 font-normal">URL:</span>
+                            <span className="font-mono text-[10px] text-neutral-600">/{t.slug}/dashboard</span>
+                          </div>
+
+                          {/* Detail specs */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 pt-2">
+                            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+                              <Landmark className="h-3 w-3 text-neutral-300 flex-shrink-0" />
+                              <span>RNC: {t.rnc || "N/A"}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+                              <Phone className="h-3 w-3 text-neutral-300 flex-shrink-0" />
+                              <span>Tel: {t.phone || "N/A"}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-xs text-neutral-500 sm:col-span-2">
+                              <MapPin className="h-3 w-3 text-neutral-300 flex-shrink-0" />
+                              <span className="truncate">{t.address || "N/A"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2.5 self-end md:self-center">
+                        {!isActive && (
+                          <Button
+                            onClick={() => handleSimulatePayment(t.id, t.name)}
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold h-9 text-xs flex items-center gap-1.5 shadow-sm hover:shadow transition-all cursor-pointer border-none"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Activar (Simular Pago)
+                          </Button>
+                        )}
+                        
+                        <Button
+                          onClick={() => handleEditBranch(t)}
+                          variant="outline"
+                          size="sm"
+                          className="text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50 border-neutral-200 hover:border-emerald-100 rounded-lg h-9 w-9 p-0 flex items-center justify-center cursor-pointer transition-all"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+
+                        {/* Prevent deleting the primary branch in the account */}
+                        {t.id !== allowedTenants[0]?.id && (
+                          <Button
+                            onClick={() => setDeleteBranchTarget(t)}
+                            variant="outline"
+                            size="sm"
+                            className="text-neutral-400 hover:text-rose-600 hover:bg-rose-50 border-neutral-200 hover:border-rose-100 rounded-lg h-9 w-9 p-0 flex items-center justify-center cursor-pointer transition-all"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── WHATSAPP ── */}
+      {tab === "whatsapp" && (
+        <Card className="border-neutral-100 shadow-sm">
+          <CardHeader>
+            <CardTitle>WaSender API</CardTitle>
+            <CardDescription>Conecta tu taller con WhatsApp Business para enviar recordatorios automáticos. Obtén tu API Key en <a href="https://wasenderapi.com" target="_blank" className="text-black font-medium underline">wasenderapi.com</a></CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>API Key</Label>
+              <div className="relative">
+                <Input type={waVisible ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10"
+                  placeholder="Bearer token de WaSender..."
+                  value={waKey} onChange={e => setWaKey(e.target.value)} />
+                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setWaVisible(!waVisible)}>
+                  {waVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Número de WhatsApp del Taller</Label>
+              <Input type="tel" className="h-10 rounded-xl border-neutral-200" placeholder="+1809XXXXXXX"
+                value={waPhone} onChange={e => setWaPhone(e.target.value)} />
+            </div>
+            <div className="flex gap-3">
+              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer" onClick={saveWa}>
+                <Check className="h-4 w-4 mr-2" /> Guardar
+              </Button>
+              <Button variant="outline" className="rounded-lg cursor-pointer" onClick={testWa} disabled={waTesting}>
+                {waTesting ? "Enviando..." : "Probar Conexión"}
+              </Button>
+            </div>
+            {taller?.wasenderApiKey && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="text-sm text-emerald-700 font-medium">API configurada</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── IMPRESIÓN ── */}
+      {tab === "print" && (
+        <Card className="border-neutral-100 shadow-sm">
+          <CardHeader><CardTitle>Configuración de Impresión</CardTitle><CardDescription>Define cómo se verán los recibos del POS.</CardDescription></CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-1.5">
+              <Label>Tamaño de Papel</Label>
+              <div className="flex gap-2">
+                {(["80mm", "58mm", "A4"] as const).map(size => (
+                  <button key={size} onClick={() => updatePrintSettings({ paperSize: size })}
+                    className={cn("px-4 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer",
+                      ps.paperSize === size ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label>Opciones del Recibo</Label>
+              {([
+                { key: "showLogo",   label: "Mostrar logo del taller" },
+                { key: "showNcf",    label: "Mostrar número NCF" },
+                { key: "showItbis",  label: "Mostrar ITBIS desglosado" },
+                { key: "showChange", label: "Mostrar cambio/vuelto" },
+              ] as { key: keyof typeof ps; label: string }[]).map(opt => (
+                <div key={opt.key} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 bg-neutral-50">
+                  <span className="text-sm font-medium text-neutral-700">{opt.label}</span>
+                  <button onClick={() => updatePrintSettings({ [opt.key]: !(ps as any)[opt.key] })}
+                    className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none",
+                      (ps as any)[opt.key] ? "bg-black" : "bg-neutral-200")}>
+                    <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                      (ps as any)[opt.key] ? "left-5" : "left-0.5")} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Número de Copias</Label>
+              <div className="flex items-center gap-3">
+                <button onClick={() => updatePrintSettings({ copies: Math.max(1, ps.copies - 1) })}
+                  className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">−</button>
+                <span className="text-lg font-bold w-8 text-center">{ps.copies}</span>
+                <button onClick={() => updatePrintSettings({ copies: Math.min(5, ps.copies + 1) })}
+                  className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">+</button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Texto de Pie de Página</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" value={ps.footer}
+                onChange={e => updatePrintSettings({ footer: e.target.value })} />
+            </div>
+
+            <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer"
+              onClick={() => toast.success("Configuración de impresión guardada")}>
+              <Check className="h-4 w-4 mr-2" /> Guardar Configuración
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── USUARIOS ── */}
+      {tab === "users" && (
+        <div className="space-y-6">
+          {/* Role reference */}
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Roles Disponibles</CardTitle>
+                <CardDescription>Control de acceso basado en roles (RBAC).</CardDescription>
+              </div>
+              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2 cursor-pointer"
+                onClick={() => setInviteOpen(true)}>
+                <Plus className="h-4 w-4" /> Invitar Usuario
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                {ROLES.map(r => (
+                  <div key={r.value} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50">
+                    <Shield className="h-4 w-4 text-neutral-400" />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold">{r.label}</span>
+                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5", r.color)}>{r.value === "owner" ? "Admin" : r.value === "cashier" ? "POS" : r.value === "mechanic" ? "OT" : "CRM"}</Badge>
+                      </div>
+                      <p className="text-xs text-neutral-400">
+                        {r.value === "owner" ? "Control total del taller" : r.value === "mechanic" ? "Ver y actualizar órdenes asignadas" : r.value === "cashier" ? "Acceso al POS y facturación" : "Registrar clientes y vehículos"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Active users */}
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader><CardTitle>Usuarios Activos</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-neutral-50">
+                {users.filter((u) => u.tenantId === taller.id).map(u => (
+                  <div key={u.id} className="flex items-center gap-4 px-5 py-4 hover:bg-neutral-50/50 transition-colors">
+                    <div className="h-9 w-9 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
+                      {u.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-neutral-900">{u.name}</p>
+                      <p className="text-xs text-neutral-400">{u.email}</p>
+                    </div>
+                    <Badge className={cn("border-none rounded-full text-xs", roleBadge(u.role))}>{roleLabel(u.role)}</Badge>
+                    <Badge className={cn("border-none rounded-full text-xs",
+                       u.status === "active" ? "bg-emerald-100 text-emerald-700"
+                      : u.status === "invited" ? "bg-amber-100 text-amber-700"
+                      : "bg-neutral-100 text-neutral-500")}>
+                      {u.status === "active" ? "Activo" : u.status === "invited" ? "Invitado" : "Inactivo"}
+                    </Badge>
+                    {u.role !== "owner" && (
+                      <button onClick={() => setDeleteTarget(u)}
+                        className="text-neutral-300 hover:text-rose-500 transition-colors cursor-pointer border-none bg-transparent">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── SEGURIDAD ── */}
+      {tab === "security" && (
+        <Card className="border-neutral-100 shadow-sm max-w-md">
+          <CardHeader><CardTitle>Cambiar Contraseña</CardTitle><CardDescription>Actualiza tus credenciales de acceso.</CardDescription></CardHeader>
+          <CardContent className="space-y-4">
+            {[
+              { key: "current", label: "Contraseña Actual" },
+              { key: "next",    label: "Nueva Contraseña" },
+              { key: "confirm", label: "Confirmar Nueva Contraseña" },
+            ].map(f => (
+              <div key={f.key} className="space-y-1.5">
+                <Label>{f.label}</Label>
+                <div className="relative">
+                  <Input type={showPw ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10"
+                    value={(pwForm as any)[f.key]}
+                    onChange={e => setPwForm({ ...pwForm, [f.key]: e.target.value })} />
+                  {f.key === "current" && (
+                    <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setShowPw(!showPw)}>
+                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {pwForm.next && pwForm.confirm && pwForm.next !== pwForm.confirm && (
+              <p className="text-xs text-rose-500 font-medium">Las contraseñas no coinciden</p>
+            )}
+            <Button className="w-full rounded-xl bg-black text-white hover:bg-neutral-800 h-11 cursor-pointer" onClick={changePassword}>
+              <Shield className="h-4 w-4 mr-2" /> Actualizar Contraseña
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── INVITE USER DIALOG ── */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="sm:max-w-sm rounded-2xl bg-white p-6 shadow-2xl border-none max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in-50 zoom-in-95 duration-200">
+          <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
+            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Invitar Usuario</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
+            <div className="space-y-1.5">
+              <Label>Nombre Completo</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" 
+                placeholder="Ej. Juan Pérez"
+                value={inviteForm.name}
+                onChange={e => setInviteForm({ ...inviteForm, name: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Correo Electrónico</Label>
+              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+                placeholder="juan@taller.do"
+                value={inviteForm.email}
+                onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Rol</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {ROLES.filter(r => r.value !== "owner").map(r => (
+                  <button key={r.value} onClick={() => setInviteForm({ ...inviteForm, role: r.value })}
+                    className={cn("py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer",
+                      inviteForm.role === r.value ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setInviteOpen(false)}>Cancelar</Button>
+            <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleInvite}>Enviar Invitación</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── REGISTER BRANCH (SUCURSAL) DIALOG ── */}
+      <Dialog open={branchOpen} onOpenChange={setBranchOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white p-6 shadow-2xl border-none max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in-50 zoom-in-95 duration-200">
+          <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
+            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Registrar Nueva Sucursal</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
+            <div className="space-y-1.5">
+              <Label>Nombre Comercial</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" 
+                placeholder="Ej. Servicentro Santiago Norte"
+                value={branchForm.name}
+                onChange={e => handleBranchNameChange(e.target.value)} />
+            </div>
+            
+            <div className="space-y-1.5">
+              <Label>Slug Comercial (URL)</Label>
+              <div className="flex items-center rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
+                <span className="px-3 py-2.5 text-[10px] font-mono text-neutral-400 bg-neutral-100 border-r border-neutral-200 whitespace-nowrap select-none">servitracks.com/</span>
+                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0" 
+                  placeholder="servicentro-santiago-norte"
+                  value={branchForm.slug}
+                  onChange={e => setBranchForm({ ...branchForm, slug: e.target.value.replace(/\s+/g, "-").toLowerCase() })} />
+              </div>
+              <p className="text-[10px] text-neutral-400 font-medium">Se utilizará para generar el enlace exclusivo de esta sede.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>RNC / Cédula</Label>
+                <Input className="h-10 rounded-xl border-neutral-200" 
+                  placeholder="1-32-12345-9"
+                  value={branchForm.rnc}
+                  onChange={e => setBranchForm({ ...branchForm, rnc: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Teléfono</Label>
+                <Input className="h-10 rounded-xl border-neutral-200" 
+                  placeholder="809-555-0199"
+                  value={branchForm.phone}
+                  onChange={e => setBranchForm({ ...branchForm, phone: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Correo de la Sucursal</Label>
+              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+                placeholder="norte@tallergarcia.do"
+                value={branchForm.email}
+                onChange={e => setBranchForm({ ...branchForm, email: e.target.value })} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Dirección Física</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" 
+                placeholder="Autopista Duarte Km 5, Santiago"
+                value={branchForm.address}
+                onChange={e => setBranchForm({ ...branchForm, address: e.target.value })} />
+            </div>
+
+            {/* Note about status pending */}
+            <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl flex gap-2">
+              <Landmark className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider block">Nota de Suscripción</span>
+                <span className="text-[10px] text-amber-700 leading-tight block">Las nuevas sucursales se registran en estado <strong>Pendiente de Pago</strong>. Deberás activar su membresía para operar en ella.</span>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setBranchOpen(false)}>Cancelar</Button>
+            <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleRegisterBranch}>
+              Registrar Sucursal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── DELETE USER CONFIRMATION ── */}
+      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm rounded-2xl bg-white p-6 shadow-2xl border-none">
+          <DialogHeader><DialogTitle className="text-xl font-bold">Eliminar Usuario</DialogTitle></DialogHeader>
+          <p className="text-sm text-neutral-600 py-2">
+            ¿Estás seguro de eliminar a <strong>{deleteTarget?.name}</strong>? Esta acción no se puede deshacer.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setDeleteTarget(null)}>Cancelar</Button>
+            <Button className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700 cursor-pointer border-none animate-in fade-in-50 duration-200" onClick={confirmDelete}>
+              <Trash2 className="h-4 w-4 mr-2" /> Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── EDIT BRANCH (SUCURSAL) DIALOG ── */}
+      <Dialog open={!!editBranchTarget} onOpenChange={() => setEditBranchTarget(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white p-6 shadow-2xl border-none max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in-50 zoom-in-95 duration-200">
+          <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
+            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Editar Sucursal</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
+            <div className="space-y-1.5">
+              <Label>Nombre Comercial</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" 
+                placeholder="Ej. Servicentro Santiago Norte"
+                value={editBranchForm.name}
+                onChange={e => setEditBranchForm({ ...editBranchForm, name: e.target.value })} />
+            </div>
+            
+            <div className="space-y-1.5">
+              <Label>Slug Comercial (URL)</Label>
+              <div className="flex items-center rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
+                <span className="px-3 py-2.5 text-[10px] font-mono text-neutral-400 bg-neutral-100 border-r border-neutral-200 whitespace-nowrap select-none">servitracks.com/</span>
+                <Input className="h-10 border-0 rounded-none font-mono text-xs text-neutral-700 bg-neutral-50 focus-visible:ring-0 focus-visible:ring-offset-0" 
+                  placeholder="servicentro-santiago-norte"
+                  value={editBranchForm.slug}
+                  onChange={e => setEditBranchForm({ ...editBranchForm, slug: e.target.value.replace(/\s+/g, "-").toLowerCase() })} />
+              </div>
+              <p className="text-[10px] text-neutral-400 font-medium">Se utilizará para generar el enlace exclusivo de esta sede.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>RNC / Cédula</Label>
+                <Input className="h-10 rounded-xl border-neutral-200" 
+                  placeholder="1-32-12345-9"
+                  value={editBranchForm.rnc}
+                  onChange={e => setEditBranchForm({ ...editBranchForm, rnc: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Teléfono</Label>
+                <Input className="h-10 rounded-xl border-neutral-200" 
+                  placeholder="809-555-0199"
+                  value={editBranchForm.phone}
+                  onChange={e => setEditBranchForm({ ...editBranchForm, phone: e.target.value })} />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Correo de la Sucursal</Label>
+              <Input type="email" className="h-10 rounded-xl border-neutral-200" 
+                placeholder="norte@tallergarcia.do"
+                value={editBranchForm.email}
+                onChange={e => setEditBranchForm({ ...editBranchForm, email: e.target.value })} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Dirección Física</Label>
+              <Input className="h-10 rounded-xl border-neutral-200" 
+                placeholder="Autopista Duarte Km 5, Santiago"
+                value={editBranchForm.address}
+                onChange={e => setEditBranchForm({ ...editBranchForm, address: e.target.value })} />
+            </div>
+          </div>
+          
+          <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setEditBranchTarget(null)}>Cancelar</Button>
+            <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleSaveEditBranch}>
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── DELETE BRANCH CONFIRMATION ── */}
+      <Dialog open={!!deleteBranchTarget} onOpenChange={() => setDeleteBranchTarget(null)}>
+        <DialogContent className="sm:max-w-sm rounded-2xl bg-white p-6 shadow-2xl border-none">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Eliminar Sucursal</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-neutral-600 py-2 leading-relaxed">
+            ¿Estás completamente seguro de eliminar de forma permanente la sucursal <strong>{deleteBranchTarget?.name}</strong>? Se perderán todos sus registros asociados. Esta acción es irreversible.
+          </p>
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setDeleteBranchTarget(null)}>Cancelar</Button>
+            <Button 
+              className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700 cursor-pointer border-none" 
+              onClick={confirmDeleteBranch}
+            >
+              <Trash2 className="h-4 w-4 mr-2" /> Eliminar Sucursal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

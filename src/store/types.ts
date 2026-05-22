@@ -1,0 +1,363 @@
+export interface Tenant {
+  id: string;
+  name: string;
+  slug: string;
+  logo?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  rnc?: string;
+  status?: 'active' | 'pending' | 'suspended';
+  wasenderApiKey?: string;
+  wasenderPhone?: string;
+  monto_caja_chica?: number;
+  monto_actual_caja_chica?: number;
+  config?: {
+    umbral_diferencia_caja?: number;
+    formato_ticket?: '57mm' | '80mm';
+    formato_ticket_default?: '57mm' | '80mm';
+  };
+  plan_id?: string;
+  estado?: 'ACTIVO' | 'TRIAL' | 'SUSPENDIDO' | 'CANCELADO';
+  trial_hasta?: string;
+  color_primario?: string;
+  color_secundario?: string;
+}
+
+export interface TenantUser {
+  id: string;
+  tenantId: string;
+  name: string;
+  email: string;
+  role: 'owner' | 'mechanic' | 'cashier' | 'receptionist';
+  status: 'active' | 'invited' | 'inactive';
+  createdAt: string;
+}
+
+export interface PrintSettings {
+  paperSize: '80mm' | '58mm' | 'A4';
+  showLogo: boolean;
+  showNcf: boolean;
+  showItbis: boolean;
+  showChange: boolean;
+  copies: number;
+  footer: string;
+}
+
+export interface Customer {
+  id: string;
+  tenantId: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  tags?: string[];
+  birthday?: string;
+  createdAt: string;
+}
+
+export interface Vehicle {
+  id: string;
+  customerId: string;
+  tenantId: string;
+  brand: string;
+  model: string;
+  year: number;
+  plate: string;
+  vin?: string;
+  color?: string;
+  km?: number;
+  fuel?: string;
+  transmission?: string;
+  lastService?: string;
+  nextService?: string;
+}
+
+export interface Service {
+  id: string;
+  tenantId: string;
+  name: string;
+  description?: string;
+  price: number;
+  duration?: string;
+  category?: string;
+  /** Categoría interna de mantenimiento que dispara este servicio */
+  maintenanceCategory?: 'engine' | 'brakes' | 'tires' | 'battery' | 'suspension' | 'transmission' | 'cooling' | 'ac' | 'steering' | 'others';
+  /** Vida útil en kilómetros que otorga este servicio al vehículo */
+  lifespanKm?: number;
+  /** Vida útil en días que otorga este servicio al vehículo */
+  lifespanDays?: number;
+}
+
+export interface Product {
+  id: string;
+  tenantId: string;
+  name: string;
+  sku: string;
+  barcode?: string;
+  category: string;
+  brand?: string;
+  type?: string;
+  costPrice: number;
+  salePrice: number;
+  stock: number;
+  minStock: number;
+  tax: number;
+  image?: string;
+  supplier?: string;
+  location?: string;
+  serviceIds?: string[];
+  variants?: ProductVariant[];
+  /** Categoría interna de mantenimiento que dispara este producto al instalarse */
+  maintenanceCategory?: 'engine' | 'brakes' | 'tires' | 'battery' | 'suspension' | 'transmission' | 'cooling' | 'ac' | 'steering' | 'others';
+  /** Vida útil en kilómetros que otorga este producto al vehículo */
+  lifespanKm?: number;
+  /** Vida útil en días que otorga este producto al vehículo */
+  lifespanDays?: number;
+}
+
+export interface ProductVariant {
+  id: string;
+  productId: string;
+  name: string;
+  sku: string;
+  stock: number;
+  price?: number;
+}
+
+export interface InventoryMovement {
+  id: string;
+  tenantId: string;
+  productId: string;
+  productName: string;
+  variantId?: string;
+  type: 'in' | 'out' | 'adjustment';
+  quantity: number;
+  reason: string;
+  date: string;
+  userId?: string;
+}
+
+export interface WorkOrder {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  vehicleId: string;
+  mechanicId?: string;
+  km?: number;
+  kmUnit?: 'km' | 'mi';
+  status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced';
+  description: string;
+  serviceIds?: string[]; // Multiple services selected
+  estimatedTime?: string;
+  notes?: string;
+  checklist?: { item: string; completed: boolean }[];
+  total: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvoiceItem {
+  id: string;
+  productId?: string;
+  serviceId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  discount?: number;
+  tax: number;
+}
+
+export interface Invoice {
+  id: string;
+  tenantId: string;
+  customerId?: string;
+  vehicleId?: string;
+  orderId?: string;
+  mechanicId?: string;
+  km?: number;
+  kmUnit?: 'km' | 'mi';
+  items: InvoiceItem[];
+  subtotal: number;
+  tax: number;
+  discount?: number;
+  total: number;
+  paymentMethod: 'cash' | 'card' | 'transfer' | 'credit';
+  status: 'paid' | 'pending' | 'cancelled';
+  ncf?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface Technician {
+  id: string;
+  tenantId: string;
+  name: string;
+  phone?: string;
+  status: 'active' | 'inactive';
+  createdAt: string;
+}
+
+export interface WhatsAppLog {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  customerName: string;
+  phone: string;
+  type: 'reminder' | 'notification' | 'marketing' | 'invoice';
+  message: string;
+  status: 'sent' | 'failed' | 'pending';
+  sentAt: string;
+}
+
+export interface MaintenanceItem {
+  id: string;
+  vehicleId: string;
+  tenantId: string;
+  name: string; // e.g., "Cambio de Aceite"
+  lastServiceDate: string;
+  lastServiceKm: number;
+  lifespanKm: number;
+  lifespanDays: number;
+  currentPercentage: number;
+  category: 'engine' | 'brakes' | 'tires' | 'battery' | 'suspension' | 'transmission' | 'cooling' | 'ac' | 'steering' | 'others';
+}
+
+export interface MaintenanceHistoryItem {
+  id: string;
+  vehicleId: string;
+  tenantId: string;
+  name: string;
+  serviceDate: string;
+  serviceKm: number;
+  completedAt: string;
+  notes?: string;
+}
+
+export interface MaintenanceAlert {
+  id: string;
+  tenantId: string;
+  vehicleId: string;
+  customerId: string;
+  maintenanceItemId: string;
+  type: 'preventive' | 'critical';
+  percentage: number;
+  createdAt: string;
+  status: 'pending' | 'dismissed' | 'notified';
+}
+
+export interface Caja {
+  id: string;
+  tenant_id: string;
+  empleado_id: string;
+  monto_inicial: number;
+  estado: 'ABIERTA' | 'CERRADA';
+  abierta_en: string;
+  cerrada_en?: string;
+  monto_esperado_efectivo?: number;
+  monto_contado_efectivo?: number;
+  monto_contado_tarjeta?: number;
+  monto_contado_transferencia?: number;
+  diferencia?: number;
+  notas_apertura?: string;
+  notas_cierre?: string;
+}
+
+export type TipoMovimiento = 'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'VENTA' | 'ABONO';
+export type MetodoPago = 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA';
+
+export interface MovimientoCaja {
+  id: string;
+  tenant_id: string;
+  caja_id: string;
+  empleado_id: string;
+  tipo: TipoMovimiento;
+  concepto: string;
+  monto: number;
+  metodo: MetodoPago;
+  creado_en: string;
+}
+
+export interface Empleado {
+  id: string;
+  nombre: string;
+  apellido: string;
+  rol: 'ADMIN' | 'CAJERO' | 'TECNICO';
+  pin: string;
+}
+
+export type PlanId = 'basico' | 'pro' | 'enterprise' | string;
+
+export interface Plan {
+  id: PlanId;
+  nombre: string;
+  precio_mensual: number;
+  precio_anual?: number;
+  limite_empleados: number;
+  limite_ordenes_mes: number | null;
+  limite_whatsapp_mes?: number;
+  /** Máximo de sucursales permitidas. null = ilimitadas */
+  limite_sucursales: number | null;
+  /** Costo mensual (RD$) por cada sucursal adicional */
+  precio_sucursal_adicional: number;
+  modulos: {
+    whatsapp: boolean;
+    facturacion_fiscal: boolean;
+    multisucursal: boolean;
+    logistica: boolean;
+  };
+  destacado?: boolean;
+  polar_product_monthly_url?: string;
+  polar_product_yearly_url?: string;
+}
+
+export interface BankDetails {
+  banco: string;
+  titular: string;
+  rnc: string;
+  tipo_cuenta: string;
+  numero_cuenta: string;
+}
+
+export interface GlobalConfig {
+  requirePlanOnRegistration: boolean;
+  trialDays: number;
+  defaultPlanId: PlanId;
+  bankDetails?: BankDetails;
+}
+
+export interface LicenciaLocal {
+  id: string;
+  codigo: string;
+  nombre_lavanderia: string;
+  estado: 'ACTIVO' | 'INACTIVO' | 'SUSPENDIDO';
+  es_anual: boolean;
+  expira_en?: string;
+  whatsapp_activo: boolean;
+  facturacion_activa: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  tenantId: string;
+  name: string;
+  phone: string;
+  last_msg: string;
+  time: string;
+  unread: number;
+  status: 'activa' | 'finalizada';
+  agent: 'ia' | 'humano';
+}
+
+export interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  time: string;
+  payload?: any;
+  reply_to_id?: string | null;
+  reactions?: { emoji: string; from: string }[] | null;
+  status?: string;
+}

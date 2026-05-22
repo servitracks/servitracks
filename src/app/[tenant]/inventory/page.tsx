@@ -1,0 +1,706 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import { useParams } from "@/lib/next-compat";
+import { useStore, Product } from "@/store/useStore";
+import {
+  Plus,
+  Search,
+  Filter,
+  MoreVertical,
+  Package,
+  AlertTriangle,
+  ArrowUpDown,
+  Download,
+  X,
+  TrendingUp,
+  Edit,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
+
+type ProductForm = {
+  name: string; sku: string; barcode: string; category: string;
+  brand: string; supplier: string; costPrice: string; salePrice: string;
+  stock: string; minStock: string; tax: string; location: string;
+  serviceIds: string[];
+};
+
+const emptyForm: ProductForm = {
+  name: "", sku: "", barcode: "", category: "",
+  brand: "", supplier: "", costPrice: "", salePrice: "",
+  stock: "0", minStock: "5", tax: "18", location: "",
+  serviceIds: [],
+};
+
+interface ProductFieldsProps {
+  form: ProductForm;
+  setForm: (update: (prev: ProductForm) => ProductForm) => void;
+  isEditOpen: boolean;
+  services: { id: string; name: string; category?: string }[];
+}
+
+const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductFieldsProps) => {
+  const serviceCategories = useMemo(() => {
+    const cats: Record<string, typeof services> = {};
+    services.forEach((s) => {
+      const cat = s.category || "Otros";
+      if (!cats[cat]) cats[cat] = [];
+      cats[cat].push(s);
+    });
+    return cats;
+  }, [services]);
+
+  const toggleService = (serviceId: string) => {
+    setForm((prev) => ({
+      ...prev,
+      serviceIds: prev.serviceIds.includes(serviceId)
+        ? prev.serviceIds.filter((id) => id !== serviceId)
+        : [...prev.serviceIds, serviceId],
+    }));
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {/* Product Name */}
+      <div className="space-y-1.5">
+        <Label>Nombre del Producto *</Label>
+        <Input 
+          placeholder="Ej: Aceite Castrol Magnatec" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.name} 
+          onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} 
+        />
+      </div>
+
+      {/* Tipo de Servicio — Multi-select */}
+      <div className="space-y-1.5">
+        <Label>Tipo de Servicio</Label>
+        <Popover>
+          <PopoverTrigger
+              type="button"
+              className="w-full h-10 rounded-xl border border-neutral-200 justify-between text-sm font-normal hover:bg-neutral-50 flex items-center px-3 bg-white"
+            >
+              <span className={cn("truncate", form.serviceIds.length === 0 && "text-neutral-400")}>
+                {form.serviceIds.length === 0
+                  ? "Vincular a servicios..."
+                  : `${form.serviceIds.length} servicio${form.serviceIds.length > 1 ? "s" : ""} vinculado${form.serviceIds.length > 1 ? "s" : ""}`}
+              </span>
+              <Filter className="h-3.5 w-3.5 text-neutral-400 flex-shrink-0" />
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-0 rounded-xl shadow-xl border-neutral-100" align="start">
+            <div className="max-h-64 overflow-y-auto p-3 space-y-3">
+              {Object.entries(serviceCategories).map(([cat, svcs]) => (
+                <div key={cat}>
+                  <p className="text-[10px] font-black uppercase tracking-wider text-neutral-400 mb-1.5 px-1">{cat}</p>
+                  <div className="space-y-0.5">
+                    {svcs.map((s) => {
+                      const isSelected = form.serviceIds.includes(s.id);
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => toggleService(s.id)}
+                          className={cn(
+                            "flex items-center gap-2.5 w-full rounded-lg px-2.5 py-2 text-left text-sm transition-colors",
+                            isSelected ? "bg-neutral-900 text-white" : "hover:bg-neutral-50 text-neutral-700"
+                          )}
+                        >
+                          <div className={cn(
+                            "h-4 w-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                            isSelected ? "bg-white border-white" : "border-neutral-300"
+                          )}>
+                            {isSelected && <span className="text-black text-[10px] font-black">✓</span>}
+                          </div>
+                          <span className="truncate">{s.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {form.serviceIds.length > 0 && (
+              <div className="border-t border-neutral-100 p-2">
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, serviceIds: [] }))}
+                  className="text-xs text-neutral-500 hover:text-red-500 font-medium px-2 py-1 w-full text-center transition-colors"
+                >
+                  Limpiar selección
+                </button>
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>SKU *</Label>
+        <Input 
+          placeholder="Ej: CAS-MAG-01" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.sku} 
+          onChange={(e) => setForm((prev) => ({ ...prev, sku: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Código de Barras</Label>
+        <Input 
+          placeholder="Opcional" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.barcode} 
+          onChange={(e) => setForm((prev) => ({ ...prev, barcode: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Categoría *</Label>
+        <Select 
+          value={form.category} 
+          onValueChange={(v) => setForm((prev) => ({ ...prev, category: v || "" }))}
+        >
+          <SelectTrigger className="h-10 rounded-xl border-neutral-200">
+            <SelectValue placeholder="Seleccionar" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl">
+            {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Marca</Label>
+        <Input 
+          placeholder="Ej: Castrol" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.brand} 
+          onChange={(e) => setForm((prev) => ({ ...prev, brand: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Precio Costo (RD$)</Label>
+        <Input 
+          type="number" 
+          placeholder="0" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.costPrice} 
+          onChange={(e) => setForm((prev) => ({ ...prev, costPrice: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Precio Venta (RD$)</Label>
+        <Input 
+          type="number" 
+          placeholder="0" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.salePrice} 
+          onChange={(e) => setForm((prev) => ({ ...prev, salePrice: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Stock {isEditOpen ? "Actual" : "Inicial"}</Label>
+        <Input 
+          type="number" 
+          placeholder="0" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.stock} 
+          onChange={(e) => setForm((prev) => ({ ...prev, stock: e.target.value }))} 
+          readOnly={isEditOpen} 
+          disabled={isEditOpen} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Stock Mínimo</Label>
+        <Input 
+          type="number" 
+          placeholder="5" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.minStock} 
+          onChange={(e) => setForm((prev) => ({ ...prev, minStock: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Impuesto (ITBIS %)</Label>
+        <Input 
+          type="number" 
+          placeholder="18" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.tax} 
+          onChange={(e) => setForm((prev) => ({ ...prev, tax: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Proveedor</Label>
+        <Input 
+          placeholder="Ej: Distribuidora X" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.supplier} 
+          onChange={(e) => setForm((prev) => ({ ...prev, supplier: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Ubicación en Almacén</Label>
+        <Input 
+          placeholder="Ej: Estante A-3" 
+          className="h-10 rounded-xl border-neutral-200"
+          value={form.location} 
+          onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} 
+        />
+      </div>
+    </div>
+  );
+};
+
+export default function InventoryPage() {
+  const params = useParams();
+  const tenantId = (params?.tenant as string) || "1";
+  const { products, services, addProduct, updateProduct, deleteProduct, addMovement, movements } = useStore();
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("Todos");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [adjustQty, setAdjustQty] = useState("");
+  const [adjustType, setAdjustType] = useState<"in" | "out" | "adjustment">("in");
+  const [adjustReason, setAdjustReason] = useState("");
+
+  const filteredProducts = products.filter((p) => {
+    const matchSearch =
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku.toLowerCase().includes(search.toLowerCase()) ||
+      (p.brand || "").toLowerCase().includes(search.toLowerCase());
+    const matchCat = categoryFilter === "Todos" || p.category === categoryFilter;
+    return matchSearch && matchCat;
+  });
+
+  const totalValue = products.reduce((acc, p) => acc + p.costPrice * p.stock, 0);
+  const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
+  const outOfStockCount = products.filter((p) => p.stock === 0).length;
+
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.sku || !form.category) {
+      toast.error("Nombre, SKU y categoría son obligatorios");
+      return;
+    }
+    const newProduct: Product = {
+      id: `p${Date.now()}`,
+      tenantId: tenantId,
+      name: form.name,
+      sku: form.sku,
+      barcode: form.barcode,
+      category: form.category,
+      brand: form.brand,
+      supplier: form.supplier,
+      costPrice: Number(form.costPrice) || 0,
+      salePrice: Number(form.salePrice) || 0,
+      stock: Number(form.stock) || 0,
+      minStock: Number(form.minStock) || 0,
+      tax: Number(form.tax) || 18,
+      location: form.location,
+      serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
+    };
+    addProduct(newProduct);
+    addMovement({
+      id: `m${Date.now()}`,
+      tenantId: tenantId,
+      productId: newProduct.id,
+      productName: newProduct.name,
+      type: "in",
+      quantity: Number(form.stock),
+      reason: "Stock inicial",
+      date: new Date().toISOString(),
+    });
+    toast.success("Producto creado correctamente");
+    setIsCreateOpen(false);
+    setForm(emptyForm);
+  };
+
+  const openEdit = (product: Product) => {
+    setSelectedProduct(product);
+    setForm(() => ({
+      name: product.name, sku: product.sku, barcode: product.barcode || "",
+      category: product.category, brand: product.brand || "",
+      supplier: product.supplier || "", costPrice: String(product.costPrice),
+      salePrice: String(product.salePrice), stock: String(product.stock),
+      minStock: String(product.minStock), tax: String(product.tax),
+      location: product.location || "",
+      serviceIds: product.serviceIds || [],
+    }));
+    setIsEditOpen(true);
+  };
+
+  const handleEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+    updateProduct(selectedProduct.id, {
+      name: form.name, sku: form.sku, barcode: form.barcode,
+      category: form.category, brand: form.brand, supplier: form.supplier,
+      costPrice: Number(form.costPrice) || 0, salePrice: Number(form.salePrice) || 0,
+      minStock: Number(form.minStock) || 0, tax: Number(form.tax) || 18, location: form.location,
+      serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
+    });
+    toast.success("Producto actualizado");
+    setIsEditOpen(false);
+  };
+
+  const openAdjust = (product: Product) => {
+    setSelectedProduct(product);
+    setAdjustQty("");
+    setAdjustReason("");
+    setAdjustType("in");
+    setIsAdjustOpen(true);
+  };
+
+  const handleAdjust = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct || !adjustQty || !adjustReason) {
+      toast.error("Completa todos los campos");
+      return;
+    }
+    const qty = Number(adjustQty);
+    const currentStock = selectedProduct.stock;
+    let newStock = currentStock;
+    if (adjustType === "in") newStock = currentStock + qty;
+    else if (adjustType === "out") newStock = Math.max(0, currentStock - qty);
+    else newStock = qty;
+
+    updateProduct(selectedProduct.id, { stock: newStock });
+    addMovement({
+      id: `m${Date.now()}`,
+      tenantId: tenantId,
+      productId: selectedProduct.id,
+      productName: selectedProduct.name,
+      type: adjustType,
+      quantity: qty,
+      reason: adjustReason,
+      date: new Date().toISOString(),
+    });
+    toast.success(adjustType === "in" ? `+${qty} unidades agregadas` : `Stock ajustado a ${newStock}`);
+    setIsAdjustOpen(false);
+  };
+
+  const handleDelete = (id: string, name: string) => {
+    deleteProduct(id);
+    toast.success(`"${name}" eliminado del inventario`);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900">Inventario</h1>
+          <p className="text-neutral-500">Gestiona tus productos, repuestos y suministros.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" className="hidden rounded-lg md:flex gap-2">
+            <Download className="h-4 w-4" /> Exportar
+          </Button>
+          <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2"
+            onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}>
+            <Plus className="h-4 w-4" /> Nuevo Producto
+          </Button>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          { label: "Total Productos", value: products.length, icon: Package, color: "text-neutral-700", bg: "bg-neutral-50" },
+          { label: "Stock Bajo", value: lowStockCount, icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50" },
+          { label: "Sin Stock", value: outOfStockCount, icon: X, color: "text-rose-600", bg: "bg-rose-50" },
+          { label: "Valor Total", value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50" },
+        ].map((kpi) => (
+          <Card key={kpi.label} className="border-neutral-100 shadow-sm">
+            <CardContent className="flex items-center gap-4 p-5">
+              <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
+                <kpi.icon className={cn("h-5 w-5", kpi.color)} />
+              </div>
+              <div>
+                <p className="text-xs font-medium text-neutral-500">{kpi.label}</p>
+                <p className="text-xl font-black text-neutral-900">{kpi.value}</p>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Tabs: Productos / Movimientos */}
+      <Tabs defaultValue="products">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <TabsList className="bg-neutral-100 rounded-xl p-1">
+            <TabsTrigger value="products" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Productos</TabsTrigger>
+            <TabsTrigger value="movements" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Movimientos</TabsTrigger>
+          </TabsList>
+          {/* Search + filter */}
+          <div className="flex gap-3 w-full sm:w-auto">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              <Input placeholder="Buscar producto, SKU, marca..." className="rounded-full border-neutral-200 bg-white pl-10 h-9"
+                value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v || "Todos")}>
+              <SelectTrigger className="w-36 h-9 rounded-full border-neutral-200 bg-white">
+                <Filter className="h-3.5 w-3.5 mr-1 text-neutral-400" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="Todos">Todos</SelectItem>
+                {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <TabsContent value="products" className="mt-4">
+          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader className="bg-neutral-50/50">
+                <TableRow>
+                  <TableHead className="w-[280px]">Producto</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead>Precio Venta</TableHead>
+                  <TableHead>Stock</TableHead>
+                  <TableHead>Margen</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-[50px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredProducts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-32 text-center text-neutral-400">
+                      No se encontraron productos.
+                    </TableCell>
+                  </TableRow>
+                ) : filteredProducts.map((product) => {
+                  const margin = product.costPrice > 0
+                    ? Math.round(((product.salePrice - product.costPrice) / product.salePrice) * 100)
+                    : 0;
+                  return (
+                    <TableRow key={product.id} className="group hover:bg-neutral-50/50">
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 group-hover:bg-black group-hover:text-white transition-colors">
+                            <Package className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-neutral-900 text-sm">{product.name}</p>
+                            <p className="text-xs text-neutral-400 font-mono">{product.sku}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">
+                          {product.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-semibold text-sm">RD$ {product.salePrice.toLocaleString("es-DO")}</TableCell>
+                      <TableCell>
+                        <div>
+                          <span className={cn("font-bold text-sm", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
+                            {product.stock}
+                          </span>
+                          <span className="text-neutral-400 text-xs"> / mín {product.minStock}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
+                      </TableCell>
+                      <TableCell>
+                        {product.stock <= 0 ? (
+                          <Badge className="bg-rose-100 text-rose-700 border-none text-xs">Agotado</Badge>
+                        ) : product.stock <= product.minStock ? (
+                          <Badge className="bg-amber-100 text-amber-700 border-none text-xs">Stock Bajo</Badge>
+                        ) : (
+                          <Badge className="bg-emerald-100 text-emerald-700 border-none text-xs">Disponible</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors">
+                            <MoreVertical className="h-4 w-4 text-neutral-400" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
+                            <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
+                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openEdit(product)}>
+                              <Edit className="h-4 w-4" /> Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openAdjust(product)}>
+                              <ArrowUpDown className="h-4 w-4" /> Ajustar Stock
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
+                              onClick={() => handleDelete(product.id, product.name)}>
+                              <Trash2 className="h-4 w-4" /> Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="movements" className="mt-4">
+          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader className="bg-neutral-50/50">
+                <TableRow>
+                  <TableHead>Producto</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Cantidad</TableHead>
+                  <TableHead>Motivo</TableHead>
+                  <TableHead>Fecha</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {movements.length === 0 ? (
+                  <TableRow><TableCell colSpan={5} className="h-32 text-center text-neutral-400">Sin movimientos registrados.</TableCell></TableRow>
+                ) : [...movements].reverse().map((m) => (
+                  <TableRow key={m.id} className="hover:bg-neutral-50/50">
+                    <TableCell className="font-medium text-sm">{m.productName}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        {m.type === "in" ? <ArrowUp className="h-3.5 w-3.5 text-emerald-500" /> : m.type === "out" ? <ArrowDown className="h-3.5 w-3.5 text-rose-500" /> : <ArrowUpDown className="h-3.5 w-3.5 text-blue-500" />}
+                        <span className={cn("text-xs font-semibold", m.type === "in" ? "text-emerald-600" : m.type === "out" ? "text-rose-600" : "text-blue-600")}>
+                          {m.type === "in" ? "Entrada" : m.type === "out" ? "Salida" : "Ajuste"}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-bold">{m.quantity}</TableCell>
+                    <TableCell className="text-sm text-neutral-600">{m.reason}</TableCell>
+                    <TableCell className="text-xs text-neutral-400">{new Date(m.date).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Create Dialog */}
+      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Nuevo Producto</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4 py-2">
+            <ProductFormFields form={form} setForm={setForm} isEditOpen={false} services={services} />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)} className="rounded-xl">Cancelar</Button>
+              <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Crear Producto</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Editar Producto</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleEdit} className="space-y-4 py-2">
+            <ProductFormFields form={form} setForm={setForm} isEditOpen={true} services={services} />
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="rounded-xl">Cancelar</Button>
+              <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Guardar Cambios</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Adjust Stock Dialog */}
+      <Dialog open={isAdjustOpen} onOpenChange={setIsAdjustOpen}>
+        <DialogContent className="sm:max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">Ajuste de Stock</DialogTitle>
+            {selectedProduct && <p className="text-sm text-neutral-500 font-medium">{selectedProduct.name} — Stock actual: <strong>{selectedProduct.stock}</strong></p>}
+          </DialogHeader>
+          <form onSubmit={handleAdjust} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Tipo de Movimiento</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { value: "in", label: "Entrada (+)", color: "bg-emerald-50 border-emerald-200 text-emerald-700" },
+                  { value: "out", label: "Salida (-)", color: "bg-rose-50 border-rose-200 text-rose-700" },
+                  { value: "adjustment", label: "Ajuste (=)", color: "bg-blue-50 border-blue-200 text-blue-700" },
+                ] as const).map(opt => (
+                  <button key={opt.value} type="button"
+                    onClick={() => setAdjustType(opt.value)}
+                    className={cn(
+                      "py-2 px-1 rounded-xl border-2 text-xs font-semibold text-center transition-all",
+                      adjustType === opt.value ? opt.color + " ring-2 ring-offset-1 ring-neutral-900" : "border-neutral-200 text-neutral-500 hover:border-neutral-300"
+                    )}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Cantidad</Label>
+              <Input type="number" min="1" placeholder="0" className="h-10 rounded-xl border-neutral-200"
+                value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Motivo</Label>
+              <Input placeholder="Ej: Compra a proveedor, Venta, Pérdida..." className="h-10 rounded-xl border-neutral-200"
+                value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsAdjustOpen(false)} className="rounded-xl">Cancelar</Button>
+              <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Confirmar</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
