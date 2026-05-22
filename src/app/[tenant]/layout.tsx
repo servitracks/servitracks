@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/dashboard/Sidebar";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { HydrationGuard } from "@/components/dashboard/HydrationGuard";
 import { TourController } from "@/components/dashboard/TourController";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { useHydration } from "@/store/useHydration";
@@ -20,8 +20,10 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const hydrated = useHydration();
   const { tenants, updateTenant, currentUserId } = useStore();
+  const location = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Redirigir a login si no está autenticado (una vez hidratado el store)
   useEffect(() => {
@@ -29,6 +31,11 @@ export default function DashboardLayout() {
       navigate("/login");
     }
   }, [hydrated, currentUserId, navigate]);
+
+  // Cerrar sidebar al cambiar de página
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
 
 
   const tenantSlug =
@@ -62,12 +69,12 @@ export default function DashboardLayout() {
 
   if (isPending) {
     return (
-      <div className="flex h-screen overflow-hidden bg-neutral-50/50">
-        <Sidebar />
+      <div className="flex h-screen overflow-hidden bg-neutral-50/50 relative">
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <TopBar />
+          <TopBar onMenuClick={() => setSidebarOpen(true)} />
           <HydrationGuard>
-            <main className="flex-1 overflow-y-auto p-8 flex items-center justify-center">
+            <main className="flex-1 overflow-y-auto p-4 sm:p-8 flex items-center justify-center">
               <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-neutral-100 p-8 text-center space-y-6 relative overflow-hidden animate-in fade-in-50 zoom-in-95 duration-300">
                 {/* Background glow decorator */}
                 <div className="absolute -top-12 -right-12 w-32 h-32 bg-rose-500/10 rounded-full blur-2xl pointer-events-none" />
@@ -328,11 +335,11 @@ export default function DashboardLayout() {
         </div>
       )}
 
-      <Sidebar />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar />
+        <TopBar onMenuClick={() => setSidebarOpen(true)} />
         <HydrationGuard>
-          <main className="flex-1 overflow-y-auto p-8">
+          <main className="flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="mx-auto max-w-7xl">
               <Outlet />
             </div>

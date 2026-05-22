@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import {
   Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip,
   Line, LineChart, Cell, Pie, PieChart, Legend,
@@ -25,6 +26,13 @@ interface ReportChartsProps {
 }
 
 export default function ReportCharts({ topProducts, statusData }: ReportChartsProps) {
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsMounted(true), 150);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <>
       {/* Revenue line chart */}
@@ -41,18 +49,20 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
           </div>
         </CardHeader>
         <CardContent className="h-[280px] w-full">
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <LineChart data={monthlyRevenue}>
-              <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
-              <Tooltip
-                contentStyle={{ borderRadius: "12px", border: "1px solid #f0f0f0", boxShadow: "0 10px 20px -5px rgba(0,0,0,0.1)", fontSize: "12px" }}
-                formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Ingresos"]}
-              />
-              <Line type="monotone" dataKey="total" stroke="#000" strokeWidth={2.5}
-                dot={{ fill: "#000", r: 3 }} activeDot={{ r: 6 }} />
-            </LineChart>
-          </ResponsiveContainer>
+          {isMounted && (
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <LineChart data={monthlyRevenue}>
+                <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
+                <Tooltip
+                  contentStyle={{ borderRadius: "12px", border: "1px solid #f0f0f0", boxShadow: "0 10px 20px -5px rgba(0,0,0,0.1)", fontSize: "12px" }}
+                  formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Ingresos"]}
+                />
+                <Line type="monotone" dataKey="total" stroke="#000" strokeWidth={2.5}
+                  dot={{ fill: "#000", r: 3 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </CardContent>
       </Card>
 
@@ -65,7 +75,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
           <CardContent className="h-[260px] w-full">
             {topProducts.length === 0 ? (
               <div className="flex items-center justify-center h-full text-neutral-400 text-sm">Sin datos de ventas.</div>
-            ) : (
+            ) : isMounted ? (
               <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <BarChart data={topProducts} layout="vertical">
                   <XAxis type="number" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false}
@@ -78,7 +88,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
                   <Bar dataKey="revenue" fill="#000" radius={[0, 4, 4, 0]} barSize={20} />
                 </BarChart>
               </ResponsiveContainer>
-            )}
+            ) : null}
           </CardContent>
         </Card>
 
@@ -89,7 +99,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
           <CardContent className="w-full">
             {statusData.length === 0 ? (
               <div className="flex items-center justify-center h-40 text-neutral-400 text-sm">Sin órdenes.</div>
-            ) : (
+            ) : isMounted ? (
               <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie data={statusData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
@@ -100,7 +110,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
                     formatter={(v) => <span className="text-xs text-neutral-600">{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       </div>

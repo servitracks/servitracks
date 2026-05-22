@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip,
@@ -15,6 +16,13 @@ interface DashboardChartsProps {
 }
 
 export default function DashboardCharts({ orders, invoices, statusColors, statusLabels }: DashboardChartsProps) {
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setIsMounted(true), 150);
+    return () => clearTimeout(timer);
+  }, []);
+
   const statusCounts = Object.keys(statusLabels).map((s) => ({
     status: s,
     label: statusLabels[s],
@@ -50,7 +58,7 @@ export default function DashboardCharts({ orders, invoices, statusColors, status
           <p className="text-xs text-neutral-400">Últimos 7 días</p>
         </CardHeader>
         <CardContent className="h-[280px] w-full pb-4">
-          {hasRevenue ? (
+          {hasRevenue && isMounted ? (
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <BarChart data={weeklyData} barGap={4}>
                 <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />

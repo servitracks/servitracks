@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield } from "lucide-react";
+import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield, Menu } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -26,7 +26,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { supabaseAdmin } from "@/lib/supabase";
 
-export function TopBar() {
+interface TopBarProps {
+  onMenuClick?: () => void;
+}
+
+export function TopBar({ onMenuClick }: TopBarProps) {
   const maintenanceAlerts = useStore((s) => s.maintenanceAlerts);
   const whatsappLogs = useStore((s) => s.whatsappLogs);
   const users = useStore((s) => s.users);
@@ -143,8 +147,17 @@ export function TopBar() {
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-neutral-100 bg-white/80 px-8 backdrop-blur-md">
-        <div className="flex w-full max-w-md items-center">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-neutral-100 bg-white/80 px-4 sm:px-8 backdrop-blur-md">
+        <div className="flex w-full max-w-md items-center gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden h-10 w-10 rounded-full flex-shrink-0 cursor-pointer text-neutral-500 hover:bg-neutral-50"
+            onClick={onMenuClick}
+            type="button"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
             <Input
