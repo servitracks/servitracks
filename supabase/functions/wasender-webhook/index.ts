@@ -1,204 +1,298 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-// Extraer número de teléfono limpio (sin @s.whatsapp.net, sin @c.us)
-function cleanPhone(jid: string): string {
-  return "+" + jid.replace(/@.*/, "").replace(/\D/g, "");
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Extraer texto del mensaje de cualquier formato WaSender
-function extractMessageText(data: any): string {
-  if (!data) return "";
-  // Formato directo
-  if (typeof data.body === "string") return data.body;
-  if (typeof data.text === "string") return data.text;
-  if (typeof data.message === "string") return data.message;
-  // Formato WhatsApp Web JS / Baileys
-  const msg = data.message;
-  if (!msg) return "";
-  return (
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    msg.videoMessage?.caption ||
-    msg.documentMessage?.caption ||
-    "[Archivo multimedia]"
-  );
+// Media type mapping for WaSender message objects
+const MEDIA_KEYS: Record<string, string> = {
+    imageMessage: 'image',
+    videoMessage: 'video',
+    audioMessage: 'audio',
+    documentMessage: 'document',
+    stickerMessage: 'image',
+};
+
+/**
+ * Detects media in a WaSender message object.
+ * Returns { type, mediaInfo } or null if no media found.
+ */
+function findMedia(messageObj: any): { type: string; mediaInfo: any } | null {
+    if (!messageObj) return null;
+    for (const [key, type] of Object.entries(MEDIA_KEYS)) {
+        if (messageObj[key]) {
+            return { type, mediaInfo: messageObj[key] };
+        }
+    }
+    return null;
+}
+
+/**
+ * Calls WaSender's decrypt-media endpoint to get a temporary public URL (1 hour).
+ * Must send the original message structure as documented by WaSender.
+ */
+async function decryptMedia(
+    apiKey: string,
+    messageKey: any,
+    rawMessage: any,
+    baseUrl: string
+): Promise<string | null> {
+    try {
+        const base = baseUrl.replace(/\/$/, '') || 'https://wasenderapi.com';
+        
+        // WaSender expects the full original message structure
+        const payload = {
+            data: {
+                messages: {
+                    key: { id: messageKey.id },
+                    message: rawMessage
+                }
+            }
+        };
+
+        console.log('decrypt-media request:', JSON.stringify(payload).substring(0, 500));
+
+        const res = await fetch(`${base}/api/decrypt-media`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+                'Accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const responseText = await res.text();
+        console.log('decrypt-media response:', res.status, responseText.substring(0, 500));
+
+        if (!res.ok) {
+            console.error('decrypt-media failed:', res.status, responseText);
+            return null;
+        }
+
+        const data = JSON.parse(responseText);
+        return data.publicUrl || data.data?.publicUrl || null;
+    } catch (err) {
+        console.error('decrypt-media error:', err);
+        return null;
+    }
 }
 
 serve(async (req) => {
-  // Permitir OPTIONS para CORS
-  if (req.method === "OPTIONS") {
-    return new Response(null, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-    });
-  }
-
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  let payload: any;
-  try {
-    payload = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  console.log("WaSender webhook received:", JSON.stringify(payload, null, 2));
-
-  // Solo procesar mensajes recibidos (no los que enviamos nosotros)
-  const event = payload.event || payload.type;
-  const data = payload.data || payload;
-
-  // Ignorar mensajes enviados por nosotros (fromMe)
-  const fromMe = data?.key?.fromMe || data?.fromMe || false;
-  if (fromMe) {
-    return new Response(JSON.stringify({ ok: true, skipped: "fromMe" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Extraer datos del mensaje
-  const remoteJid =
-    data?.key?.remoteJid ||
-    data?.from ||
-    data?.sender ||
-    data?.remoteJid ||
-    "";
-
-  const phone = cleanPhone(remoteJid);
-  const contactName = data?.pushName || data?.notifyName || phone;
-  const messageText = extractMessageText(data);
-  const wasenderId = data?.key?.id || data?.id || null;
-
-  if (!phone || phone === "+") {
-    console.log("No phone number found, skipping");
-    return new Response(JSON.stringify({ ok: true, skipped: "no_phone" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Buscar tenant por número de teléfono de WaSender (wasender_phone)
-  // El número del taller recibe el mensaje, necesitamos saber qué tenant es
-  // Buscamos en la tabla tenants el campo wasender_phone
-  const toJid = data?.key?.remoteJid === undefined 
-    ? data?.to || data?.receiver || ""
-    : null;
-  
-  // Intentar obtener el tenant_id desde query param o header
-  // WaSender puede enviar el sessionId que coincide con el wasender_phone del tenant
-  const sessionId = payload?.sessionId || payload?.session || "";
-  
-  let tenantId: string | null = null;
-  
-  // Buscar tenant por sessionId (que es el wasender_phone configurado)
-  if (sessionId) {
-    const { data: tenantData } = await supabase
-      .from("tenants")
-      .select("id")
-      .or(`wasender_phone.eq.${sessionId},wasender_phone.eq.+${sessionId}`)
-      .limit(1)
-      .single();
-    
-    if (tenantData) tenantId = tenantData.id;
-  }
-  
-  // Si no encontramos por session, buscar el primer tenant con API configurada
-  if (!tenantId) {
-    const { data: tenantData } = await supabase
-      .from("tenants")
-      .select("id")
-      .not("wasender_api_key", "is", null)
-      .limit(1)
-      .single();
-    
-    if (tenantData) tenantId = tenantData.id;
-  }
-
-  if (!tenantId) {
-    console.log("No tenant found for this webhook");
-    return new Response(JSON.stringify({ ok: true, skipped: "no_tenant" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // 1. Upsert conversación (crear o actualizar)
-  const { data: conv, error: convError } = await supabase
-    .from("wa_conversations")
-    .upsert(
-      {
-        tenant_id: tenantId,
-        phone,
-        name: contactName,
-        last_message: messageText,
-        last_message_at: new Date().toISOString(),
-        unread_count: 1,
-        status: "activa",
-      },
-      {
-        onConflict: "tenant_id,phone",
-        ignoreDuplicates: false,
-      }
-    )
-    .select("id")
-    .single();
-
-  if (convError || !conv) {
-    console.error("Error upserting conversation:", convError);
-    return new Response(
-      JSON.stringify({ error: "DB error", detail: convError?.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  // Incrementar unread_count
-  await supabase.rpc("increment_unread", { conv_id: conv.id });
-
-  // 2. Insertar mensaje
-  if (messageText) {
-    const { error: msgError } = await supabase.from("wa_messages").insert({
-      conversation_id: conv.id,
-      tenant_id: tenantId,
-      role: "user",
-      content: messageText,
-      message_type: "text",
-      status: "delivered",
-      wasender_id: wasenderId,
-    });
-
-    if (msgError) {
-      console.error("Error inserting message:", msgError);
+    // Handle CORS
+    if (req.method === 'OPTIONS') {
+        return new Response('ok', { headers: corsHeaders })
     }
-  }
 
-  console.log(
-    `✅ Message saved: ${phone} → conv ${conv.id}, text: "${messageText}"`
-  );
+    const url = new URL(req.url)
 
-  return new Response(JSON.stringify({ ok: true, convId: conv.id }), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
-});
+    // Webhook Verification (GET)
+    if (req.method === 'GET') {
+        const mode = url.searchParams.get('hub.mode')
+        const token = url.searchParams.get('hub.verify_token')
+        const challenge = url.searchParams.get('hub.challenge')
+
+        if (mode && token) {
+            if (mode === 'subscribe') {
+                console.log('Webhook verified successfully')
+                return new Response(challenge, { status: 200 })
+            }
+        }
+        return new Response('Verification failed', { status: 403 })
+    }
+
+    // Handle Incoming Events (POST)
+    if (req.method === 'POST') {
+        try {
+            const body = await req.json()
+            const supabase = createClient(
+                Deno.env.get('SUPABASE_URL') ?? '',
+                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+            )
+
+            // Detect WASender API Event
+            const isWasender = body.event && body.data;
+            
+            if (isWasender) {
+                console.log('WaSender event received:', body.event);
+                
+                if (body.event === 'messages.received') {
+                    const rawMessages = body.data?.messages;
+                    if (!rawMessages) return new Response('No message data', { status: 200 });
+
+                    // Handle array or single message object format
+                    const messageData = Array.isArray(rawMessages) ? rawMessages[0] : rawMessages;
+                    if (!messageData) return new Response('No message data', { status: 200 });
+
+                    const key = messageData.key;
+                    if (key?.fromMe) {
+                        return new Response('Ignore outgoing message', { status: 200 });
+                    }
+
+                    // Extract cleaned telephone number and ID
+                    const from = key?.cleanedSenderPn || key?.remoteJid?.split('@')[0];
+                    const wamid = key?.id;
+                    const pushName = messageData.pushName || body.data?.pushName || from;
+
+                    // Resolve tenant ID from query parameter
+                    const tenantId = url.searchParams.get('tenant_id');
+                    if (!tenantId) {
+                        console.error('No tenant_id provided in webhook URL');
+                        return new Response('No tenant_id provided', { status: 200 });
+                    }
+
+                    // --- DEDUPLICATION: skip if wamid already exists ---
+                    if (wamid) {
+                        const { data: existing, error: existErr } = await supabase
+                            .from('wa_messages')
+                            .select('id')
+                            .eq('wasender_id', wamid)
+                            .limit(1);
+                        if (existing && existing.length > 0) {
+                            console.log('Duplicate wamid, skipping:', wamid);
+                            return new Response('Duplicate message', { status: 200 });
+                        }
+                    }
+
+                    // --- MEDIA DETECTION ---
+                    const rawMessageObj = messageData.message || {};
+                    const media = findMedia(rawMessageObj);
+                    let content: string;
+
+                    if (media) {
+                        // Try to get the tenant's WaSender API key for decrypt-media
+                        let decryptedUrl: string | null = null;
+                        try {
+                            const { data: tenantData } = await supabase
+                                .from('tenants')
+                                .select('config')
+                                .eq('id', tenantId)
+                                .single();
+
+                            const waConfig = tenantData?.config?.whatsapp;
+                            if (waConfig?.api_key) {
+                                decryptedUrl = await decryptMedia(
+                                    waConfig.api_key,
+                                    key,
+                                    rawMessageObj,
+                                    waConfig.base_url || 'https://wasenderapi.com'
+                                );
+                            }
+                        } catch (e) {
+                            console.error('Error fetching tenant config for media decrypt:', e);
+                        }
+
+                        const caption = messageData.messageBody || media.mediaInfo.caption || '';
+
+                        if (decryptedUrl) {
+                            // Store as [type] url|filename format for UI rendering
+                            let filenameSuffix = '';
+                            if (media.type === 'document') {
+                                const filename = media.mediaInfo.title || media.mediaInfo.filename || media.mediaInfo.fileName || 'document.pdf';
+                                filenameSuffix = `|${filename}`;
+                            } else if (media.type === 'image') {
+                                const filename = media.mediaInfo.title || media.mediaInfo.filename || media.mediaInfo.fileName || 'imagen.png';
+                                filenameSuffix = `|${filename}`;
+                            }
+                            content = `[${media.type}] ${decryptedUrl}${filenameSuffix}`;
+                            if (caption) content += `\n${caption}`;
+                        } else {
+                            // Fallback: couldn't decrypt, store type indicator
+                            content = caption || `📎 ${media.type === 'image' ? '📷 Imagen' : media.type === 'video' ? '🎥 Video' : media.type === 'audio' ? '🎤 Audio' : '📄 Documento'} recibido`;
+                        }
+                    } else {
+                        // Plain text message
+                        content = messageData.messageBody || messageData.message?.conversation || '(mensaje vacío)';
+                    }
+
+                    // 1. Resolve or create Conversation
+                    const { data: convs, error: selectErr } = await supabase
+                        .from('wa_conversations')
+                        .select('id, unread_count')
+                        .eq('tenant_id', tenantId)
+                        .eq('phone', from)
+                        .order('last_message_at', { ascending: false });
+
+                    if (selectErr) {
+                        console.error('Error selecting conversation:', selectErr);
+                    }
+
+                    let conversation = convs && convs.length > 0 ? convs[0] : null;
+
+                    // Short display text for conversation list (no URL)
+                    const lastMsgPreview = media 
+                        ? `📎 ${media.type === 'image' ? '📷 Imagen' : media.type === 'video' ? '🎥 Video' : media.type === 'audio' ? '🎤 Audio' : '📄 Documento'}`
+                        : content.substring(0, 100);
+
+                    if (!conversation) {
+                        const { data: newConv, error: insertErr } = await supabase
+                            .from('wa_conversations')
+                            .insert({
+                                tenant_id: tenantId,
+                                name: pushName,
+                                phone: from,
+                                status: 'activa',
+                                agent: 'humano',
+                                unread_count: 0,
+                                last_message: lastMsgPreview,
+                                last_message_at: new Date().toISOString()
+                            })
+                            .select()
+                            .single()
+                        
+                        if (insertErr) {
+                            console.error('Error inserting conversation:', insertErr);
+                            throw insertErr;
+                        }
+                        conversation = newConv;
+                    }
+
+                    if (!conversation) throw new Error('Failed to resolve conversation')
+
+                    // 2. Insert Message into database
+                    const { error: msgInsertErr } = await supabase.from('wa_messages').insert({
+                        tenant_id: tenantId,
+                        conversation_id: conversation.id,
+                        role: 'user',
+                        content: content,
+                        wasender_id: wamid,
+                        message_type: media ? media.type : 'text',
+                        status: 'delivered'
+                    })
+
+                    if (msgInsertErr) {
+                        console.error('Error inserting message:', msgInsertErr);
+                        throw msgInsertErr;
+                    }
+
+                    // 3. Update Conversation details
+                    const { error: convUpdateErr } = await supabase.from('wa_conversations').update({
+                        last_message: lastMsgPreview,
+                        last_message_at: new Date().toISOString(),
+                        unread_count: (conversation.unread_count || 0) + 1,
+                        status: 'activa'
+                    }).eq('id', conversation.id)
+
+                    if (convUpdateErr) {
+                        console.error('Error updating conversation:', convUpdateErr);
+                        throw convUpdateErr;
+                    }
+                }
+                
+                return new Response('ok', { status: 200 })
+            }
+
+            return new Response('Event ignored', { status: 200 })
+        } catch (error: any) {
+            console.error('Webhook processing error:', error)
+            return new Response(JSON.stringify({ error: error.message }), { 
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200 
+            })
+        }
+    }
+
+    return new Response('Not allowed', { status: 405 })
+})

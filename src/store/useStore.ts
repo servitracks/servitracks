@@ -393,8 +393,9 @@ export const useStore = create<AppState>()(
           const newItems = state.maintenanceItems.map((item) => {
             const lastDate = new Date(item.lastServiceDate);
             const daysPassed = Math.floor((now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-            const currentKm = currentKmMap[item.vehicleId] || item.lastServiceKm;
-            const kmPassed = currentKm - item.lastServiceKm;
+            const vehicle = state.vehicles.find(v => v.id === item.vehicleId);
+            const currentKm = currentKmMap[item.vehicleId] ?? vehicle?.km ?? item.lastServiceKm;
+            const kmPassed = Math.max(0, currentKm - item.lastServiceKm);
 
             const timeUsage = (daysPassed / item.lifespanDays) * 100;
             const kmUsage = (kmPassed / item.lifespanKm) * 100;
@@ -457,26 +458,41 @@ export const useStore = create<AppState>()(
           others:       { km: 10000, days: 180,  label: 'Mantenimiento General' },
         };
 
+        const getMaintenanceCategoryFromText = (category?: string): string => {
+          const cat = category?.toLowerCase() || '';
+          if (cat.includes('motor')) return 'engine';
+          if (cat.includes('freno')) return 'brakes';
+          if (cat.includes('neumatic') || cat.includes('neumátic') || cat.includes('llanta')) return 'tires';
+          if (cat.includes('electr') || cat.includes('eléctr') || cat.includes('bater')) return 'battery';
+          if (cat.includes('suspens')) return 'suspension';
+          if (cat.includes('transmi')) return 'transmission';
+          if (cat.includes('enfria') || cat.includes('cool')) return 'cooling';
+          if (cat.includes('aire') || cat.includes('a/c') || cat.includes('ac')) return 'ac';
+          if (cat.includes('direcc') || cat.includes('steer')) return 'steering';
+          return 'others';
+        };
+
         // Estructura para agrupar: { category -> { lifespanKm, lifespanDays, label } }
         const categoriesToUpdate = new Map<string, { lifespanKm: number; lifespanDays: number; label: string }>();
 
         // 1. Leer datos de los SERVICIOS aplicados
         const appliedServices = state.services.filter(s => appliedServiceIds.includes(s.id));
         appliedServices.forEach(service => {
-          if (service.maintenanceCategory) {
-            const existing = categoriesToUpdate.get(service.maintenanceCategory);
-            const fallback = FALLBACK_LIFESPANS[service.maintenanceCategory] || FALLBACK_LIFESPANS.others;
+          const categoryKey = service.maintenanceCategory || getMaintenanceCategoryFromText(service.category);
+          if (categoryKey) {
+            const existing = categoriesToUpdate.get(categoryKey);
+            const fallback = FALLBACK_LIFESPANS[categoryKey] || FALLBACK_LIFESPANS.others;
             // Si hay múltiples servicios de la misma categoría, tomamos el de mayor duración
             const newKm = service.lifespanKm ?? fallback.km;
             const newDays = service.lifespanDays ?? fallback.days;
             if (!existing) {
-              categoriesToUpdate.set(service.maintenanceCategory, {
+              categoriesToUpdate.set(categoryKey, {
                 lifespanKm: newKm,
                 lifespanDays: newDays,
                 label: service.name,
               });
             } else {
-              categoriesToUpdate.set(service.maintenanceCategory, {
+              categoriesToUpdate.set(categoryKey, {
                 lifespanKm: Math.max(existing.lifespanKm, newKm),
                 lifespanDays: Math.max(existing.lifespanDays, newDays),
                 label: existing.label.includes(service.name) ? existing.label : `${existing.label}, ${service.name}`,
@@ -488,19 +504,20 @@ export const useStore = create<AppState>()(
         // 2. Leer datos de los PRODUCTOS aplicados (ej. batería, pastillas)
         const appliedProducts = state.products.filter(p => appliedProductIds.includes(p.id));
         appliedProducts.forEach(product => {
-          if (product.maintenanceCategory) {
-            const existing = categoriesToUpdate.get(product.maintenanceCategory);
-            const fallback = FALLBACK_LIFESPANS[product.maintenanceCategory] || FALLBACK_LIFESPANS.others;
+          const categoryKey = product.maintenanceCategory || getMaintenanceCategoryFromText(product.category);
+          if (categoryKey) {
+            const existing = categoriesToUpdate.get(categoryKey);
+            const fallback = FALLBACK_LIFESPANS[categoryKey] || FALLBACK_LIFESPANS.others;
             const newKm = product.lifespanKm ?? fallback.km;
             const newDays = product.lifespanDays ?? fallback.days;
             if (!existing) {
-              categoriesToUpdate.set(product.maintenanceCategory, {
+              categoriesToUpdate.set(categoryKey, {
                 lifespanKm: newKm,
                 lifespanDays: newDays,
                 label: product.name,
               });
             } else {
-              categoriesToUpdate.set(product.maintenanceCategory, {
+              categoriesToUpdate.set(categoryKey, {
                 lifespanKm: Math.max(existing.lifespanKm, newKm),
                 lifespanDays: Math.max(existing.lifespanDays, newDays),
                 label: existing.label.includes(product.name) ? existing.label : `${existing.label}, ${product.name}`,
@@ -509,7 +526,6 @@ export const useStore = create<AppState>()(
           }
         });
 
-        // Si no hay nada que procesar, salir
         if (categoriesToUpdate.size === 0) return;
 
         const now = new Date().toISOString();
@@ -549,6 +565,42 @@ export const useStore = create<AppState>()(
                 : m
             );
           } else {
+            // No existe un item real en la base de datos para esta categoría
+            // Busquemos si existe un servicio anterior sintético (orden de trabajo entregada anteriormente)
+            const vehicleOrders = state.orders.filter(
+              o => o.vehicleId === vehicleId && (o.status === 'delivered' || o.status === 'invoiced')
+            );
+            const matchingOrders = vehicleOrders.filter(o => {
+              const oServices = (o.serviceIds || [])
+                .map((sid: string) => state.services.find(s => s.id === sid))
+                .filter((s): s is NonNullable<typeof s> => !!s);
+              return oServices.some(s => (s.maintenanceCategory || getMaintenanceCategoryFromText(s.category)) === category);
+            }).sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+
+            // Si hay más de una orden con esta categoría, la segunda es la anterior (ya que la primera es la actual)
+            if (matchingOrders.length > 1) {
+              const prevOrder = matchingOrders[1];
+              const prevServices = (prevOrder.serviceIds || [])
+                .map((sid: string) => state.services.find(s => s.id === sid))
+                .filter((s): s is NonNullable<typeof s> => !!s);
+              
+              const prevItemNames = prevServices
+                .filter(s => (s.maintenanceCategory || getMaintenanceCategoryFromText(s.category)) === category)
+                .map(s => s.name)
+                .join(', ');
+
+              newHistoryItems.push({
+                id: Math.random().toString(36).substr(2, 9),
+                vehicleId,
+                tenantId,
+                name: prevItemNames || 'Servicio anterior',
+                serviceDate: prevOrder.updatedAt || prevOrder.createdAt,
+                serviceKm: prevOrder.km || 0,
+                completedAt: now,
+                notes: `Registrado en historial desde orden anterior #${prevOrder.id.slice(-6).toUpperCase()} al iniciar ciclo real.`,
+              });
+            }
+
             // Crear nuevo registro de mantenimiento desde cero
             newMaintenanceItems.push({
               id: Math.random().toString(36).substr(2, 9),

@@ -666,6 +666,32 @@ export default function SettingsPage() {
                 <span className="text-sm text-emerald-700 font-medium">API configurada</span>
               </div>
             )}
+
+            <div className="pt-4 mt-4 border-t border-neutral-100 space-y-3">
+              <div>
+                <Label className="text-sm font-bold text-neutral-900">URL del Webhook (Recepción de Mensajes)</Label>
+                <p className="text-xs text-neutral-500 mt-1">
+                  Copia esta URL y pégala en la configuración de Webhook dentro de tu cuenta de WaSender para poder recibir los mensajes de tus clientes en ServiTracks.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input 
+                  readOnly 
+                  className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
+                  value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`} 
+                />
+                <Button 
+                  variant="outline" 
+                  className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 hover:bg-neutral-50"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`);
+                    toast.success("URL copiada al portapapeles");
+                  }}
+                >
+                  Copiar
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

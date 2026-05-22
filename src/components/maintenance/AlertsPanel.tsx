@@ -26,6 +26,7 @@ export function AlertsPanel({ onClose }: AlertsPanelProps) {
   const pendingAlerts = maintenanceAlerts.filter(a => a.status === 'pending');
   const criticalAlerts = pendingAlerts.filter(a => a.type === 'critical');
   const preventiveAlerts = pendingAlerts.filter(a => a.type === 'preventive');
+  const tenants = useStore((s) => s.tenants);
 
   const handleVer = (alert: any) => {
     const tenant = params.tenant || 'autocheck';
@@ -40,13 +41,17 @@ export function AlertsPanel({ onClose }: AlertsPanelProps) {
 
     if (!customer || !vehicle || !item) return;
 
-    const text = `Hola ${customer.name}, te saludo de ServiTracks. Tu vehículo ${vehicle.brand} ${vehicle.model} (${vehicle.plate}) tiene el servicio "${item.name}" al ${alert.percentage}%. Te recomendamos agendar una cita pronto. ¡Gracias!`;
+    const tenantSlug = (params.tenant as string) || '';
+    const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
+    const tenantName = currentTenant ? currentTenant.name : 'ServiTracks';
+
+    const text = `Hola ${customer.name}, te saludo de ${tenantName}. Tu vehículo ${vehicle.brand} ${vehicle.model} (${vehicle.plate}) tiene el servicio "${item.name}" al ${alert.percentage}%. Te recomendamos agendar una cita pronto. ¡Gracias!`;
     
     window.open(`https://wa.me/${customer.phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(text)}`, '_blank');
 
     addWhatsAppLog({
       id: Math.random().toString(36).substr(2, 9),
-      tenantId: '1',
+      tenantId: currentTenant?.id || '1',
       customerId: customer.id,
       customerName: customer.name,
       phone: customer.phone,

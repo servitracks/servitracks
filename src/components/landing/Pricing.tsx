@@ -6,101 +6,75 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useStore } from "@/store/useStore";
+import { getPlans } from "@/lib/storage";
+import type { Plan } from "@/store/types";
 
-const tiers = [
-  {
-    name: "Básico",
-    id: "tier-basic",
-    price: "RD$ 2,500",
-    period: "/mes",
-    description: "Ideal para talleres pequeños que están empezando a digitalizarse.",
+function planToTier(plan: Plan) {
+  return {
+    id: plan.id,
+    name: plan.nombre,
+    price: plan.precio_mensual === 0 ? "Personalizado" : `RD$ ${plan.precio_mensual.toLocaleString("es-DO")}`,
+    period: plan.precio_mensual === 0 ? "" : "/mes",
+    description: `Plan ideal para tu taller con hasta ${plan.limite_empleados} usuarios y ${plan.limite_ordenes_mes ? plan.limite_ordenes_mes : "ilimitadas"} órdenes.`,
     features: [
-      "Hasta 2 usuarios",
-      "Inventario hasta 500 productos",
-      "POS básico con ITBIS",
-      "Facturación con NCF",
+      plan.limite_empleados ? `Hasta ${plan.limite_empleados} técnicos/usuarios` : "Usuarios ilimitados",
+      plan.limite_ordenes_mes ? `Hasta ${plan.limite_ordenes_mes} órdenes de trabajo/mes` : "Órdenes de trabajo ilimitadas",
+      plan.limite_whatsapp_mes ? `Hasta ${plan.limite_whatsapp_mes.toLocaleString()} mensajes WhatsApp/mes` : "Mensajes WhatsApp ilimitados",
+      plan.precio_sucursal_adicional
+        ? `Sucursales extra a RD$ ${plan.precio_sucursal_adicional.toLocaleString("es-DO")}/mes`
+        : "Sucursales extra sin costo",
+      plan.modulos.facturacion_fiscal ? "Facturación Electrónica (NCF)" : "POS básico y facturación",
+      plan.modulos.whatsapp ? "WhatsApp Automation" : null,
+      plan.modulos.multisucursal ? "Gestión Multi-sucursal" : null,
+      plan.modulos.logistica ? "Logística y Repartidores" : null,
       "Gestión de clientes y vehículos",
-      "Soporte vía email",
-    ],
-    cta: "Empezar gratis",
-    featured: false,
-    badge: "",
-  },
-  {
-    name: "Pro",
-    id: "tier-pro",
-    price: "RD$ 4,900",
-    period: "/mes",
-    description: "El plan completo para talleres en crecimiento con alta demanda operativa.",
-    features: [
-      "Usuarios ilimitados",
-      "Inventario ilimitado",
-      "POS avanzado + impresión térmica",
-      "WhatsApp Automation (WaSender)",
-      "Órdenes de trabajo completas",
-      "Reportes financieros avanzados",
-      "Dashboard con métricas en tiempo real",
-      "Soporte prioritario 24/7",
-    ],
-    cta: "Empezar con Pro",
-    featured: true,
-    badge: "Más popular",
-  },
-  {
-    name: "Enterprise",
-    id: "tier-enterprise",
-    price: "Personalizado",
-    period: "",
-    description: "Para redes de talleres, concesionarios y franquicias a gran escala.",
-    features: [
-      "Todo lo de Pro",
-      "Multi-sucursal ilimitada",
-      "API de integración",
-      "Branding personalizado",
-      "Account Manager dedicado",
-      "SLA personalizado",
-      "Onboarding presencial",
-    ],
-    cta: "Contactar ventas",
-    featured: false,
-    badge: "",
-  },
-];
+      plan.destacado ? "Soporte prioritario 24/7" : "Soporte vía email",
+    ].filter(Boolean) as string[],
+    cta: plan.destacado ? "Empezar con Plan " + plan.nombre : "Empezar gratis",
+    featured: !!plan.destacado,
+    badge: plan.destacado ? "Más popular" : "",
+  };
+}
 
 export function Pricing() {
-  const [mounted, setMounted] = useState(false);
   const storePlans = useStore((s) => s.plans);
 
+  // Start with whatever the store already has (persisted in localStorage)
+  const [displayPlans, setDisplayPlans] = useState<ReturnType<typeof planToTier>[]>(
+    () => (storePlans && storePlans.length > 0) ? storePlans.map(planToTier) : []
+  );
+
+  // Fetch fresh plans from Supabase on mount and sync to store + local state
   useEffect(() => {
-    setMounted(true);
+    let cancelled = false;
+    async function loadPlans() {
+      try {
+        const plans = await getPlans();
+        if (cancelled || !plans || plans.length === 0) return;
+
+        // Sync to Zustand store so other components (register, settings) benefit
+        const store = useStore.getState();
+        plans.forEach((p) => {
+          const exists = store.plans.some((sp) => sp.id === p.id);
+          if (exists) store.updatePlan?.(p.id, p);
+          else store.addPlan?.(p);
+        });
+
+        setDisplayPlans(plans.map(planToTier));
+      } catch (err) {
+        console.error("[Pricing] Error loading plans:", err);
+      }
+    }
+    loadPlans();
+    return () => { cancelled = true; };
   }, []);
 
-  const displayPlans = mounted && storePlans && storePlans.length > 0 
-    ? storePlans.map((plan) => ({
-        id: plan.id,
-        name: plan.nombre,
-        price: plan.precio_mensual === 0 ? "Personalizado" : `RD$ ${plan.precio_mensual.toLocaleString("es-DO")}`,
-        period: plan.precio_mensual === 0 ? "" : "/mes",
-        description: `Plan ideal para tu taller con hasta ${plan.limite_empleados} usuarios y ${plan.limite_ordenes_mes ? plan.limite_ordenes_mes : "ilimitadas"} órdenes.`,
-        features: [
-          plan.limite_empleados ? `Hasta ${plan.limite_empleados} técnicos/usuarios` : "Usuarios ilimitados",
-          plan.limite_ordenes_mes ? `Hasta ${plan.limite_ordenes_mes} órdenes de trabajo/mes` : "Órdenes de trabajo ilimitadas",
-          plan.limite_whatsapp_mes ? `Hasta ${plan.limite_whatsapp_mes.toLocaleString()} mensajes WhatsApp/mes` : "Mensajes WhatsApp ilimitados",
-          plan.precio_sucursal_adicional
-            ? `Sucursales extra a RD$ ${plan.precio_sucursal_adicional.toLocaleString("es-DO")}/mes`
-            : "Sucursales extra sin costo",
-          plan.modulos.facturacion_fiscal ? "Facturación Electrónica (NCF)" : "POS básico y facturación",
-          plan.modulos.whatsapp ? "WhatsApp Automation" : null,
-          plan.modulos.multisucursal ? "Gestión Multi-sucursal" : null,
-          plan.modulos.logistica ? "Logística y Repartidores" : null,
-          "Gestión de clientes y vehículos",
-          plan.destacado ? "Soporte prioritario 24/7" : "Soporte vía email",
-        ].filter(Boolean) as string[],
-        cta: plan.destacado ? "Empezar con " + plan.nombre : "Empezar gratis",
-        featured: !!plan.destacado,
-        badge: plan.destacado ? "Más popular" : "",
-      }))
-    : tiers;
+  // Reactive fallback: if store gets updated by another source, reflect it
+  useEffect(() => {
+    if (displayPlans.length === 0 && storePlans && storePlans.length > 0) {
+      setDisplayPlans(storePlans.map(planToTier));
+    }
+  }, [storePlans, displayPlans.length]);
 
   return (
     <section id="pricing" className="py-24 sm:py-32 bg-white">

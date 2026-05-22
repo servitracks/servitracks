@@ -72,24 +72,11 @@ export default function Conversations() {
 
   // ── Resolve real Supabase tenant UUID by slug (only once) ────────────
   useEffect(() => {
-    const slug = tenant || currentTenant?.slug;
-    if (!slug || resolvedRef.current) return;
-    resolvedRef.current = true;
-    supabaseAdmin
-      .from("tenants")
-      .select("id")
-      .eq("slug", slug)
-      .single()
-      .then(({ data, error }) => {
-        if (error || !data) {
-          console.warn("[Conversaciones] tenant not found:", slug);
-          if (currentTenant?.id) setSupabaseTenantId(currentTenant.id);
-          return;
-        }
-        console.log("[Conversaciones] tenant ID resolved:", data.id);
-        setSupabaseTenantId(data.id);
-      });
-  }, [tenant]); // only depend on tenant slug from URL
+    if (currentTenant?.id && !resolvedRef.current) {
+      resolvedRef.current = true;
+      setSupabaseTenantId(currentTenant.id);
+    }
+  }, [currentTenant?.id]);
 
   // ── Load conversations + polling every 30s (fallback si webhook falla) ──
   useEffect(() => {
@@ -101,7 +88,7 @@ export default function Conversations() {
 
   async function loadConversations() {
     setLoadingConvs(true);
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("wa_conversations")
       .select("*")
       .eq("tenant_id", supabaseTenantId!)
@@ -111,11 +98,21 @@ export default function Conversations() {
     setLoadingConvs(false);
   }
 
-  // ── Real-time: nuevas conversaciones (supabaseAdmin bypasea RLS) ───
+  // Usamos una referencia para el ID activo, así el WebSocket siempre sabe cuál es la conversación actual
+  // sin necesidad de desconectarse y reconectarse (lo que provocaba los CLOSED/SUBSCRIBED).
+  const activeConvRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeConvRef.current = selectedConvId;
+  }, [selectedConvId]);
+
+  // ── Real-time ÚNICO: El secreto de la latencia ~100ms ───
   useEffect(() => {
     if (!supabaseTenantId) return;
-    const ch = supabaseAdmin
-      .channel(`wa_conv_${supabaseTenantId}`)
+
+    // Se crea un solo canal por Tenant que escucha ambas tablas simultáneamente
+    const ch = supabase
+      .channel(`chat_tenant:${supabaseTenantId}`)
+      // Escucha cambios en conversaciones (para refrescar la barra lateral)
       .on("postgres_changes", {
         event: "*",
         schema: "public",
@@ -124,19 +121,54 @@ export default function Conversations() {
       }, (payload) => {
         console.log("[RT conv]", payload.eventType, payload.new);
         if (payload.eventType === "INSERT") {
-          setConversations((prev) => [payload.new as WaConversation, ...prev]);
-          toast.info(`💬 Nuevo mensaje de ${(payload.new as WaConversation).name || (payload.new as WaConversation).phone}`);
+          toast.info(`💬 Nuevo chat de ${(payload.new as WaConversation).name || (payload.new as WaConversation).phone}`);
+        }
+        loadConversations(); // Refresca la lista completa (Paso 2 del diagrama)
+      })
+      // Escucha la llegada de nuevos mensajes y actualizaciones (para agregar al chat, sonar o actualizar estado)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_messages",
+        filter: `tenant_id=eq.${supabaseTenantId}`,
+      }, (payload) => {
+        if (payload.eventType === "INSERT") {
+          const newMsg = payload.new as WaMessage;
+          console.log("[RT msg INSERT]", newMsg);
+          
+          // Reproducir sonido para cualquier mensaje entrante del usuario
+          if (newMsg.role === "user") {
+            const audio = new Audio("/nuevo_mensaje.mp3.mpeg");
+            audio.play().catch((err) => console.log("Audio play blocked by browser policy:", err));
+          }
+
+          // Si es la conversación activa -> agrega el mensaje a la pantalla actual
+          if (newMsg.conversation_id === activeConvRef.current) {
+            setMessages((prev) => {
+              if (prev.find((m) => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+            setTimeout(() => {
+              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, 50);
+            // Marcar como leído
+            supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", activeConvRef.current);
+          }
         } else if (payload.eventType === "UPDATE") {
-          setConversations((prev) =>
-            prev.map((c) => c.id === payload.new.id ? payload.new as WaConversation : c)
-              .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
-          );
+          const updatedMsg = payload.new as WaMessage;
+          console.log("[RT msg UPDATE]", updatedMsg);
+          
+          // Si es de la conversación activa -> actualiza el estado del mensaje (por ejemplo, checkmarks)
+          if (updatedMsg.conversation_id === activeConvRef.current) {
+            setMessages((prev) => prev.map((m) => m.id === updatedMsg.id ? updatedMsg : m));
+          }
         }
       })
       .subscribe((status, err) => {
-        console.log("[RT conversations]", status, err || "");
+        console.log("[RT Chat System]", status, err || "");
       });
-    return () => { supabaseAdmin.removeChannel(ch); };
+
+    return () => { supabase.removeChannel(ch); };
   }, [supabaseTenantId]);
 
   // ── Select first conv or from location state ────────────────────────
@@ -148,16 +180,9 @@ export default function Conversations() {
     }
   }, [conversations]);
 
-  // ── Load messages for selected conversation ─────────────────────────
-  useEffect(() => {
-    if (!selectedConvId) { setMessages([]); return; }
-    // Mark as read
-    supabaseAdmin.from("wa_conversations").update({ unread_count: 0 }).eq("id", selectedConvId);
-  }, [selectedConvId]);
-
   async function loadMessages(convId: string) {
     setLoadingMsgs(true);
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from("wa_messages")
       .select("*")
       .eq("conversation_id", convId)
@@ -166,36 +191,14 @@ export default function Conversations() {
     setLoadingMsgs(false);
   }
 
-  // ── Real-time: mensajes de la conversación activa (supabaseAdmin bypasea RLS) ──
+  // ── Load messages for selected conversation ─────────────────────────
   useEffect(() => {
-    if (!selectedConvId) return;
+    if (!selectedConvId) { setMessages([]); return; }
+    // Mark as read immediately on select
+    supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", selectedConvId);
+    
     // Reload messages immediately on selection
     loadMessages(selectedConvId);
-    // Polling each 8s as fallback
-    const poll = setInterval(() => loadMessages(selectedConvId), 8_000);
-    // Realtime subscription
-    const ch = supabaseAdmin
-      .channel(`wa_msgs_${selectedConvId}`)
-      .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "wa_messages",
-        filter: `conversation_id=eq.${selectedConvId}`,
-      }, (payload) => {
-        console.log("[RT msg]", payload.new);
-        setMessages((prev) => {
-          if (prev.find((m) => m.id === payload.new.id)) return prev;
-          return [...prev, payload.new as WaMessage];
-        });
-        setTimeout(() => {
-          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }, 50);
-      })
-      .subscribe((status, err) => console.log("[RT messages]", status, err || ""));
-    return () => {
-      clearInterval(poll);
-      supabaseAdmin.removeChannel(ch);
-    };
   }, [selectedConvId]);
 
   // ── Scroll on new messages ──────────────────────────────────────────
@@ -215,7 +218,7 @@ export default function Conversations() {
     setReplyingTo(null);
     setSending(true);
 
-    const { data: msg, error: msgErr } = await supabaseAdmin.from("wa_messages").insert({
+    const { data: msg, error: msgErr } = await supabase.from("wa_messages").insert({
       conversation_id: selectedConvId,
       tenant_id: supabaseTenantId,
       role: "assistant",
@@ -227,7 +230,7 @@ export default function Conversations() {
     if (!msgErr && msg) {
       setMessages((prev) => [...prev, msg]);
       // Update conversation last message
-      await supabaseAdmin.from("wa_conversations").update({
+      await supabase.from("wa_conversations").update({
         last_message: text,
         last_message_at: new Date().toISOString(),
       }).eq("id", selectedConvId);
@@ -236,29 +239,54 @@ export default function Conversations() {
     // 2. Send via WaSender API
     if (currentTenant.wasenderApiKey) {
       try {
-        const res = await fetch("/api/whatsapp", {
+        const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wasender-proxy`;
+        
+        // Exact format required by wasenderapi.com/api/send-message
+        const payload = type === "text" 
+          ? { 
+              to: conv.phone, 
+              text: text
+            }
+          : { 
+              to: conv.phone, 
+              text: text || "[Media]", 
+              imageUrl: mediaContent // WaSenderAPI uses imageUrl for images
+            };
+
+        const res = await fetch(edgeFunctionUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${currentTenant.wasenderApiKey}`,
+            "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
           },
-          body: JSON.stringify({ to: conv.phone.replace("+", ""), text }),
+          body: JSON.stringify({
+            action: "send",
+            api_key: currentTenant.wasenderApiKey,
+            base_url: "https://wasenderapi.com", 
+            ...payload
+          })
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          console.warn("WaSender error:", data);
-          // Still saved to DB, just notify
-          toast.warning(`Guardado en DB. WaSender: ${data?.message ?? res.status}`);
+
+        const data = await res.json().catch(() => null);
+
+        const isLogicalError = data?.success === false || data?.status === "error";
+
+        if (!res.ok || isLogicalError) {
+          const errMsg = data?.message || data?.error || (data && JSON.stringify(data)) || res.statusText || "Error 422: Faltan parámetros requeridos por WaSender";
+          console.warn("WaSender API error:", errMsg, data);
+          toast.warning(`Guardado en DB. Error WaSender: ${errMsg}`);
         } else {
           // Update message status to delivered
           if (msg) {
-            await supabaseAdmin.from("wa_messages").update({ status: "delivered" }).eq("id", msg.id);
+            await supabase.from("wa_messages").update({ status: "delivered" }).eq("id", msg.id);
             setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, status: "delivered" } : m));
           }
         }
       } catch (e: any) {
-        toast.warning("Mensaje guardado. Sin conexión a WaSender.");
+        toast.warning("Mensaje guardado. Sin conexión a la API de WhatsApp.");
       }
+    } else {
+      toast.info("Mensaje guardado en la base de datos (Requiere API Key de WhatsApp para salir).");
     }
     setSending(false);
   };

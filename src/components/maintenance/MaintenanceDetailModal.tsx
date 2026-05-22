@@ -33,7 +33,7 @@ interface MaintenanceDetailModalProps {
 }
 
 export function MaintenanceDetailModal({ isOpen, onOpenChange, data }: MaintenanceDetailModalProps) {
-  const { updateMaintenanceItem, addWhatsAppLog, calculateMaintenanceHealth, addMaintenanceHistoryItem } = useStore();
+  const { updateMaintenanceItem, addWhatsAppLog, calculateMaintenanceHealth, addMaintenanceHistoryItem, tenants } = useStore();
   const router = useRouter();
   const params = useParams();
 
@@ -70,11 +70,15 @@ export function MaintenanceDetailModal({ isOpen, onOpenChange, data }: Maintenan
   };
 
   const handleQueueWhatsApp = (item: any) => {
-    const text = `Hola ${customer.name}, te saludo de ServiTracks. Tu vehículo ${vehicle.brand} ${vehicle.model} tiene el ${item.name} al ${item.currentPercentage}%. Te recomendamos agendar una cita pronto.`;
+    const tenantSlug = (params.tenant as string) || '';
+    const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
+    const tenantName = currentTenant ? currentTenant.name : 'ServiTracks';
+    
+    const text = `Hola ${customer.name}, te saludo de ${tenantName}. Tu vehículo ${vehicle.brand} ${vehicle.model} tiene el ${item.name} al ${item.currentPercentage}%. Te recomendamos agendar una cita pronto.`;
     
     addWhatsAppLog({
       id: `wl_pending_${Date.now()}`,
-      tenantId: '1',
+      tenantId: currentTenant?.id || '1',
       customerId: customer.id,
       customerName: customer.name,
       phone: customer.phone,
@@ -195,14 +199,14 @@ export function MaintenanceDetailModal({ isOpen, onOpenChange, data }: Maintenan
                         <span style={{ fontSize: 14, fontWeight: 800, color: '#171717', display: 'block', textTransform: 'uppercase' }}>
                           {
                             {
-                              engine: 'Mantenimiento del Motor',
+                              engine: 'Motor',
                               brakes: 'Frenos',
                               tires: 'Neumáticos',
                               battery: 'Sistema Eléctrico',
                               suspension: 'Suspensión',
                               transmission: 'Transmisión',
                               cooling: 'Enfriamiento',
-                              ac: 'Sistema A/C',
+                              ac: 'Aire Acondicionado',
                               steering: 'Dirección',
                               others: 'Mantenimiento General'
                             }[item.category as string] || 'Mantenimiento'

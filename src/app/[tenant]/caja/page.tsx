@@ -365,14 +365,14 @@ export default function CajaPage() {
     <div className="space-y-6 max-w-7xl mx-auto p-1 animate-in fade-in duration-300">
       
       {/* Header section with Action Buttons */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900 flex items-center gap-2">
             <Coins className="h-8 w-8 text-black" /> Control de Caja Diario
           </h1>
-          <p className="text-neutral-500">Administra turnos, realiza arqueos y cuadres térmicos con soporte de caja chica.</p>
+          <p className="text-neutral-500 max-w-xl">Administra turnos, realiza arqueos y cuadres térmicos con soporte de caja chica.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-shrink-0">
           <Button 
             variant="outline" 
             onClick={() => setIsHistoricoOpen(true)}
@@ -391,14 +391,14 @@ export default function CajaPage() {
           {activeCaja ? (
             <Button 
               onClick={() => setIsCierreOpen(true)}
-              className="rounded-xl bg-rose-600 text-white hover:bg-rose-700 font-bold gap-2 h-11 shadow-lg shadow-rose-600/10"
+              className="rounded-xl bg-rose-600 text-white hover:bg-rose-700 font-bold gap-2 h-11 shadow-lg shadow-rose-600/10 flex-shrink-0"
             >
               <Lock className="h-4 w-4" /> Cerrar Turno (Arqueo)
             </Button>
           ) : (
             <Button 
               onClick={() => setIsAperturaOpen(true)}
-              className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2 h-11 shadow-lg shadow-black/10"
+              className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2 h-11 shadow-lg shadow-black/10 flex-shrink-0"
             >
               <Plus className="h-4 w-4" /> Abrir Caja
             </Button>

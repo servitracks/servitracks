@@ -237,7 +237,7 @@ export default function OrdersPage() {
             value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as Status | "all")}>
-          <SelectTrigger className="w-44 h-10 rounded-full border-neutral-200 bg-white">
+          <SelectTrigger className="w-52 h-10 rounded-full border-neutral-200 bg-white">
             <Filter className="h-3.5 w-3.5 mr-1.5 text-neutral-400" />
             <span className="text-sm">{(({
               all: "Todos los estados",
@@ -249,6 +249,7 @@ export default function OrdersPage() {
             {STATUS_FLOW.map((s) => <SelectItem key={s} value={s}>{statusLabels[s]}</SelectItem>)}
           </SelectContent>
         </Select>
+
         <div className="flex rounded-xl border border-neutral-200 overflow-hidden bg-white">
           <button onClick={() => setViewMode("list")} className={cn("p-2.5 transition-colors", viewMode === "list" ? "bg-black text-white" : "text-neutral-400 hover:bg-neutral-50")}>
             <List className="h-4 w-4" />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,7 @@ import { AlertsPanel } from "@/components/maintenance/AlertsPanel";
 import { MessagesPanel } from "@/components/maintenance/MessagesPanel";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export function TopBar() {
   const maintenanceAlerts = useStore((s) => s.maintenanceAlerts);
@@ -44,6 +45,33 @@ export function TopBar() {
     ? { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' }
     : users.find((u) => u.id === currentUserId);
 
+  // Recovery: If the user is authenticated but not in the local store (e.g. after login or refresh), fetch them
+  useEffect(() => {
+    if (currentUserId && currentUserId !== 'admin' && !currentUser) {
+      async function fetchMissingUser() {
+        const { data, error } = await supabaseAdmin
+          .from("tenant_users")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .limit(1)
+          .single();
+        
+        if (data && !error) {
+          useStore.getState().addUser({
+            id: currentUserId!, // Use auth user_id as the store ID
+            tenantId: data.tenant_id,
+            name: data.name,
+            email: data.email,
+            role: data.role,
+            status: data.status,
+            createdAt: data.created_at || new Date().toISOString()
+          });
+        }
+      }
+      fetchMissingUser();
+    }
+  }, [currentUserId, currentUser]);
+
   // Profile dialog
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -59,11 +87,39 @@ export function TopBar() {
     setProfileOpen(true);
   };
 
-  const handleSaveProfile = () => {
+  const handleSaveProfile = async () => {
     if (!currentUser) return;
     if (!profileForm.name.trim()) { toast.error("El nombre es requerido"); return; }
+
+    // Update local store
     updateUser(currentUser.id, { name: profileForm.name, email: profileForm.email });
-    toast.success("Perfil actualizado correctamente");
+
+    // Persist to Supabase (tenant_users table)
+    try {
+      const { error } = await supabaseAdmin
+        .from("tenant_users")
+        .update({ name: profileForm.name, email: profileForm.email })
+        .eq("user_id", currentUser.id);
+
+      if (error) {
+        // Fallback: try matching by email if user_id doesn't match
+        const { error: error2 } = await supabaseAdmin
+          .from("tenant_users")
+          .update({ name: profileForm.name })
+          .eq("email", currentUser.email);
+        
+        if (error2) {
+          console.error("[Profile] Error saving to Supabase:", error, error2);
+          toast.warning("Perfil actualizado localmente. Error al sincronizar con servidor.");
+          setProfileOpen(false);
+          return;
+        }
+      }
+      toast.success("Perfil actualizado correctamente");
+    } catch (err) {
+      console.error("[Profile] Exception:", err);
+      toast.warning("Perfil actualizado localmente");
+    }
     setProfileOpen(false);
   };
 

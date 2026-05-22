@@ -15,6 +15,8 @@ import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import type { Tenant, TenantUser } from "@/store/types";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { getPlans } from "@/lib/storage";
+import type { Plan } from "@/store/types";
 
 // Dominican Republic provinces list
 const PROVINCIAS_RD = [
@@ -52,33 +54,7 @@ const PROVINCIAS_RD = [
   "San José de Ocoa"
 ];
 
-// Plans definitions tailored for ServiTracks
-const PLANS = [
-  {
-    id: "basico",
-    nombre: "Plan Básico",
-    limite_empleados: "3 empleados",
-    limite_ordenes_mes: "100 órdenes/mes",
-    precio_mensual: 1500,
-    caracteristicas: ["Gestión de clientes y vehículos", "Control de órdenes de trabajo", "Notificaciones básicas"]
-  },
-  {
-    id: "pro",
-    nombre: "Plan Profesional",
-    limite_empleados: "10 empleados",
-    limite_ordenes_mes: "Órdenes ilimitadas",
-    precio_mensual: 2500,
-    caracteristicas: ["Todo lo de Básico", "Módulo POS y Facturación", "Control de Caja Chica", "WhatsApp integrado"]
-  },
-  {
-    id: "premium",
-    nombre: "Plan Premium",
-    limite_empleados: "Empleados ilimitados",
-    limite_ordenes_mes: "Órdenes ilimitadas",
-    precio_mensual: 4500,
-    caracteristicas: ["Todo lo de Profesional", "Reportes financieros avanzados", "Recordatorios preventivos automáticos", "Soporte prioritario 24/7"]
-  }
-];
+// Plans are loaded dynamically from Supabase (managed via Superadmin)
 
 const STEPS = [
   { id: 1, label: "Taller", icon: Building2 },
@@ -115,7 +91,7 @@ const initial: FormState = {
   slugTouched: false,
   color_primario: "#059669", // Emerald 600 default for ServiTracks
   logo_url: "",
-  plan_id: "pro",
+  plan_id: "",
   admin_nombre: "",
   admin_email: "",
   admin_password: "",
@@ -215,8 +191,51 @@ export default function RegisterPage() {
   const [provisioningStep, setProvisioningStep] = useState(0);
   const [slugChecking, setSlugChecking] = useState(false);
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
+  const [dbPlans, setDbPlans] = useState<Plan[]>([]);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const storePlans = useStore((s) => s.plans);
+
+  // Load plans from Supabase on mount, fallback to Zustand store (persisted in localStorage)
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPlans() {
+      try {
+        const plans = await getPlans();
+        if (cancelled) return;
+        if (plans && plans.length > 0) {
+          setDbPlans(plans);
+          const featured = plans.find(p => p.destacado);
+          const defaultPlan = featured || plans[0];
+          setForm(f => f.plan_id ? f : { ...f, plan_id: defaultPlan.id });
+          return;
+        }
+      } catch (err) {
+        console.error("[Register] Error loading plans:", err);
+      }
+      // Fallback: use store plans if Supabase returned nothing
+      const cached = useStore.getState().plans;
+      if (!cancelled && cached && cached.length > 0) {
+        setDbPlans(cached);
+        const featured = cached.find(p => p.destacado);
+        const defaultPlan = featured || cached[0];
+        setForm(f => f.plan_id ? f : { ...f, plan_id: defaultPlan.id });
+      }
+    }
+    loadPlans();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Reactive: if store plans arrive later (e.g. from Pricing component sync), use them
+  useEffect(() => {
+    if (dbPlans.length === 0 && storePlans && storePlans.length > 0) {
+      setDbPlans(storePlans);
+      const featured = storePlans.find(p => p.destacado);
+      const defaultPlan = featured || storePlans[0];
+      setForm(f => f.plan_id ? f : { ...f, plan_id: defaultPlan.id });
+    }
+  }, [storePlans, dbPlans.length]);
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -714,57 +733,70 @@ export default function RegisterPage() {
                       <p className="text-xs text-neutral-400 mt-1 font-semibold">Elige el plan ideal para el tamaño de tus operaciones. Prueba gratis por 7 días.</p>
                     </div>
 
-                    <div className="grid gap-3.5">
-                      {PLANS.map((p) => {
-                        const isSelected = form.plan_id === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => update("plan_id", p.id)}
-                            className={`text-left rounded-2xl border-2 p-4 transition-all duration-200 cursor-pointer ${
-                              isSelected 
-                                ? "border-emerald-600 bg-emerald-50/20 shadow-xs" 
-                                : "border-neutral-100 bg-white hover:border-neutral-200"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-4">
-                              <div className="flex-1 space-y-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-base font-black text-neutral-950">{p.nombre}</span>
-                                  {p.id === "pro" && (
-                                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[8.5px] font-black text-amber-700 uppercase tracking-wider">
-                                      Recomendado
-                                    </span>
-                                  )}
+                    {dbPlans.length === 0 ? (
+                      <div className="text-center py-8 text-neutral-400 text-sm font-semibold">Cargando planes disponibles...</div>
+                    ) : (
+                      <div className="grid gap-3.5">
+                        {dbPlans.map((p) => {
+                          const isSelected = form.plan_id === p.id;
+                          const empleadosLabel = p.limite_empleados >= 999999 ? "Empleados ilimitados" : `Hasta ${p.limite_empleados} empleados`;
+                          const ordenesLabel = p.limite_ordenes_mes === null ? "Órdenes ilimitadas" : `${p.limite_ordenes_mes} órdenes/mes`;
+                          const features = [
+                            p.modulos.facturacion_fiscal ? "Facturación Electrónica (NCF)" : null,
+                            p.modulos.whatsapp ? "WhatsApp Automation" : null,
+                            p.modulos.multisucursal ? "Gestión Multi-sucursal" : null,
+                            p.modulos.logistica ? "Logística y Repartidores" : null,
+                            "Gestión de clientes y vehículos",
+                          ].filter(Boolean) as string[];
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => update("plan_id", p.id)}
+                              className={`text-left rounded-2xl border-2 p-4 transition-all duration-200 cursor-pointer ${
+                                isSelected 
+                                  ? "border-emerald-600 bg-emerald-50/20 shadow-xs" 
+                                  : "border-neutral-100 bg-white hover:border-neutral-200"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-4">
+                                <div className="flex-1 space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base font-black text-neutral-950">{p.nombre}</span>
+                                    {p.destacado && (
+                                      <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[8.5px] font-black text-amber-700 uppercase tracking-wider">
+                                        Recomendado
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-neutral-400 font-bold uppercase tracking-wider">
+                                    {empleadosLabel} • {ordenesLabel}
+                                  </div>
+                                  <div className="pt-2 flex flex-wrap gap-x-3 gap-y-1">
+                                    {features.map((char, idx) => (
+                                      <span key={idx} className="text-[10px] text-neutral-500 font-semibold flex items-center gap-1">
+                                        <CheckCircle2 size={10} className="text-emerald-500" /> {char}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
-                                <div className="text-[11px] text-neutral-400 font-bold uppercase tracking-wider">
-                                  {p.limite_empleados} • {p.limite_ordenes_mes}
-                                </div>
-                                <div className="pt-2 flex flex-wrap gap-x-3 gap-y-1">
-                                  {p.caracteristicas.map((char, idx) => (
-                                    <span key={idx} className="text-[10px] text-neutral-500 font-semibold flex items-center gap-1">
-                                      <CheckCircle2 size={10} className="text-emerald-500" /> {char}
-                                    </span>
-                                  ))}
+                                <div className="flex items-center gap-5">
+                                  <div className="text-right">
+                                    <div className="text-lg font-black text-neutral-950">{formatRD(p.precio_mensual)}</div>
+                                    <div className="text-[9px] uppercase font-bold tracking-wider text-neutral-400">/ mes</div>
+                                  </div>
+                                  <div className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
+                                    isSelected ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200"
+                                  }`}>
+                                    {isSelected && <Check className="h-3 w-3" strokeWidth={3} />}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-5">
-                                <div className="text-right">
-                                  <div className="text-lg font-black text-neutral-950">{formatRD(p.precio_mensual)}</div>
-                                  <div className="text-[9px] uppercase font-bold tracking-wider text-neutral-400">/ mes</div>
-                                </div>
-                                <div className={`flex h-5 w-5 items-center justify-center rounded-full border-2 transition-all ${
-                                  isSelected ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200"
-                                }`}>
-                                  {isSelected && <Check className="h-3 w-3" strokeWidth={3} />}
-                                </div>
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -833,6 +865,7 @@ export default function RegisterPage() {
                     tenant={createdTenant} 
                     adminNombre={form.admin_nombre} 
                     adminEmail={form.admin_email} 
+                    planNombre={dbPlans.find(p => p.id === form.plan_id)?.nombre || "Plan seleccionado"}
                     onEnter={() => navigate(`/${createdTenant.slug}`)} 
                   />
                 )}
@@ -880,13 +913,13 @@ export default function RegisterPage() {
   );
 }
 
-function SuccessCard({ tenant, adminNombre, adminEmail, onEnter }: { 
+function SuccessCard({ tenant, adminNombre, adminEmail, planNombre, onEnter }: { 
   tenant: Tenant; 
   adminNombre: string; 
   adminEmail: string; 
+  planNombre: string;
   onEnter: () => void 
 }) {
-  const planNombre = PLANS.find((p) => p.id === "pro")?.nombre || "Profesional";
 
   return (
     <div className="text-center">

@@ -219,13 +219,22 @@ function MaintenanceContent() {
         services.forEach((svc: any) => {
           const lifespanDays = svc?.lifespanDays || 90;
           const lifespanKm = svc?.lifespanKm || 5000;
-          const pct = Math.max(0, Math.round(((lifespanDays - daysSince) / lifespanDays) * 100));
+
+          const vehicle = vehicles.find(v => v.id === order.vehicleId);
+          const currentKm = vehicle?.km || order.km || 0;
+          const kmPassed = Math.max(0, currentKm - (order.km || 0));
+
+          const timeUsage = (daysSince / lifespanDays) * 100;
+          const kmUsage = (kmPassed / lifespanKm) * 100;
+          const maxUsage = Math.max(timeUsage, kmUsage);
+          const pct = Math.max(0, Math.floor(100 - maxUsage));
+
           syntheticItems.push({
             id: `synth_${order.id}_${svc.id}`,
             vehicleId: order.vehicleId,
             tenantId: order.tenantId,
             name: svc.name,
-            category: svc.maintenanceCategory || 'others',
+            category: svc.maintenanceCategory || getMaintenanceCategoryFromText(svc.category),
             lastServiceDate: order.updatedAt || order.createdAt,
             lastServiceKm: order.km || 0,
             lifespanKm,
@@ -237,7 +246,17 @@ function MaintenanceContent() {
       } else {
         // No services mapped — create a generic maintenance item from the order description
         const lifespanDays = 90;
-        const pct = Math.max(0, Math.round(((lifespanDays - daysSince) / lifespanDays) * 100));
+        const lifespanKm = 5000;
+
+        const vehicle = vehicles.find(v => v.id === order.vehicleId);
+        const currentKm = vehicle?.km || order.km || 0;
+        const kmPassed = Math.max(0, currentKm - (order.km || 0));
+
+        const timeUsage = (daysSince / lifespanDays) * 100;
+        const kmUsage = (kmPassed / lifespanKm) * 100;
+        const maxUsage = Math.max(timeUsage, kmUsage);
+        const pct = Math.max(0, Math.floor(100 - maxUsage));
+
         syntheticItems.push({
           id: `synth_${order.id}`,
           vehicleId: order.vehicleId,
@@ -246,7 +265,7 @@ function MaintenanceContent() {
           category: 'others',
           lastServiceDate: order.updatedAt || order.createdAt,
           lastServiceKm: order.km || 0,
-          lifespanKm: 5000,
+          lifespanKm,
           lifespanDays,
           currentPercentage: pct,
           _fromOrder: order.id,
@@ -254,14 +273,18 @@ function MaintenanceContent() {
       }
     });
 
-    // Merge: real items take priority, then synthetics for vehicles without any real items
+    // Merge: real items take priority, then synthetics for categories without any real items for that vehicle
     const allItems = [...maintenanceItems];
-    const vehiclesWithRealItems = new Set(maintenanceItems.map((m) => m.vehicleId));
+    const realVehicleCategories = new Set(
+      maintenanceItems.map((m) => `${m.vehicleId}_${m.category}`)
+    );
     syntheticItems.forEach((s) => {
-      if (!vehiclesWithRealItems.has(s.vehicleId)) allItems.push(s);
+      if (!realVehicleCategories.has(`${s.vehicleId}_${s.category}`)) {
+        allItems.push(s);
+      }
     });
     return allItems;
-  }, [storeOrders, storeServices, maintenanceItems]);
+  }, [storeOrders, storeServices, maintenanceItems, vehicles]);
 
   const maintenanceData = useMemo(() => {
     return vehicles.map(vehicle => {
@@ -406,15 +429,29 @@ function MaintenanceContent() {
   );
 }
 
+function getMaintenanceCategoryFromText(category?: string): string {
+  const cat = category?.toLowerCase() || '';
+  if (cat.includes('motor')) return 'engine';
+  if (cat.includes('freno')) return 'brakes';
+  if (cat.includes('neumatic') || cat.includes('neumátic') || cat.includes('llanta')) return 'tires';
+  if (cat.includes('electr') || cat.includes('eléctr') || cat.includes('bater')) return 'battery';
+  if (cat.includes('suspens')) return 'suspension';
+  if (cat.includes('transmi')) return 'transmission';
+  if (cat.includes('enfria') || cat.includes('cool')) return 'cooling';
+  if (cat.includes('aire') || cat.includes('a/c') || cat.includes('ac')) return 'ac';
+  if (cat.includes('direcc') || cat.includes('steer')) return 'steering';
+  return 'others';
+}
+
 const CATEGORY_LABELS: Record<string, string> = {
-  engine: 'Mantenimiento del Motor',
+  engine: 'Motor',
   brakes: 'Frenos',
   tires: 'Neumáticos',
   battery: 'Sistema Eléctrico',
   suspension: 'Suspensión',
   transmission: 'Transmisión',
   cooling: 'Enfriamiento',
-  ac: 'Sistema A/C',
+  ac: 'Aire Acondicionado',
   steering: 'Dirección',
   others: 'Mantenimiento General'
 };
