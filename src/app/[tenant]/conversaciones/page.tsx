@@ -18,6 +18,16 @@ import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 interface WaConversation {
   id: string;
@@ -58,7 +68,20 @@ export default function Conversations() {
   const [sending, setSending] = useState(false);
   const [loadingConvs, setLoadingConvs] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [convToDelete, setConvToDelete] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<WaMessage | null>(null);
+  const [activeMediaModalUrl, setActiveMediaModalUrl] = useState<string | null>(null);
+
+  const getProxiedUrl = (url: string) => {
+    if (!url) return "";
+    if (url.includes("wasenderapi.com")) {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const apiKey = currentTenant?.wasenderApiKey || "";
+      return `${supabaseUrl}/functions/v1/wasender-proxy?action=media&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`;
+    }
+    return url;
+  };
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -105,70 +128,66 @@ export default function Conversations() {
     activeConvRef.current = selectedConvId;
   }, [selectedConvId]);
 
-  // ── Real-time ÚNICO: El secreto de la latencia ~100ms ───
+  // ── Real-time ÚNICO: Escucha a través de eventos globales del Layout ───
   useEffect(() => {
     if (!supabaseTenantId) return;
 
-    // Se crea un solo canal por Tenant que escucha ambas tablas simultáneamente
-    const ch = supabase
-      .channel(`chat_tenant:${supabaseTenantId}`)
-      // Escucha cambios en conversaciones (para refrescar la barra lateral)
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "wa_conversations",
-        filter: `tenant_id=eq.${supabaseTenantId}`,
-      }, (payload) => {
-        console.log("[RT conv]", payload.eventType, payload.new);
-        if (payload.eventType === "INSERT") {
-          toast.info(`💬 Nuevo chat de ${(payload.new as WaConversation).name || (payload.new as WaConversation).phone}`);
-        }
-        loadConversations(); // Refresca la lista completa (Paso 2 del diagrama)
-      })
-      // Escucha la llegada de nuevos mensajes y actualizaciones (para agregar al chat, sonar o actualizar estado)
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "wa_messages",
-        filter: `tenant_id=eq.${supabaseTenantId}`,
-      }, (payload) => {
-        if (payload.eventType === "INSERT") {
-          const newMsg = payload.new as WaMessage;
-          console.log("[RT msg INSERT]", newMsg);
-          
-          // Reproducir sonido para cualquier mensaje entrante del usuario
-          if (newMsg.role === "user") {
-            const audio = new Audio("/nuevo_mensaje.mp3.mpeg");
-            audio.play().catch((err) => console.log("Audio play blocked by browser policy:", err));
-          }
+    const handleConversationUpdate = (e: Event) => {
+      const payload = (e as CustomEvent).detail;
+      console.log("[Local RT conv]", payload.eventType, payload.new);
+      if (payload.eventType === "INSERT") {
+        toast.info(`💬 Nuevo chat de ${(payload.new as WaConversation).name || (payload.new as WaConversation).phone}`);
+      }
+      loadConversations(); // Refresca la lista completa
+    };
 
-          // Si es la conversación activa -> agrega el mensaje a la pantalla actual
-          if (newMsg.conversation_id === activeConvRef.current) {
-            setMessages((prev) => {
-              if (prev.find((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
+    const handleMessageReceive = (e: Event) => {
+      const payload = (e as CustomEvent).detail;
+      
+      if (payload.eventType === "INSERT") {
+        const newMsg = payload.new as WaMessage;
+        console.log("[Local RT msg INSERT]", newMsg);
+        
+        // Si es la conversación activa -> agrega el mensaje a la pantalla actual
+        if (newMsg.conversation_id === activeConvRef.current) {
+          setMessages((prev) => {
+            if (prev.find((m) => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          setTimeout(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+          }, 50);
+          // Marcar como leído
+          supabase
+            .from("wa_conversations")
+            .update({ unread_count: 0 })
+            .eq("id", activeConvRef.current)
+            .then(({ error }) => {
+              if (error) console.error("Error marking active conversation as read:", error);
             });
-            setTimeout(() => {
-              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-            }, 50);
-            // Marcar como leído
-            supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", activeConvRef.current);
-          }
-        } else if (payload.eventType === "UPDATE") {
-          const updatedMsg = payload.new as WaMessage;
-          console.log("[RT msg UPDATE]", updatedMsg);
-          
-          // Si es de la conversación activa -> actualiza el estado del mensaje (por ejemplo, checkmarks)
-          if (updatedMsg.conversation_id === activeConvRef.current) {
-            setMessages((prev) => prev.map((m) => m.id === updatedMsg.id ? updatedMsg : m));
-          }
+            
+          setConversations((prev) =>
+            prev.map((c) => (c.id === activeConvRef.current ? { ...c, unread_count: 0 } : c))
+          );
         }
-      })
-      .subscribe((status, err) => {
-        console.log("[RT Chat System]", status, err || "");
-      });
+      } else if (payload.eventType === "UPDATE") {
+        const updatedMsg = payload.new as WaMessage;
+        console.log("[Local RT msg UPDATE]", updatedMsg);
+        
+        // Si es de la conversación activa -> actualiza el estado del mensaje
+        if (updatedMsg.conversation_id === activeConvRef.current) {
+          setMessages((prev) => prev.map((m) => m.id === updatedMsg.id ? updatedMsg : m));
+        }
+      }
+    };
 
-    return () => { supabase.removeChannel(ch); };
+    window.addEventListener("wa_conversation_updated", handleConversationUpdate);
+    window.addEventListener("wa_message_received", handleMessageReceive);
+
+    return () => {
+      window.removeEventListener("wa_conversation_updated", handleConversationUpdate);
+      window.removeEventListener("wa_message_received", handleMessageReceive);
+    };
   }, [supabaseTenantId]);
 
   // ── Select first conv or from location state ────────────────────────
@@ -195,7 +214,17 @@ export default function Conversations() {
   useEffect(() => {
     if (!selectedConvId) { setMessages([]); return; }
     // Mark as read immediately on select
-    supabase.from("wa_conversations").update({ unread_count: 0 }).eq("id", selectedConvId);
+    supabase
+      .from("wa_conversations")
+      .update({ unread_count: 0 })
+      .eq("id", selectedConvId)
+      .then(({ error }) => {
+        if (error) console.error("Error marking selected conversation as read:", error);
+      });
+      
+    setConversations((prev) =>
+      prev.map((c) => (c.id === selectedConvId ? { ...c, unread_count: 0 } : c))
+    );
     
     // Reload messages immediately on selection
     loadMessages(selectedConvId);
@@ -207,13 +236,16 @@ export default function Conversations() {
   }, [messages]);
 
   // ── Send message ────────────────────────────────────────────────────
-  const handleSend = async (type = "text", mediaContent?: string) => {
+  const handleSend = async (type = "text", mediaUrl?: string, filename?: string) => {
     if (type === "text" && !messageText.trim()) return;
     if (!selectedConvId || !supabaseTenantId) return;
     const conv = conversations.find((c) => c.id === selectedConvId);
     if (!conv) return;
 
-    const text = type === "text" ? messageText.trim() : (mediaContent || "[Media]");
+    const text = type === "text" 
+      ? messageText.trim() 
+      : `[${type}] ${mediaUrl}${filename ? `|${filename}` : ""}`;
+      
     if (type === "text") setMessageText("");
     setReplyingTo(null);
     setSending(true);
@@ -249,8 +281,8 @@ export default function Conversations() {
             }
           : { 
               to: conv.phone, 
-              text: text || "[Media]", 
-              imageUrl: mediaContent // WaSenderAPI uses imageUrl for images
+              text: type === "image" ? "📷 Imagen" : type === "audio" ? "🎤 Audio" : `📄 ${filename || "Archivo"}`, 
+              imageUrl: mediaUrl
             };
 
         const res = await fetch(edgeFunctionUrl, {
@@ -289,6 +321,46 @@ export default function Conversations() {
       toast.info("Mensaje guardado en la base de datos (Requiere API Key de WhatsApp para salir).");
     }
     setSending(false);
+  };
+
+  // ── Delete Conversation ─────────────────────────────────────────────
+  const handleDeleteConversation = async (convId: string) => {
+    try {
+      // 1. Delete messages first
+      const { error: msgErr } = await supabaseAdmin
+        .from("wa_messages")
+        .delete()
+        .eq("conversation_id", convId);
+
+      if (msgErr) console.error("Error deleting messages:", msgErr);
+
+      // 2. Delete conversation
+      const { error: convErr } = await supabaseAdmin
+        .from("wa_conversations")
+        .delete()
+        .eq("id", convId);
+
+      if (convErr) {
+        toast.error("No se pudo eliminar la conversación");
+        console.error(convErr);
+        return;
+      }
+
+      toast.success("Conversación eliminada correctamente");
+      
+      // Update local state
+      setConversations((prev) => prev.filter((c) => c.id !== convId));
+      
+      // Clear selection if deleted
+      if (selectedConvId === convId) {
+        setSelectedConvId(null);
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      toast.error("Ocurrió un error al intentar eliminar la conversación");
+    } finally {
+      setConvToDelete(null);
+    }
   };
 
   // ── Toggle agent ────────────────────────────────────────────────────
@@ -337,6 +409,24 @@ export default function Conversations() {
   };
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
+  const formatLastMessage = (content: string | null) => {
+    if (!content) return "";
+    
+    // Si empieza con alguno de los tags multimedia
+    if (content.startsWith("[image]")) return "📷 Imagen";
+    if (content.startsWith("[video]")) return "🎥 Video";
+    if (content.startsWith("[audio]")) return "🎤 Audio";
+    if (content.startsWith("[document]")) return "📄 Documento";
+    
+    // Si contiene base64 de imágenes o documentos antiguos
+    if (content.startsWith("data:image/")) return "📷 Imagen";
+    if (content.startsWith("data:video/")) return "🎥 Video";
+    if (content.startsWith("data:audio/")) return "🎤 Audio";
+    if (content.startsWith("data:application/")) return "📄 Documento";
+    
+    return content;
+  };
+
   const selectedConv = conversations.find((c) => c.id === selectedConvId);
   const isAiMode = selectedConv?.agent === "ia";
   const filtered = conversations.filter(
@@ -372,28 +462,38 @@ export default function Conversations() {
               <div
                 key={conv.id}
                 onClick={() => setSelectedConvId(conv.id)}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 transition-colors ${conv.id === selectedConvId ? "bg-accent" : "hover:bg-muted/50"}`}
+                className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 transition-colors group relative ${conv.id === selectedConvId ? "bg-accent" : "hover:bg-muted/50"}`}
               >
                 <div className="h-9 w-9 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0 mt-0.5">
                   {(conv.name || conv.phone).charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-start">
                     <p className="text-sm font-medium text-foreground truncate">{conv.name || conv.phone}</p>
-                    <span className="text-[10px] text-muted-foreground shrink-0">
-                      {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: es })}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                      <span className="text-[10px] text-muted-foreground group-hover:hidden">
+                        {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: es })}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConvToDelete(conv.id);
+                        }}
+                        className="hidden group-hover:flex items-center justify-center h-5 w-5 rounded-full hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
+                        title="Eliminar conversación"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.last_message || ""}</p>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <Badge variant="secondary" className={`text-[10px] h-4 px-1.5 border-0 ${conv.agent === "ia" ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-700"}`}>
-                      {conv.agent === "ia" ? <Bot className="h-2.5 w-2.5 mr-0.5" /> : <User className="h-2.5 w-2.5 mr-0.5" />}
-                      {conv.agent === "ia" ? "IA" : "HUMANO"}
-                    </Badge>
-                    {conv.unread_count > 0 && (
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{formatLastMessage(conv.last_message)}</p>
+                  <div className="flex items-center justify-between mt-1 min-h-[16px]">
+                    {conv.unread_count > 0 && conv.id !== selectedConvId ? (
                       <span className="ml-auto h-4 w-4 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold">
                         {conv.unread_count}
                       </span>
+                    ) : (
+                      <div />
                     )}
                   </div>
                 </div>
@@ -421,16 +521,14 @@ export default function Conversations() {
                   </p>
                 </div>
                 <Button
-                  variant={isAiMode ? "default" : "outline"}
-                  size="sm"
-                  className={`h-8 gap-1.5 text-xs rounded-xl ${isAiMode ? "bg-primary hover:bg-primary/90" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}
-                  onClick={() => toggleAgent(selectedConv.id, selectedConv.agent)}
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
+                  onClick={() => setConvToDelete(selectedConv.id)}
+                  title="Eliminar conversación"
                 >
-                  {isAiMode ? <><Bot className="h-3.5 w-3.5" />IA activa<ArrowRightLeft className="h-3 w-3" /></> : <><Hand className="h-3.5 w-3.5" />Humano<ArrowRightLeft className="h-3 w-3" /></>}
+                  <Trash2 className="h-4.5 w-4.5" />
                 </Button>
-              </div>
-              <div className={`h-8 px-5 flex items-center gap-2 text-xs font-medium ${isAiMode ? "bg-primary/5 text-primary border-t border-primary/10" : "bg-amber-50 text-amber-700 border-t border-amber-100"}`}>
-                {isAiMode ? <><Bot className="h-3.5 w-3.5" />IA responde automáticamente</> : <><ShieldCheck className="h-3.5 w-3.5" />Tú controlas esta conversación</>}
               </div>
             </div>
 
@@ -450,6 +548,26 @@ export default function Conversations() {
                 messages.map((msg, idx) => {
                   const isSent = msg.role === "assistant";
                   const showTail = idx === 0 || messages[idx - 1].role !== msg.role;
+
+                  // ── PARSEO MULTIMEDIA DETALLADO ──
+                  const isMedia = msg.content.startsWith('[image]') || msg.content.startsWith('[video]') || msg.content.startsWith('[audio]') || msg.content.startsWith('[document]');
+                  let mediaType = "";
+                  let mediaUrl = "";
+                  let mediaCaption = "";
+                  let mediaFilename = "";
+
+                  if (isMedia) {
+                    const lines = msg.content.split('\n');
+                    const match = lines[0].match(/^\[(\w+)\]\s*(.*)$/);
+                    if (match) {
+                      mediaType = match[1];
+                      const parts = match[2].split('|');
+                      mediaUrl = parts[0];
+                      mediaFilename = parts[1] || "";
+                      mediaCaption = lines.slice(1).join('\n').trim();
+                    }
+                  }
+
                   return (
                     <div key={msg.id} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-1 group`}>
                       <div className={`max-w-[80%] relative rounded-lg px-3 py-1.5 text-[14px] shadow-sm ${isSent ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-none" : "bg-white text-[#111b21] rounded-tl-none"}`}>
@@ -463,7 +581,78 @@ export default function Conversations() {
                         >
                           <Reply className="h-3.5 w-3.5 text-[#667781]" />
                         </button>
-                        <p className="leading-normal">{msg.content}</p>
+                        
+                        {/* RENDERIZADO MULTIMEDIA / TEXTO */}
+                        {isMedia ? (
+                          <div className="space-y-1">
+                            {mediaType === 'image' && (
+                              <img 
+                                src={getProxiedUrl(mediaUrl)} 
+                                alt="WhatsApp attachment" 
+                                className="rounded-xl max-h-60 object-cover max-w-full hover:scale-[1.01] transition-transform shadow-sm cursor-pointer" 
+                                onClick={() => setActiveMediaModalUrl(getProxiedUrl(mediaUrl))} 
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  const retries = parseInt(target.getAttribute('data-retry') || '0', 10);
+                                  if (retries < 4) {
+                                    target.setAttribute('data-retry', (retries + 1).toString());
+                                    setTimeout(() => {
+                                      const currentSrc = target.src;
+                                      target.src = '';
+                                      target.src = currentSrc;
+                                    }, 1000 * (retries + 1));
+                                  } else {
+                                    target.style.display = 'none';
+                                    const placeholder = document.createElement('div');
+                                    placeholder.className = 'flex items-center gap-2 p-3 bg-black/5 rounded-xl text-xs text-muted-foreground';
+                                    placeholder.innerHTML = '📷 <span class="opacity-75">Imagen (expirada)</span>';
+                                    target.parentNode?.insertBefore(placeholder, target);
+                                  }
+                                }}
+                              />
+                            )}
+
+                            {mediaType === 'video' && (
+                              <video 
+                                src={getProxiedUrl(mediaUrl)} 
+                                controls 
+                                className="rounded-xl max-h-60 max-w-full shadow-sm"
+                              />
+                            )}
+
+                            {mediaType === 'audio' && (
+                              <audio 
+                                src={getProxiedUrl(mediaUrl)} 
+                                controls 
+                                className="max-w-full"
+                              />
+                            )}
+
+                            {mediaType === 'document' && (
+                              <a 
+                                href={getProxiedUrl(mediaUrl)} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl hover:bg-neutral-100 transition-colors border border-neutral-200/50 max-w-sm"
+                              >
+                                <div className="h-10 w-10 rounded-lg bg-red-50 text-red-500 flex items-center justify-center flex-shrink-0">
+                                  <FileText className="h-4 w-4" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold truncate text-neutral-800">{mediaFilename || "Documento.pdf"}</p>
+                                  <p className="text-[10px] text-neutral-400">Haga clic para descargar</p>
+                                </div>
+                              </a>
+                            )}
+
+                            {mediaCaption && (
+                              <p className="leading-normal mt-1">{mediaCaption}</p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="leading-normal">{msg.content}</p>
+                        )}
+
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           <span className="text-[10px] text-[#667781]">
                             {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "numeric", minute: "2-digit", hour12: true })}
@@ -478,6 +667,7 @@ export default function Conversations() {
                     </div>
                   );
                 })
+
               )}
             </div>
 
@@ -493,77 +683,116 @@ export default function Conversations() {
                 </div>
               )}
               <div className="flex items-center gap-2">
-                {!isRecording ? (
-                  <>
-                    <div className="flex-1 flex items-center gap-1 bg-muted/40 rounded-full px-3 border border-border/40 h-12">
-                      <Popover>
-                        <PopoverTrigger>
-                          <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
-                            <Smile className="h-5 w-5" />
-                          </div>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[350px] p-0 border-none shadow-2xl mb-4 ml-4 rounded-3xl overflow-hidden" align="start">
-                          <EmojiPicker onEmojiClick={(e) => setMessageText((p) => p + e.emoji)} theme={Theme.LIGHT} width="100%" height="400px" lazyLoadEmojis skinTonesDisabled previewConfig={{ showPreview: false }} />
-                        </PopoverContent>
-                      </Popover>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger>
-                          <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
-                            <Paperclip className="h-5 w-5" />
-                          </div>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-52 mb-4 ml-6 p-1 rounded-2xl shadow-2xl border-none bg-white">
-                          <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><FileText className="h-4 w-4" /></div>
-                            <span className="font-semibold text-sm">Documento</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="h-9 w-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-600"><Image className="h-4 w-4" /></div>
-                            <span className="font-semibold text-sm">Foto / Video</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*,video/*,application/pdf" onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) { const r = new FileReader(); r.readAsDataURL(f); r.onload = () => handleSend("image", r.result as string); }
-                      }} />
-                      <Input
-                        placeholder={isAiMode ? "IA responde automáticamente..." : "Escribe un mensaje..."}
-                        className="h-9 text-[14px] border-none focus-visible:ring-0 bg-transparent px-2 shadow-none"
-                        value={messageText}
-                        onChange={(e) => setMessageText(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                        disabled={sending}
-                      />
-                    </div>
-                    <div className="shrink-0">
-                      {messageText.trim() ? (
-                        <Button className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md p-0" onClick={() => handleSend()} disabled={sending}>
-                          {sending ? <Loader2 className="h-5 w-5 text-white animate-spin" /> : <Send className="h-5 w-5 text-white ml-0.5" />}
-                        </Button>
-                      ) : (
-                        <Button className="h-11 w-11 rounded-full bg-[#008055] hover:bg-[#006644] shadow-md p-0" onClick={startRecording}>
-                          <Mic className="h-5 w-5 text-white" />
-                        </Button>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-between bg-red-50/50 rounded-full px-4 h-12 border border-red-200/30">
-                    <div className="flex items-center gap-3">
-                      <div className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
-                      <span className="text-sm font-bold font-mono text-red-600">{formatTime(recordingTime)}</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" className="h-8 text-red-600 hover:bg-red-100/50 font-bold px-3 rounded-full" onClick={cancelRecording}>
-                        <Trash2 className="h-4 w-4 mr-1" />Cancelar
-                      </Button>
-                      <Button size="sm" className="h-8 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold px-4" onClick={stopRecording}>
-                        <Check className="h-4 w-4 mr-1" />Enviar
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                <div className="flex-1 flex items-center gap-1 bg-muted/40 rounded-full px-3 border border-border/40 h-12">
+                  <Popover>
+                    <PopoverTrigger>
+                      <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
+                        <Smile className="h-5 w-5" />
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[350px] p-0 border-none shadow-2xl mb-4 ml-4 rounded-3xl overflow-hidden" align="start">
+                      <EmojiPicker onEmojiClick={(e) => setMessageText((p) => p + e.emoji)} theme={Theme.LIGHT} width="100%" height="400px" lazyLoadEmojis skinTonesDisabled previewConfig={{ showPreview: false }} />
+                    </PopoverContent>
+                  </Popover>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger>
+                      <div className="flex h-9 w-9 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer">
+                        <Paperclip className="h-5 w-5" />
+                      </div>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-52 mb-4 ml-6 p-1 rounded-2xl shadow-2xl border-none bg-white">
+                      <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                        <div className="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600"><FileText className="h-4 w-4" /></div>
+                        <span className="font-semibold text-sm">Documento</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem className="gap-3 py-3 rounded-xl cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                        <div className="h-9 w-9 rounded-full bg-purple-100 flex items-center justify-center text-purple-600"><Image className="h-4 w-4" /></div>
+                        <span className="font-semibold text-sm">Foto / Video</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept="image/*,video/*,application/pdf,audio/*" 
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0];
+                      if (!f) return;
+
+                      // Determinar el tipo de archivo
+                      let msgType: "image" | "video" | "audio" | "document" = "document";
+                      if (f.type.startsWith("image/")) msgType = "image";
+                      else if (f.type.startsWith("video/")) msgType = "video";
+                      else if (f.type.startsWith("audio/")) msgType = "audio";
+
+                      const toastId = toast.loading(`Subiendo ${f.name} a WhatsApp...`);
+                      
+                      const reader = new FileReader();
+                      reader.readAsDataURL(f);
+                      reader.onload = async () => {
+                        try {
+                          const base64DataUrl = reader.result as string;
+                          const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wasender-proxy?action=upload`;
+                          
+                          const res = await fetch(edgeFunctionUrl, {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                              "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                            },
+                            body: JSON.stringify({
+                              api_key: currentTenant?.wasenderApiKey,
+                              base_url: "https://wasenderapi.com",
+                              base64: base64DataUrl
+                            })
+                          });
+
+                          const data = await res.json().catch(() => null);
+
+                          if (!res.ok || !data?.success || !data?.publicUrl) {
+                            const errMsg = data?.message || data?.error || "Error al subir archivo a WaSender";
+                            console.error("WaSender upload error:", errMsg, data);
+                            toast.error(`Error al subir: ${errMsg}`, { id: toastId });
+                            return;
+                          }
+
+                          toast.success("Archivo subido con éxito", { id: toastId });
+                          
+                          // Enviar mensaje con la URL pública de WaSender
+                          await handleSend(msgType, data.publicUrl, f.name);
+                        } catch (err: any) {
+                          console.error("File upload crash:", err);
+                          toast.error(`Error inesperado: ${err.message || err}`, { id: toastId });
+                        }
+                      };
+                    }} 
+                  />
+                  <Input
+                    placeholder="Escribe un mensaje..."
+                    className="h-9 text-[14px] border-none focus-visible:ring-0 bg-transparent px-2 shadow-none"
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                    disabled={sending}
+                  />
+                </div>
+                <div className="shrink-0">
+                  <Button 
+                    className="h-12 px-6 rounded-full bg-[#008055] hover:bg-[#006644] text-white font-bold flex items-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer" 
+                    onClick={() => handleSend()} 
+                    disabled={sending || !messageText.trim()}
+                  >
+                    {sending ? (
+                      <Loader2 className="h-5 w-5 text-white animate-spin" />
+                    ) : (
+                      <>
+                        <span>Enviar</span>
+                        <Send className="h-4 w-4 text-white" />
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           </>
@@ -577,6 +806,55 @@ export default function Conversations() {
           </div>
         )}
       </div>
+
+      {/* AlertDialog de Confirmación de Borrado */}
+      <AlertDialog open={!!convToDelete} onOpenChange={(open) => !open && setConvToDelete(null)}>
+        <AlertDialogContent className="bg-white rounded-3xl p-6 shadow-2xl border border-neutral-100 max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-lg font-bold text-neutral-900 flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-red-500" />
+              ¿Eliminar conversación?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-sm text-neutral-500 mt-2 leading-relaxed">
+              Esta acción eliminará de forma permanente esta conversación y todos sus mensajes asociados de la base de datos. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-6 flex justify-end gap-3">
+            <AlertDialogCancel className="rounded-xl px-4 py-2 hover:bg-neutral-100 font-semibold text-neutral-700 transition-colors border border-neutral-200">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (convToDelete) {
+                  handleDeleteConversation(convToDelete);
+                }
+              }}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-xl px-4 py-2 font-semibold transition-colors shadow-lg shadow-red-500/20"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal de Previsualización Multimedia (Lightbox) */}
+      {activeMediaModalUrl && (
+        <div 
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 cursor-zoom-out animate-in fade-in duration-200"
+          onClick={() => setActiveMediaModalUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl shadow-2xl border border-white/10 animate-in zoom-in-95 duration-200">
+            <img src={activeMediaModalUrl} alt="Vista ampliada" className="max-w-full max-h-[85vh] object-contain" />
+            <button 
+              className="absolute top-4 right-4 h-10 w-10 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
+              onClick={() => setActiveMediaModalUrl(null)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

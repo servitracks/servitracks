@@ -44,9 +44,10 @@ const navigation = [
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
+  unreadChatsCount?: number;
 }
 
-export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
+export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const params = useParams();
   const router = useRouter();
@@ -175,7 +176,10 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 ? lowStockCount
                 : item.href === "/orders" && pendingOrdersCount > 0
                 ? pendingOrdersCount
+                : item.href === "/conversaciones" && unreadChatsCount > 0
+                ? unreadChatsCount
                 : null;
+
 
             return (
               <Link

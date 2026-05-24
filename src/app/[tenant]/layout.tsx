@@ -9,6 +9,8 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { useHydration } from "@/store/useHydration";
+import { supabase } from "@/lib/supabase";
+
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -24,6 +26,7 @@ export default function DashboardLayout() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadChatsCount, setUnreadChatsCount] = useState(0);
 
   // Redirigir a login si no está autenticado (una vez hidratado el store)
   useEffect(() => {
@@ -45,6 +48,87 @@ export default function DashboardLayout() {
 
   const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
   const isPending = currentTenant?.status === "pending";
+
+  // --- ESCUCHA GLOBAL EN TIEMPO REAL PARA WHATSAPP ---
+  useEffect(() => {
+    if (!currentTenant?.id) return;
+
+    // Limpieza semanal silenciosa de mensajes y chats antiguos (> 7 días)
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    supabase
+      .from("wa_messages")
+      .delete()
+      .lt("created_at", oneWeekAgo)
+      .eq("tenant_id", currentTenant.id)
+      .then(() => {
+        supabase
+          .from("wa_conversations")
+          .delete()
+          .lt("last_message_at", oneWeekAgo)
+          .eq("tenant_id", currentTenant.id);
+      });
+
+    async function fetchUnreadCount() {
+      if (!currentTenant?.id) return;
+      const { data, error } = await supabase
+        .from("wa_conversations")
+        .select("unread_count")
+        .eq("tenant_id", currentTenant.id);
+      
+      if (!error && data) {
+        const total = data.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+        setUnreadChatsCount(total);
+      }
+    }
+
+    fetchUnreadCount();
+
+    const ch = supabase
+      .channel(`chat_tenant_global:${currentTenant.id}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_conversations",
+        filter: `tenant_id=eq.${currentTenant.id}`,
+      }, (payload) => {
+        console.log("[Global RT conv]", payload.eventType, payload.new);
+        fetchUnreadCount();
+        // Despachar evento nativo para que la página de conversaciones se entere
+        window.dispatchEvent(new CustomEvent("wa_conversation_updated", { detail: payload }));
+      })
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_messages",
+        filter: `tenant_id=eq.${currentTenant.id}`,
+      }, (payload) => {
+        console.log("[Global RT msg]", payload.eventType, payload.new);
+        
+        if (payload.eventType === "INSERT") {
+          const newMsg = payload.new;
+          if (newMsg && newMsg.role === "user") {
+            // Play sound
+            const audio = new Audio("/nuevo_mensaje.mp3.mpeg");
+            audio.play().catch((err) => console.log("Audio play blocked by browser policy:", err));
+            
+            // Toast notification if on other screens
+            if (!window.location.pathname.includes("/conversaciones")) {
+              toast.info("💬 Nuevo mensaje de WhatsApp recibido");
+            }
+          }
+        }
+        
+        fetchUnreadCount();
+        // Despachar evento nativo para que la página de conversaciones se entere
+        window.dispatchEvent(new CustomEvent("wa_message_received", { detail: payload }));
+      })
+      .subscribe((status, err) => {
+        console.log("[Global RT Subscription]", status, err || "");
+      });
+
+    return () => { supabase.removeChannel(ch); };
+  }, [currentTenant?.id]);
+
   
   const trialDays = currentTenant?.trial_hasta ? Math.max(0, Math.ceil((new Date(currentTenant.trial_hasta).getTime() - Date.now()) / 86400000)) : 0;
   const isTrialExpired = currentTenant?.estado === "TRIAL" && currentTenant.trial_hasta && new Date(currentTenant.trial_hasta).getTime() < Date.now();
@@ -70,7 +154,7 @@ export default function DashboardLayout() {
   if (isPending) {
     return (
       <div className="flex h-screen overflow-hidden bg-neutral-50/50 relative">
-        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} unreadChatsCount={unreadChatsCount} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <TopBar onMenuClick={() => setSidebarOpen(true)} />
           <HydrationGuard>
@@ -335,7 +419,7 @@ export default function DashboardLayout() {
         </div>
       )}
 
-      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} unreadChatsCount={unreadChatsCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
         <HydrationGuard>

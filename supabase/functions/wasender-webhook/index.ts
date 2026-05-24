@@ -167,17 +167,17 @@ serve(async (req) => {
                         try {
                             const { data: tenantData } = await supabase
                                 .from('tenants')
-                                .select('config')
+                                .select('wasender_api_key, config')
                                 .eq('id', tenantId)
                                 .single();
 
-                            const waConfig = tenantData?.config?.whatsapp;
-                            if (waConfig?.api_key) {
+                            const apiKey = tenantData?.wasender_api_key || tenantData?.config?.whatsapp?.api_key;
+                            if (apiKey) {
                                 decryptedUrl = await decryptMedia(
-                                    waConfig.api_key,
+                                    apiKey,
                                     key,
                                     rawMessageObj,
-                                    waConfig.base_url || 'https://wasenderapi.com'
+                                    tenantData?.config?.whatsapp?.base_url || 'https://wasenderapi.com'
                                 );
                             }
                         } catch (e) {
