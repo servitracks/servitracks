@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   ArrowUpDown,
   Download,
+  Upload,
   X,
   TrendingUp,
   Edit,
@@ -57,6 +58,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import ImportWizardModal from "@/components/inventory/ImportWizardModal";
+import { ImportRow } from "@/components/inventory/StepPreviewEditor";
 
 const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
 
@@ -300,6 +303,7 @@ export default function InventoryPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [adjustQty, setAdjustQty] = useState("");
@@ -311,7 +315,7 @@ export default function InventoryPage() {
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase()) ||
       (p.brand || "").toLowerCase().includes(search.toLowerCase());
-    const matchCat = categoryFilter === "Todos" || p.category === categoryFilter;
+    const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
     return matchSearch && matchCat;
   });
 
@@ -427,6 +431,65 @@ export default function InventoryPage() {
     toast.success(`"${name}" eliminado del inventario`);
   };
 
+  const handleExportCSV = () => {
+    if (products.length === 0) {
+      toast.error("No hay productos para exportar");
+      return;
+    }
+    const headers = ["Nombre", "SKU", "Marca", "Categoría", "Proveedor", "Precio Costo", "Precio Venta", "Stock", "Stock Mínimo", "ITBIS %", "Ubicación"];
+    const rows = products.map((p) => [
+      p.name, p.sku, p.brand || "", p.category, p.supplier || "",
+      p.costPrice, p.salePrice, p.stock, p.minStock, p.tax, p.location || "",
+    ]);
+    const csvContent = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `inventario-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`${products.length} productos exportados`);
+  };
+
+  const handleImport = (rows: ImportRow[]) => {
+    let imported = 0;
+    rows.forEach((row) => {
+      if (!row.name.trim()) return;
+      const newProduct: Product = {
+        id: `p${Date.now()}-${imported}`,
+        tenantId: tenantId,
+        name: row.name.trim(),
+        sku: row.sku || `SKU-${Date.now()}-${imported}`,
+        barcode: "",
+        category: row.category || "Otros",
+        brand: row.brand || "",
+        supplier: row.supplier || "",
+        costPrice: row.costPrice || 0,
+        salePrice: row.salePrice || 0,
+        stock: row.stock || 0,
+        minStock: row.minStock || 5,
+        tax: row.tax || 18,
+        location: row.location || "",
+      };
+      addProduct(newProduct);
+      if (row.stock > 0) {
+        addMovement({
+          id: `m${Date.now()}-${imported}`,
+          tenantId: tenantId,
+          productId: newProduct.id,
+          productName: newProduct.name,
+          type: "in",
+          quantity: row.stock,
+          reason: "Importación masiva",
+          date: new Date().toISOString(),
+        });
+      }
+      imported++;
+    });
+    toast.success(`✓ ${imported} producto${imported !== 1 ? "s" : ""} importado${imported !== 1 ? "s" : ""} al inventario`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -436,8 +499,12 @@ export default function InventoryPage() {
           <p className="text-neutral-500">Gestiona tus productos, repuestos y suministros.</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" className="hidden rounded-lg md:flex gap-2">
-            <Download className="h-4 w-4" /> Exportar
+          <Button variant="outline" className="hidden rounded-lg md:flex gap-2" onClick={handleExportCSV}>
+            <Download className="h-4 w-4" /> Exportar CSV
+          </Button>
+          <Button variant="outline" className="hidden rounded-lg md:flex gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+            onClick={() => setIsImportOpen(true)}>
+            <Upload className="h-4 w-4" /> Importar
           </Button>
           <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2"
             onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}>
@@ -700,7 +767,14 @@ export default function InventoryPage() {
             </DialogFooter>
           </form>
         </DialogContent>
-      </Dialog>
+        </Dialog>
+
+      {/* Import Wizard Modal */}
+      <ImportWizardModal
+        open={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImport={handleImport}
+      />
     </div>
   );
 }

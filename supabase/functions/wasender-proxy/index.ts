@@ -7,11 +7,10 @@ const corsHeaders = {
 
 /**
  * Proxy Edge Function for WaSender API calls from the browser.
- * Bypasses CORS restrictions and authorization requirements for images and audio.
- * 
- * POST /wasender-proxy?action=upload
- * POST /wasender-proxy?action=send
- * GET  /wasender-proxy?action=media&url=<url>&api_key=<api_key>
+ *
+ * POST /wasender-proxy?action=upload   — Uploads a file via multipart/form-data
+ * POST /wasender-proxy?action=send     — Sends a WhatsApp message
+ * GET  /wasender-proxy?action=media&url=<url>&api_key=<api_key>  — Proxies media
  */
 serve(async (req) => {
     if (req.method === 'OPTIONS') {
@@ -21,7 +20,7 @@ serve(async (req) => {
     const url = new URL(req.url)
     const action = url.searchParams.get('action') || 'send'
 
-    // Handle media proxy (GET request to download/render images and audio without CORS)
+    // ── GET: Media proxy ───────────────────────────────────────────────
     if (req.method === 'GET' && action === 'media') {
         try {
             const mediaUrl = url.searchParams.get('url')
@@ -34,14 +33,9 @@ serve(async (req) => {
             console.log(`Proxying GET media from: ${mediaUrl}`)
 
             const headers: HeadersInit = {}
-            if (api_key) {
-                headers['Authorization'] = `Bearer ${api_key}`
-            }
+            if (api_key) headers['Authorization'] = `Bearer ${api_key}`
 
-            const res = await fetch(mediaUrl, {
-                method: 'GET',
-                headers
-            })
+            const res = await fetch(mediaUrl, { method: 'GET', headers })
 
             if (!res.ok) {
                 console.error(`Failed to fetch media. Status: ${res.status}`)
@@ -72,23 +66,72 @@ serve(async (req) => {
     try {
         const body = await req.json()
         const { api_key, base_url, ...payload } = body
-        
+
         if (!api_key) {
-            return new Response(JSON.stringify({ error: 'Missing api_key' }), { 
-                status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            return new Response(JSON.stringify({ error: 'Missing api_key' }), {
+                status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             })
         }
 
         const base = (base_url || 'https://wasenderapi.com').replace(/\/$/, '')
-        
-        let endpoint: string
+
+        // ── POST action=upload: base64 → multipart/form-data ──────────
+        // WaSender /api/upload requires multipart/form-data, NOT JSON
         if (action === 'upload') {
-            endpoint = `${base}/api/upload`
-        } else {
-            endpoint = `${base}/api/send-message`
+            const endpoint = `${base}/api/upload`
+            const base64DataUrl: string = payload.base64 || ''
+
+            if (!base64DataUrl) {
+                return new Response(JSON.stringify({ error: 'Missing base64 field' }), {
+                    status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                })
+            }
+
+            // Parse "data:<mime>;base64,<data>"
+            const commaIdx = base64DataUrl.indexOf(',')
+            const meta = base64DataUrl.substring(5, commaIdx)   // "image/jpeg;base64"
+            const mimeType = meta.split(';')[0]                  // "image/jpeg"
+            const rawBase64 = base64DataUrl.substring(commaIdx + 1)
+
+            // Decode base64 → Uint8Array
+            const binaryStr = atob(rawBase64)
+            const bytes = new Uint8Array(binaryStr.length)
+            for (let i = 0; i < binaryStr.length; i++) {
+                bytes[i] = binaryStr.charCodeAt(i)
+            }
+
+            const ext = mimeType.split('/')[1]?.split(';')[0] || 'bin'
+            const filename = `upload_${Date.now()}.${ext}`
+
+            // Build multipart FormData
+            const formData = new FormData()
+            const blob = new Blob([bytes], { type: mimeType })
+            formData.append('file', blob, filename)
+
+            console.log(`Uploading ${filename} (${mimeType}, ${bytes.length} bytes) to ${endpoint}`)
+
+            // IMPORTANT: Do NOT set Content-Type — fetch sets it automatically with boundary
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${api_key}`,
+                    'Accept': 'application/json',
+                },
+                body: formData,
+            })
+
+            const responseText = await res.text()
+            console.log(`Upload response: ${res.status} ${responseText.substring(0, 300)}`)
+
+            return new Response(responseText, {
+                status: res.status,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
         }
 
-        console.log(`Proxying ${action} to ${endpoint}`)
+        // ── POST action=send: forward JSON as-is ──────────────────────
+        const endpoint = `${base}/api/send-message`
+        console.log(`Sending message to ${endpoint}`, JSON.stringify(payload).substring(0, 200))
 
         const res = await fetch(endpoint, {
             method: 'POST',
@@ -101,12 +144,13 @@ serve(async (req) => {
         })
 
         const responseText = await res.text()
-        console.log(`Proxy response: ${res.status} ${responseText.substring(0, 300)}`)
+        console.log(`Send response: ${res.status} ${responseText.substring(0, 300)}`)
 
         return new Response(responseText, {
             status: res.status,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
+
     } catch (error: any) {
         console.error('Proxy error:', error)
         return new Response(JSON.stringify({ error: error.message }), {

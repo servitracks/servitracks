@@ -103,12 +103,22 @@ export default function POSPage() {
       p.brand?.toLowerCase().includes(search.toLowerCase());
 
     if (activeServiceIds.length > 0) {
-      // If the product has serviceIds, only show it if it matches the active order's services
+      // 1. Explicit link: If product has specific serviceIds, use them
       if (p.serviceIds && p.serviceIds.length > 0) {
         const matchService = p.serviceIds.some((sid) => activeServiceIds.includes(sid));
         return matchCat && matchSearch && matchService;
       }
-      // Products without serviceIds → still show them (backward compat)
+
+      // 2. Implicit link (AI/imported products): Match by general category mapped to service
+      const activeServices = services.filter(s => activeServiceIds.includes(s.id));
+      const allowedCategories = activeServices.flatMap(s => SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES[s.category || ""] || []);
+      
+      if (allowedCategories.length > 0) {
+        const matchAutoCat = allowedCategories.includes((p.category || "").trim());
+        return matchCat && matchSearch && matchAutoCat;
+      }
+
+      // 3. Fallback: Show everything if no strict rules applied
       return matchCat && matchSearch;
     }
 
