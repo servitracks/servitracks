@@ -12,6 +12,41 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Outfit:wght@100..900&display=swap" rel="stylesheet" />
+    <!-- JSON-LD Schema for SoftwareApplication -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "ServiTracks",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "El Software #1 para Talleres Mecánicos en República Dominicana. Facturación con NCF, control de inventario, gestión de vehículos y automatización por WhatsApp.",
+      "url": "https://servitracks.com",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "DOP"
+      }
+    }
+    </script>
+    
+    <!-- JSON-LD Schema for Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "ServiTracks",
+      "url": "https://servitracks.com",
+      "logo": "https://servitracks.com/logo.png",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "telephone": "+1-829-968-1720",
+        "contactType": "customer service",
+        "areaServed": "DO",
+        "availableLanguage": "es"
+      }
+    }
+    </script>
   </head>
   <body class="min-h-full flex flex-col">
     <div id="root"></div>
