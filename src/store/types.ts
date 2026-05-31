@@ -16,6 +16,7 @@ export interface Tenant {
     umbral_diferencia_caja?: number;
     formato_ticket?: '57mm' | '80mm';
     formato_ticket_default?: '57mm' | '80mm';
+    autoDeductInventory?: boolean;
   };
   plan_id?: string;
   estado?: 'ACTIVO' | 'TRIAL' | 'SUSPENDIDO' | 'CANCELADO';
@@ -42,6 +43,13 @@ export interface PrintSettings {
   showChange: boolean;
   copies: number;
   footer: string;
+}
+
+export interface BarcodeSettings {
+  width: number;
+  height: number;
+  showText: boolean;
+  fontSize: number;
 }
 
 export interface Customer {
@@ -187,6 +195,7 @@ export interface Invoice {
   status: 'paid' | 'pending' | 'cancelled';
   ncf?: string;
   notes?: string;
+  isCommissionPaid?: boolean;
   createdAt: string;
 }
 
@@ -275,6 +284,7 @@ export interface MovimientoCaja {
   tipo: TipoMovimiento;
   concepto: string;
   monto: number;
+  monto_mano_obra?: number;
   metodo: MetodoPago;
   creado_en: string;
 }
@@ -360,4 +370,158 @@ export interface ChatMessage {
   reply_to_id?: string | null;
   reactions?: { emoji: string; from: string }[] | null;
   status?: string;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MÓDULO DE PROVEEDORES — Centro de Gestión de Compras y Abastecimiento
+// ════════════════════════════════════════════════════════════════════════════════
+
+export type SupplierType = 'repuestos' | 'lubricantes' | 'neumaticos' | 'herramientas' | 'servicios_externos';
+export type SupplierStatus = 'activo' | 'suspendido' | 'bloqueado';
+export type Currency = 'DOP' | 'USD' | 'EUR';
+
+export interface SupplierContact {
+  name: string;
+  role: string;
+  phone: string;
+  whatsapp?: string;
+  email?: string;
+}
+
+export interface Supplier {
+  id: string;
+  tenantId: string;
+  code: string;              // Auto-generated: PROV-001
+  commercialName: string;
+  legalName?: string;
+  rnc?: string;
+  type: SupplierType;
+  status: SupplierStatus;
+  contacts: SupplierContact[];
+  // Location
+  country?: string;
+  province?: string;
+  city?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  // Commercial Conditions
+  creditLimit?: number;
+  creditDays?: number;
+  generalDiscount?: number;
+  volumeDiscount?: number;
+  currency: Currency;
+  // Evaluation (1-5 stars)
+  ratingDelivery: number;
+  ratingQuality: number;
+  ratingPrice: number;
+  ratingService: number;
+  // Notes
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Vinculación Proveedor-Producto (catálogo del proveedor) */
+export interface SupplierProduct {
+  id: string;
+  tenantId: string;
+  supplierId: string;
+  productId: string;         // Link to existing Product
+  currentPrice: number;
+  lastPrice?: number;
+  lastUpdated: string;
+}
+
+// ──── ÓRDENES DE COMPRA ──────────────────────────────────────────────────────
+
+export type PurchaseOrderStatus = 'borrador' | 'pendiente' | 'enviada' | 'recibida_parcial' | 'recibida_completa' | 'cancelada';
+
+export interface PurchaseOrderItem {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  receivedQuantity: number;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  tenantId: string;
+  supplierId: string;
+  number: string;            // OC-2026-001
+  status: PurchaseOrderStatus;
+  items: PurchaseOrderItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  expectedDelivery?: string;
+}
+
+// ──── RECEPCIÓN DE MERCANCÍA ─────────────────────────────────────────────────
+
+export interface GoodsReceiptItem {
+  productId: string;
+  productName: string;
+  expectedQuantity: number;
+  receivedQuantity: number;
+  damagedQuantity: number;
+  notes?: string;
+}
+
+export interface GoodsReceipt {
+  id: string;
+  tenantId: string;
+  purchaseOrderId: string;
+  supplierId: string;
+  items: GoodsReceiptItem[];
+  receivedAt: string;
+  receivedBy: string;
+  notes?: string;
+}
+
+// ──── CUENTAS POR PAGAR ──────────────────────────────────────────────────────
+
+export type PayableStatus = 'pendiente' | 'parcial' | 'pagada' | 'vencida';
+
+export interface AccountPayable {
+  id: string;
+  tenantId: string;
+  supplierId: string;
+  purchaseOrderId?: string;
+  invoiceNumber: string;
+  amount: number;
+  paidAmount: number;
+  dueDate: string;
+  status: PayableStatus;
+  createdAt: string;
+  paidAt?: string;
+  notes?: string;
+}
+
+// ──── SOLICITUD DE COTIZACIÓN ────────────────────────────────────────────────
+
+export type QuoteRequestStatus = 'pendiente' | 'cotizada' | 'aceptada' | 'rechazada';
+
+export interface QuoteResponse {
+  supplierId: string;
+  price: number;
+  deliveryDays?: number;
+  notes?: string;
+  receivedAt: string;
+}
+
+export interface QuoteRequest {
+  id: string;
+  tenantId: string;
+  productName: string;
+  description?: string;
+  supplierIds: string[];
+  responses: QuoteResponse[];
+  status: QuoteRequestStatus;
+  createdAt: string;
 }

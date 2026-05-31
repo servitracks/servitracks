@@ -57,7 +57,7 @@ export default function Conversations() {
   const location = useLocation();
   const { tenant } = useParams();
   const { tenants } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
 
   const [supabaseTenantId, setSupabaseTenantId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<WaConversation[]>([]);
@@ -269,7 +269,7 @@ export default function Conversations() {
     }
 
     // 2. Send via WaSender API
-    if (currentTenant.wasenderApiKey) {
+    if (currentTenant?.wasenderApiKey) {
       try {
         const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wasender-proxy`;
         
@@ -355,6 +355,8 @@ export default function Conversations() {
       if (selectedConvId === convId) {
         setSelectedConvId(null);
       }
+
+      window.dispatchEvent(new CustomEvent("wa_force_unread_update"));
     } catch (error) {
       console.error("Delete error:", error);
       toast.error("Ocurrió un error al intentar eliminar la conversación");

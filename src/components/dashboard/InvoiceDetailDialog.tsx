@@ -23,7 +23,7 @@ interface InvoiceDetailDialogProps {
 export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDialogProps) {
   const { tenant } = useParams();
   const { customers, updateInvoice, tenants } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
 
   const [editForm, setEditForm] = useState({

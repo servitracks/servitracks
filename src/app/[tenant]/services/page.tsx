@@ -42,8 +42,8 @@ const emptyTechnician: Partial<Technician> = {
 export default function ServicesPage() {
   const { tenant } = useParams();
   const { services, addService, updateService, deleteService, tenants, technicians, addTechnician, updateTechnician, deleteTechnician } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const tenantId = currentTenant?.id || "1";
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
   
   // Services State
   const [search, setSearch] = useState("");
@@ -60,12 +60,14 @@ export default function ServicesPage() {
   const [editingTechnician, setEditingTechnician] = useState<Technician | null>(null);
   const [techForm, setTechForm] = useState(emptyTechnician);
 
-  const filteredServices = services.filter((s) => {
-    const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
-                        s.category?.toLowerCase().includes(search.toLowerCase());
-    const matchCategory = categoryFilter === "Todos" || s.category === categoryFilter;
-    return matchSearch && matchCategory;
-  });
+  const filteredServices = services
+    .filter((s) => !tenantId || s.tenantId === tenantId)
+    .filter((s) => {
+      const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
+                          s.category?.toLowerCase().includes(search.toLowerCase());
+      const matchCategory = categoryFilter === "Todos" || s.category === categoryFilter;
+      return matchSearch && matchCategory;
+    });
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,12 +106,14 @@ export default function ServicesPage() {
   };
 
   // --- Technicians Logic ---
-  const filteredTechnicians = (technicians || []).filter((t) => {
-    const matchSearch = t.name.toLowerCase().includes(techSearch.toLowerCase()) ||
-                        (t.phone && t.phone.toLowerCase().includes(techSearch.toLowerCase()));
-    const matchStatus = techStatusFilter === "all" || t.status === techStatusFilter;
-    return matchSearch && matchStatus;
-  });
+  const filteredTechnicians = (technicians || [])
+    .filter((t) => !tenantId || t.tenantId === tenantId)
+    .filter((t) => {
+      const matchSearch = t.name.toLowerCase().includes(techSearch.toLowerCase()) ||
+                          (t.phone && t.phone.toLowerCase().includes(techSearch.toLowerCase()));
+      const matchStatus = techStatusFilter === "all" || t.status === techStatusFilter;
+      return matchSearch && matchStatus;
+    });
 
   const handleTechSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,9 +160,9 @@ export default function ServicesPage() {
     toast.success(`Técnico ${tech.name} ahora está ${nextStatus === "active" ? "Activo" : "Inactivo"}`);
   };
 
-  const techActiveCount = (technicians || []).filter((t) => t.status === "active").length;
-  const techInactiveCount = (technicians || []).filter((t) => t.status === "inactive").length;
-  const techTotalCount = (technicians || []).length;
+  const techActiveCount = (technicians || []).filter((t) => t.tenantId === tenantId && t.status === "active").length;
+  const techInactiveCount = (technicians || []).filter((t) => t.tenantId === tenantId && t.status === "inactive").length;
+  const techTotalCount = (technicians || []).filter((t) => t.tenantId === tenantId).length;
 
   return (
     <div className="space-y-6">

@@ -60,9 +60,14 @@ export default function RemindersPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { whatsappLogs, customers, vehicles, addWhatsAppLog, tenants, updateTenant, updateWhatsAppLog, deleteWhatsAppLog } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const tenantId = currentTenant?.id || "1";
-  const taller = currentTenant ?? { id: tenantId, name: "", address: "", phone: "", email: "", rnc: "", logo: "" };
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+  const taller = currentTenant ?? { id: tenantId, name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined };
+
+  // Filtrar por tenantId para garantizar el aislamiento de datos multi-tenant
+  const tenantLogs = whatsappLogs.filter((l) => !tenantId || l.tenantId === tenantId);
+  const tenantCustomers = customers.filter((c) => !tenantId || c.tenantId === tenantId);
+  const tenantVehicles = vehicles.filter((v) => !tenantId || v.tenantId === tenantId);
   const [isSendOpen, setIsSendOpen] = useState(false);
   const [isApiOpen, setIsApiOpen] = useState(false);
   const [apiKey, setApiKey] = useState(taller?.wasenderApiKey ?? "");
@@ -95,14 +100,14 @@ export default function RemindersPage() {
   const openNewAuto = () => setEditAuto({ id: `custom_${Date.now()}`, title: "", desc: "", trigger: "Automático", active: true, template: "", kmThreshold: "", timeMonths: "", kmUnit: "km" });
   const isApiConnected = !!(taller?.wasenderApiKey);
 
-  const getCustomerPhone = (id: string) => customers.find((c) => c.id === id)?.phone || "";
+  const getCustomerPhone = (id: string) => tenantCustomers.find((c) => c.id === id)?.phone || "";
   const getCustomerVehicle = (id: string) => {
-    const v = vehicles.find((v) => v.customerId === id);
+    const v = tenantVehicles.find((v) => v.customerId === id);
     return v ? `${v.brand} ${v.model}` : "Vehículo";
   };
 
-  const sentCount = whatsappLogs.filter((l) => l.status === "sent").length;
-  const failedCount = whatsappLogs.filter((l) => l.status === "failed").length;
+  const sentCount = tenantLogs.filter((l) => l.status === "sent").length;
+  const failedCount = tenantLogs.filter((l) => l.status === "failed").length;
 
   // Send via WaSender proxy Edge Function
   const sendWhatsApp = async (phone: string, message: string): Promise<{ ok: boolean; error?: string }> => {
@@ -117,7 +122,7 @@ export default function RemindersPage() {
       toast.error("Selecciona un cliente y escribe el mensaje");
       return;
     }
-    const customer = customers.find((c) => c.id === sendForm.customerId);
+    const customer = tenantCustomers.find((c) => c.id === sendForm.customerId);
     if (!customer) return;
     setIsSending(true);
     try {
@@ -220,9 +225,9 @@ export default function RemindersPage() {
             <TabsList className="bg-neutral-100 p-1 rounded-xl">
               <TabsTrigger value="queue" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm flex items-center gap-1.5">
                 Cola de Envíos
-                {whatsappLogs.filter(l => l.status === "pending").length > 0 && (
+                {tenantLogs.filter(l => l.status === "pending").length > 0 && (
                   <span className="h-5 min-w-[20px] rounded-full bg-rose-500 text-[10px] font-black text-white px-1.5 flex items-center justify-center">
-                    {whatsappLogs.filter(l => l.status === "pending").length}
+                    {tenantLogs.filter(l => l.status === "pending").length}
                   </span>
                 )}
               </TabsTrigger>
@@ -231,7 +236,7 @@ export default function RemindersPage() {
             </TabsList>
 
             <TabsContent value="queue" className="space-y-4">
-              {whatsappLogs.filter(l => l.status === "pending").length === 0 ? (
+              {tenantLogs.filter(l => l.status === "pending").length === 0 ? (
                 <div className="flex flex-col items-center py-20 text-center px-5 bg-white border border-neutral-100 rounded-2xl shadow-sm">
                   <div className="h-14 w-14 rounded-2xl bg-neutral-50 flex items-center justify-center mb-4 border border-neutral-100">
                     <Clock className="h-6 w-6 text-neutral-400" />
@@ -243,8 +248,8 @@ export default function RemindersPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {whatsappLogs.filter(l => l.status === "pending").map((log) => {
-                    const vehicle = vehicles.find((v) => v.customerId === log.customerId);
+                  {tenantLogs.filter(l => l.status === "pending").map((log) => {
+                    const vehicle = tenantVehicles.find((v) => v.customerId === log.customerId);
                     return (
                       <Card key={log.id} className="border-neutral-100 shadow-sm hover:border-neutral-200 transition-all bg-white overflow-hidden">
                         <CardContent className="p-5">
@@ -378,14 +383,14 @@ export default function RemindersPage() {
             <TabsContent value="logs">
               <Card className="border-neutral-100 shadow-sm overflow-hidden">
                 <CardContent className="p-0">
-                  {whatsappLogs.length === 0 ? (
+                  {tenantLogs.length === 0 ? (
                     <div className="flex flex-col items-center py-14 text-center px-5">
                       <MessageSquare className="h-10 w-10 text-neutral-200 mb-3" />
                       <p className="text-sm font-medium text-neutral-500">Sin mensajes enviados aún.</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-neutral-100">
-                      {[...whatsappLogs].reverse().map((log) => (
+                      {[...tenantLogs].reverse().map((log) => (
                         <div key={log.id} className="flex items-start justify-between p-5 hover:bg-neutral-50/50 transition-colors">
                           <div className="flex items-start gap-3">
                             <div className={cn("h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0",
@@ -458,7 +463,7 @@ export default function RemindersPage() {
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-neutral-400">Clientes Inactivos</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {customers.slice(0, 3).map((c) => (
+              {tenantCustomers.slice(0, 3).map((c) => (
                 <div key={c.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="h-8 w-8 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-bold text-neutral-600">
@@ -494,12 +499,12 @@ export default function RemindersPage() {
                 <SelectTrigger className="h-10 rounded-xl border-neutral-200">
                   <span className="truncate text-sm">
                     {sendForm.customerId
-                      ? customers.find((c) => c.id === sendForm.customerId)?.name + " — " + customers.find((c) => c.id === sendForm.customerId)?.phone
+                      ? tenantCustomers.find((c) => c.id === sendForm.customerId)?.name + " — " + tenantCustomers.find((c) => c.id === sendForm.customerId)?.phone
                       : <span className="text-neutral-400">Seleccionar cliente</span>}
                   </span>
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>)}
+                  {tenantCustomers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

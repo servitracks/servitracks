@@ -32,11 +32,17 @@ export default function POSPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement } = useStore();
-  const currentTenant = tenants.find(t => t.slug === tenant) || tenants[0];
+  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement } = useStore();
+  const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
-  const tenantId = currentTenant?.id || "1";
+  const tenantId = currentTenant?.id ?? "";
   const activeCaja = cajas?.find(c => c.tenant_id === tenantId && c.estado === 'ABIERTA');
+
+  // Filtrar por tenantId para garantizar el aislamiento de datos multi-tenant
+  const tenantProducts = tenantId ? products.filter((p) => p.tenantId === tenantId) : [];
+  const tenantOrders = tenantId ? orders.filter((o) => o.tenantId === tenantId) : [];
+  const tenantServices = tenantId ? services.filter((s) => s.tenantId === tenantId) : [];
+  const tenantTechnicians = tenantId ? technicians.filter((t) => t.tenantId === tenantId) : [];
 
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
 
@@ -46,7 +52,7 @@ export default function POSPage() {
     }
   }, [orderId]);
 
-  const currentOrder = activeOrderId ? orders.find(o => o.id === activeOrderId) : null;
+  const currentOrder = activeOrderId ? tenantOrders.find(o => o.id === activeOrderId) : null;
   const [posMechanicId, setPosMechanicId] = useState<string>("");
 
   const serviceToProduct = (s: Service): Product => ({
@@ -93,13 +99,14 @@ export default function POSPage() {
   const [isLinkOrderOpen, setIsLinkOrderOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const CATEGORIES = ["Todos", ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))];
+  const CATEGORIES = ["Todos", ...Array.from(new Set(tenantProducts.map((p) => p.category).filter(Boolean)))];
 
   // Filter inventory: if an order with services is active, only show related products
-  const filteredProducts = products.filter((p) => {
+  const filteredProducts = tenantProducts.filter((p) => {
     const matchCat = category === "Todos" || p.category === category;
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku?.toLowerCase().includes(search.toLowerCase()) ||
+      p.barcode?.toLowerCase().includes(search.toLowerCase()) ||
       p.brand?.toLowerCase().includes(search.toLowerCase());
 
     if (activeServiceIds.length > 0) {
@@ -110,7 +117,7 @@ export default function POSPage() {
       }
 
       // 2. Implicit link (AI/imported products): Match by general category mapped to service
-      const activeServices = services.filter(s => activeServiceIds.includes(s.id));
+      const activeServices = tenantServices.filter(s => activeServiceIds.includes(s.id));
       const allowedCategories = activeServices.flatMap(s => SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES[s.category || ""] || []);
       
       if (allowedCategories.length > 0) {
@@ -165,10 +172,27 @@ export default function POSPage() {
 
   const removeItem = (id: string) => setCart((prev) => prev.filter((i) => i.id !== id));
 
+  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && search.trim()) {
+      e.preventDefault();
+      const query = search.trim().toLowerCase();
+      // Búsqueda exacta por código de barras o SKU
+      const exactMatch = filteredProducts.find(
+        (p) => p.barcode?.toLowerCase() === query || p.sku.toLowerCase() === query
+      );
+      if (exactMatch) {
+        addToCart(exactMatch);
+        setSearch(""); // Limpiar para el siguiente escaneo
+      } else {
+        toast.error("Producto no encontrado por código");
+      }
+    }
+  };
+
   const handleAddLabor = (amount: number) => {
     const laborItem: CartItem = {
       id: `labor-${Date.now()}`,
-      tenantId: "1",
+      tenantId: tenantId,
       name: "Mano de obra",
       sku: "MANO-OBRA",
       category: "Servicios",
@@ -203,6 +227,9 @@ export default function POSPage() {
   };
 
   const handleCheckout = () => {
+    if (!posMechanicId || posMechanicId === "none") {
+      toast.error("Debe asignar un técnico o mecánico a la factura"); return;
+    }
     if (payMethod === "cash" && cashNum < total) {
       toast.error("El efectivo recibido es menor al total"); return;
     }
@@ -228,7 +255,39 @@ export default function POSPage() {
       createdAt: new Date().toISOString(),
     };
     addInvoice(inv);
+
+    // ── INVENTARIO INTELIGENTE: Descuento Automático (Modo Seguro) ──
+    const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+    if (currentTenantConfig?.autoDeductInventory) {
+      cart.forEach(item => {
+        // Ignorar items de mano de obra
+        if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
+        
+        // 1. Actualizar stock
+        const newStock = Math.max(0, item.stock - item.quantity);
+        updateProduct(item.id, { stock: newStock });
+        
+        // 2. Registrar movimiento en el historial
+        addMovement({
+          id: `m-pos-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          tenantId: tenantId,
+          productId: item.id,
+          productName: item.name,
+          type: "out",
+          quantity: item.quantity,
+          reason: `Venta POS - Factura ${inv.ncf}`,
+          date: new Date().toISOString(),
+        });
+      });
+      toast.success("Inventario descontado automáticamente");
+    }
+
     if (activeCaja) {
+      const laborTotal = cart
+        .filter(i => i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.category === "Servicios")
+        .reduce((sum, item) => sum + (item.salePrice * item.quantity), 0);
+      const monto_mano_obra = Math.round(laborTotal * 1.18); // Incluyendo ITBIS base del 18%
+
       addCajaMovement({
         id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         tenant_id: tenantId,
@@ -237,6 +296,7 @@ export default function POSPage() {
         tipo: 'VENTA',
         concepto: `Venta POS - Factura ${inv.ncf || inv.id}`,
         monto: total,
+        monto_mano_obra: monto_mano_obra > 0 ? monto_mano_obra : undefined,
         metodo: payMethod === 'cash' ? 'EFECTIVO' : payMethod === 'card' ? 'TARJETA' : 'TRANSFERENCIA',
         creado_en: new Date().toISOString(),
       });
@@ -284,7 +344,7 @@ export default function POSPage() {
           total={total}
           payMethod={payMethod}
           cashReceived={cashNum}
-          mechanicName={posMechanicId ? technicians.find(t => t.id === posMechanicId)?.name : undefined}
+          mechanicName={posMechanicId ? tenantTechnicians.find(t => t.id === posMechanicId)?.name : undefined}
         />
       </div>
 
@@ -320,9 +380,9 @@ export default function POSPage() {
             </div>
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-              <Input ref={searchRef} placeholder="Buscar producto (F1)..."
+              <Input ref={searchRef} placeholder="Buscar producto o código (F1)..."
                 className="pl-9 h-9 rounded-lg bg-neutral-50 border-neutral-200 text-sm"
-                value={search} onChange={(e) => setSearch(e.target.value)} />
+                value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={handleBarcodeScan} />
             </div>
             
             <Button 
@@ -504,7 +564,7 @@ export default function POSPage() {
                 </SelectTrigger>
                 <SelectContent className="rounded-xl z-[200]">
                   <SelectItem value="none">Sin asignar</SelectItem>
-                  {technicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
+                  {tenantTechnicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
                     <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                   ))}
                 </SelectContent>

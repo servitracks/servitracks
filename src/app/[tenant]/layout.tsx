@@ -28,26 +28,35 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadChatsCount, setUnreadChatsCount] = useState(0);
 
-  // Redirigir a login si no está autenticado (una vez hidratado el store)
+  const tenantSlug =
+    params.tenant && params.tenant !== "undefined"
+      ? (params.tenant as string)
+      : null;
+
+  // IMPORTANTE: No usar || tenants[0] como fallback para evitar que datos
+  // de otros tenants (ej. "autocheck") aparezcan en nuevos usuarios.
+  const currentTenant = tenantSlug
+    ? tenants.find((t) => t.slug === tenantSlug) ?? null
+    : null;
+  const isPending = currentTenant?.status === "pending";
+
+  // Redirigir a login si no está autenticado o si el tenant no existe (una vez hidratado el store)
   useEffect(() => {
-    if (hydrated && !currentUserId) {
+    if (!hydrated) return;
+    if (!currentUserId) {
+      navigate("/login");
+      return;
+    }
+    // Si el slug en la URL no coincide con ningún tenant del usuario, redirigir a login
+    if (tenantSlug && tenants.length > 0 && !tenants.find((t) => t.slug === tenantSlug)) {
       navigate("/login");
     }
-  }, [hydrated, currentUserId, navigate]);
+  }, [hydrated, currentUserId, tenantSlug, tenants, navigate]);
 
   // Cerrar sidebar al cambiar de página
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
-
-
-  const tenantSlug =
-    params.tenant && params.tenant !== "undefined"
-      ? (params.tenant as string)
-      : "autocheck";
-
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
-  const isPending = currentTenant?.status === "pending";
 
   // --- ESCUCHA GLOBAL EN TIEMPO REAL PARA WHATSAPP ---
   useEffect(() => {
@@ -126,11 +135,23 @@ export default function DashboardLayout() {
         console.log("[Global RT Subscription]", status, err || "");
       });
 
-    return () => { supabase.removeChannel(ch); };
+    window.addEventListener("wa_force_unread_update", fetchUnreadCount);
+
+    return () => { 
+      supabase.removeChannel(ch); 
+      window.removeEventListener("wa_force_unread_update", fetchUnreadCount);
+    };
   }, [currentTenant?.id]);
 
+  if (!currentTenant) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-neutral-50/50">
+        <span className="text-sm font-medium text-neutral-500">Cargando sucursal...</span>
+      </div>
+    );
+  }
   
-  const trialDays = currentTenant?.trial_hasta ? Math.max(0, Math.ceil((new Date(currentTenant.trial_hasta).getTime() - Date.now()) / 86400000)) : 0;
+  const trialDays = currentTenant.trial_hasta ? Math.max(0, Math.ceil((new Date(currentTenant.trial_hasta).getTime() - Date.now()) / 86400000)) : 0;
   const isTrialExpired = currentTenant?.estado === "TRIAL" && currentTenant.trial_hasta && new Date(currentTenant.trial_hasta).getTime() < Date.now();
   const isSuspended = currentTenant?.estado === "SUSPENDIDO" || currentTenant?.estado === "CANCELADO";
 

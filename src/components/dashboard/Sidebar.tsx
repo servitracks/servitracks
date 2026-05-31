@@ -19,6 +19,7 @@ import {
   UserCog,
   Wallet,
   MessageCircle,
+  Truck,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,6 +33,7 @@ const navigation = [
   { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench },
   { name: "Clientes", href: "/customers", icon: Users },
   { name: "Inventario", href: "/inventory", icon: Package },
+  { name: "Proveedores", href: "/proveedores", icon: Truck },
   { name: "Servicios", href: "/services", icon: LayoutDashboard },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText },
   { name: "Control de Caja", href: "/caja", icon: Wallet },
@@ -74,10 +76,10 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
       ? (params.tenant as string)
       : "autocheck";
 
-  const lowStockCount = products.filter((p) => p.stock <= p.minStock).length;
-  const pendingOrdersCount = orders.filter((o) => o.status === "pending").length;
-
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+  const lowStockCount = products.filter((p) => p.tenantId === tenantId && p.stock <= p.minStock).length;
+  const pendingOrdersCount = orders.filter((o) => o.tenantId === tenantId && o.status === "pending").length;
   const tenantName = currentTenant ? currentTenant.name : tenantSlug.replace(/-/g, " ");
 
   const handleTenantChange = (newSlug: string) => {

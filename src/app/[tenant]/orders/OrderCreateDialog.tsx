@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/store/types";
@@ -34,18 +34,24 @@ interface OrderCreateDialogProps {
 }
 
 export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDialogProps) {
-  const customers = useStore((s) => s.customers);
-  const vehicles = useStore((s) => s.vehicles);
-  const services = useStore((s) => s.services);
-  const technicians = useStore((s) => s.technicians);
+  const { tenant } = useParams();
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const allCustomers = useStore((s) => s.customers);
+  const allVehicles = useStore((s) => s.vehicles);
+  const allServices = useStore((s) => s.services);
+  const allTechnicians = useStore((s) => s.technicians);
+
+  const customers = tenantId ? allCustomers.filter((c) => c.tenantId === tenantId) : [];
+  const vehicles = tenantId ? allVehicles.filter((v) => v.tenantId === tenantId) : [];
+  const services = tenantId ? allServices.filter((s) => s.tenantId === tenantId) : [];
+  const technicians = tenantId ? allTechnicians.filter((t) => t.tenantId === tenantId) : [];
+
   const addOrder = useStore((s) => s.addOrder);
   const updateVehicle = useStore((s) => s.updateVehicle);
   const addVehicle = useStore((s) => s.addVehicle);
-  const tenants = useStore((s) => s.tenants);
-
-  const { tenant } = useParams();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const tenantId = currentTenant?.id || "1";
 
   const [form, setForm] = useState<FormData>(emptyForm);
   const [isServicePicker, setIsServicePicker] = useState(false);
@@ -128,7 +134,8 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
         setForm(emptyForm);
       }
     }
-  }, [open, searchParams, services]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const availableVehicles = vehicles.filter((v) => v.customerId === form.customerId);
 
@@ -136,6 +143,10 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
     e.preventDefault();
     if (!form.customerId || !form.vehicleId || !form.description) {
       toast.error("Cliente, vehículo y descripción son obligatorios");
+      return;
+    }
+    if (!form.mechanicId || form.mechanicId === "none") {
+      toast.error("Debe asignar un técnico a la orden de trabajo");
       return;
     }
     const newOrder: WorkOrder = {
@@ -178,16 +189,16 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               {/* Cliente */}
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-neutral-600">Cliente *</Label>
-                <Select value={form.customerId} onValueChange={(v) => setForm({ ...form, customerId: v || "", vehicleId: "" })}>
+                <Select 
+                  value={form.customerId || undefined} 
+                  onValueChange={(v) => setForm(prev => ({ ...prev, customerId: v || "", vehicleId: "" }))}
+                  items={customers.map((c) => ({ value: c.id, label: `${c.name} — ${c.phone}` }))}
+                >
                   <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                    <span className="text-sm truncate">
-                      {form.customerId
-                        ? customers.find((c) => c.id === form.customerId)?.name ?? "Cliente"
-                        : <span className="text-neutral-400">Seleccionar cliente</span>}
-                    </span>
+                    <SelectValue placeholder="Seleccionar cliente" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl z-[200]">
-                    {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>)}
+                    {customers.map((c) => <SelectItem key={c.id} value={c.id}>{`${c.name} — ${c.phone}`}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -203,16 +214,17 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                     </button>
                   )}
                 </div>
-                <Select value={form.vehicleId} onValueChange={(v) => setForm({ ...form, vehicleId: v || "" })} disabled={!form.customerId}>
+                <Select 
+                  value={form.vehicleId || undefined} 
+                  onValueChange={(v) => setForm(prev => ({ ...prev, vehicleId: v || "" }))} 
+                  disabled={!form.customerId}
+                  items={availableVehicles.map((v) => ({ value: v.id, label: `${v.brand} ${v.model} — ${v.plate}` }))}
+                >
                   <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                    <span className="text-sm truncate">
-                      {form.vehicleId
-                        ? (() => { const v = availableVehicles.find(v => v.id === form.vehicleId); return v ? `${v.brand} ${v.model} — ${v.plate}` : "Vehículo"; })()
-                        : <span className="text-neutral-400">{form.customerId ? "Seleccionar vehículo" : "Primero selecciona cliente"}</span>}
-                    </span>
+                    <SelectValue placeholder={form.customerId ? "Seleccionar vehículo" : "Primero selecciona cliente"} />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl z-[200]">
-                    {availableVehicles.map((v) => <SelectItem key={v.id} value={v.id}>{v.brand} {v.model} — {v.plate}</SelectItem>)}
+                    {availableVehicles.map((v) => <SelectItem key={v.id} value={v.id}>{`${v.brand} ${v.model} — ${v.plate}`}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -267,14 +279,17 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
 
               {/* Técnico Asignado */}
               <div className="space-y-1">
-                <Label className="text-xs font-bold text-neutral-600">Técnico Asignado</Label>
-                <Select value={form.mechanicId} onValueChange={(v) => setForm({ ...form, mechanicId: v === "none" ? "" : (v || "") })}>
+                <Label className="text-xs font-bold text-neutral-600">Técnico Asignado *</Label>
+                <Select 
+                  value={form.mechanicId || undefined} 
+                  onValueChange={(v) => setForm(prev => ({ ...prev, mechanicId: v === "none" ? "" : (v || "") }))}
+                  items={[
+                    { value: "none", label: "Sin asignar" },
+                    ...technicians.filter(t => t.status === "active").map((t) => ({ value: t.id, label: t.name }))
+                  ]}
+                >
                   <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                    <span className="text-sm truncate">
-                      {form.mechanicId
-                        ? technicians.find((t) => t.id === form.mechanicId)?.name ?? "Técnico"
-                        : <span className="text-neutral-400">Seleccionar técnico (opcional)</span>}
-                    </span>
+                    <SelectValue placeholder="Seleccionar técnico" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl z-[200]">
                     <SelectItem value="none">Sin asignar</SelectItem>
@@ -361,7 +376,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                                 .filter(s => newIds.includes(s.id))
                                 .map(s => s.name)
                                 .join(", ");
-                              setForm({ ...form, serviceIds: newIds, description: newDesc });
+                              setForm(prev => ({ ...prev, serviceIds: newIds, description: newDesc }));
                             }}
                             className={cn(
                               "text-left p-3 rounded-xl border-2 transition-all hover:shadow-sm",
@@ -395,7 +410,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               <input
                 placeholder="Ej: Revisión general + diagnóstico..."
                 value={form.description}
-                onChange={e => setForm({ ...form, description: e.target.value })}
+                onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
                 className="flex-1 h-9 px-3 rounded-lg border border-neutral-200 text-sm focus:outline-none focus:border-neutral-400 transition-colors"
               />
               <button type="button"

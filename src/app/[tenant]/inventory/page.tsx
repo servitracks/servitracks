@@ -17,6 +17,7 @@ import {
   TrendingUp,
   Edit,
   Trash2,
+  Printer,
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
@@ -60,6 +61,8 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import ImportWizardModal from "@/components/inventory/ImportWizardModal";
 import { ImportRow } from "@/components/inventory/StepPreviewEditor";
+import QuoteRequestDialog from "@/components/inventory/QuoteRequestDialog";
+import PrintLabelDialog from "@/components/inventory/PrintLabelDialog";
 
 const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
 
@@ -82,9 +85,10 @@ interface ProductFieldsProps {
   setForm: (update: (prev: ProductForm) => ProductForm) => void;
   isEditOpen: boolean;
   services: { id: string; name: string; category?: string }[];
+  suppliers: { id: string; commercialName: string }[];
 }
 
-const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductFieldsProps) => {
+const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: ProductFieldsProps) => {
   const serviceCategories = useMemo(() => {
     const cats: Record<string, typeof services> = {};
     services.forEach((s) => {
@@ -180,9 +184,9 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductField
       </div>
 
       <div className="space-y-1.5">
-        <Label>SKU *</Label>
+        <Label>SKU</Label>
         <Input 
-          placeholder="Ej: CAS-MAG-01" 
+          placeholder="Automático si se deja vacío" 
           className="h-10 rounded-xl border-neutral-200"
           value={form.sku} 
           onChange={(e) => setForm((prev) => ({ ...prev, sku: e.target.value }))} 
@@ -191,7 +195,7 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductField
       <div className="space-y-1.5">
         <Label>Código de Barras</Label>
         <Input 
-          placeholder="Opcional" 
+          placeholder="Automático si se deja vacío" 
           className="h-10 rounded-xl border-neutral-200"
           value={form.barcode} 
           onChange={(e) => setForm((prev) => ({ ...prev, barcode: e.target.value }))} 
@@ -274,12 +278,24 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductField
       </div>
       <div className="space-y-1.5">
         <Label>Proveedor</Label>
-        <Input 
-          placeholder="Ej: Distribuidora X" 
-          className="h-10 rounded-xl border-neutral-200"
-          value={form.supplier} 
-          onChange={(e) => setForm((prev) => ({ ...prev, supplier: e.target.value }))} 
-        />
+        <Select 
+          value={form.supplier || undefined} 
+          onValueChange={(v) => setForm((prev) => ({ ...prev, supplier: (v || "") === "none" ? "" : (v || "") }))}
+          items={[
+            { value: "none", label: "Sin proveedor asignado" },
+            ...suppliers.map(s => ({ value: s.commercialName, label: s.commercialName }))
+          ]}
+        >
+          <SelectTrigger className="h-10 rounded-xl border-neutral-200">
+            <SelectValue placeholder="Seleccionar proveedor" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl">
+            <SelectItem value="none">Sin proveedor asignado</SelectItem>
+            {suppliers.map(s => (
+              <SelectItem key={s.id} value={s.commercialName}>{s.commercialName}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-1.5">
         <Label>Ubicación en Almacén</Label>
@@ -296,14 +312,32 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services }: ProductField
 
 export default function InventoryPage() {
   const params = useParams();
-  const tenantId = (params?.tenant as string) || "1";
-  const { products, services, addProduct, updateProduct, deleteProduct, addMovement, movements } = useStore();
+  const tenantSlug = params?.tenant as string;
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const { addProduct, updateProduct, deleteProduct, addMovement } = useStore();
+  const allProducts = useStore((s) => s.products);
+  const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
+
+  const allServices = useStore((s) => s.services);
+  const services = tenantId ? allServices.filter((s) => s.tenantId === tenantId) : [];
+
+  const allMovements = useStore((s) => s.movements);
+  const movements = tenantId ? allMovements.filter((m) => m.tenantId === tenantId) : [];
+
+  const allSuppliers = useStore((s) => s.suppliers);
+  const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && s.status === "activo") : [];
+
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isQuoteOpen, setIsQuoteOpen] = useState(false);
+  const [isPrintLabelOpen, setIsPrintLabelOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [adjustQty, setAdjustQty] = useState("");
@@ -314,6 +348,7 @@ export default function InventoryPage() {
     const matchSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase()) ||
+      (p.barcode || "").toLowerCase().includes(search.toLowerCase()) ||
       (p.brand || "").toLowerCase().includes(search.toLowerCase());
     const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
     return matchSearch && matchCat;
@@ -325,16 +360,23 @@ export default function InventoryPage() {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.sku || !form.category) {
-      toast.error("Nombre, SKU y categoría son obligatorios");
+    if (!form.name || !form.category) {
+      toast.error("El nombre y categoría son obligatorios");
       return;
     }
+    // Auto-generación de SKU y Código de barras si no se proveen
+    const sequentialId = products.length + 1;
+    const generatedCode = `STK${String(sequentialId).padStart(7, '0')}`;
+    
+    const finalSku = form.sku.trim() || `SKU-${generatedCode}`;
+    const finalBarcode = form.barcode.trim() || generatedCode;
+
     const newProduct: Product = {
       id: `p${Date.now()}`,
       tenantId: tenantId,
       name: form.name,
-      sku: form.sku,
-      barcode: form.barcode,
+      sku: finalSku,
+      barcode: finalBarcode,
       category: form.category,
       brand: form.brand,
       supplier: form.supplier,
@@ -639,6 +681,15 @@ export default function InventoryPage() {
                             <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openAdjust(product)}>
                               <ArrowUpDown className="h-4 w-4" /> Ajustar Stock
                             </DropdownMenuItem>
+                            {product.stock <= 0 && (
+                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-blue-600 focus:text-blue-600" onClick={() => { setSelectedProduct(product); setIsQuoteOpen(true); }}>
+                                <TrendingUp className="h-4 w-4" /> Solicitar Cotización
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}>
+                              <Printer className="h-4 w-4" /> Imprimir Etiqueta
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
                               onClick={() => handleDelete(product.id, product.name)}>
@@ -699,7 +750,7 @@ export default function InventoryPage() {
             <DialogTitle className="text-xl font-bold">Nuevo Producto</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 py-2">
-            <ProductFormFields form={form} setForm={setForm} isEditOpen={false} services={services} />
+            <ProductFormFields form={form} setForm={setForm} isEditOpen={false} services={services} suppliers={suppliers} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)} className="rounded-xl">Cancelar</Button>
               <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Crear Producto</Button>
@@ -715,7 +766,7 @@ export default function InventoryPage() {
             <DialogTitle className="text-xl font-bold">Editar Producto</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleEdit} className="space-y-4 py-2">
-            <ProductFormFields form={form} setForm={setForm} isEditOpen={true} services={services} />
+            <ProductFormFields form={form} setForm={setForm} isEditOpen={true} services={services} suppliers={suppliers} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)} className="rounded-xl">Cancelar</Button>
               <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Guardar Cambios</Button>
@@ -774,6 +825,19 @@ export default function InventoryPage() {
         open={isImportOpen}
         onClose={() => setIsImportOpen(false)}
         onImport={handleImport}
+      />
+
+      <QuoteRequestDialog
+        open={isQuoteOpen}
+        onOpenChange={(o) => { if (!o) setIsQuoteOpen(false); }}
+        product={selectedProduct}
+        tenantId={tenantId}
+      />
+
+      <PrintLabelDialog
+        open={isPrintLabelOpen}
+        onOpenChange={(o) => { if (!o) setIsPrintLabelOpen(false); }}
+        product={selectedProduct}
       />
     </div>
   );

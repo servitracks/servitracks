@@ -2,6 +2,7 @@
 
 import { useState, lazy, Suspense } from "react";
 import { useStore } from "@/store/useStore";
+import { useParams } from "@/lib/next-compat";
 import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Download,
   ArrowUpRight, ArrowDownRight,
@@ -15,7 +16,21 @@ import { cn } from "@/lib/utils";
 const ReportCharts = lazy(() => import("./ReportCharts"));
 
 export default function ReportsPage() {
-  const { invoices, orders, customers } = useStore();
+  const params = useParams();
+  const tenantSlug = params?.tenant as string;
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const allInvoices = useStore((s) => s.invoices);
+  const invoices = tenantId ? allInvoices.filter((i) => i.tenantId === tenantId) : [];
+
+  const allOrders = useStore((s) => s.orders);
+  const orders = tenantId ? allOrders.filter((o) => o.tenantId === tenantId) : [];
+
+  const allCustomers = useStore((s) => s.customers);
+  const customers = tenantId ? allCustomers.filter((c) => c.tenantId === tenantId) : [];
+
   const [period, setPeriod] = useState<"week" | "month" | "year">("month");
 
   const paidInvoices = invoices.filter((i) => i.status === "paid");

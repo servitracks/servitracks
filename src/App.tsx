@@ -21,6 +21,7 @@ import ServicesPage from "./app/[tenant]/services/page";
 import SettingsPage from "./app/[tenant]/settings/page";
 import CajaPage from "./app/[tenant]/caja/page";
 import ConversacionesPage from "./app/[tenant]/conversaciones/page";
+import ProveedoresPage from "./app/[tenant]/proveedores/page";
 import Admin from "./app/admin/page";
 import BlogIndex from "./app/blog/page";
 import BlogPost from "./app/blog/[slug]/page";
@@ -70,6 +71,7 @@ export default function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="maintenance" element={<MaintenancePage />} />
           <Route path="conversaciones" element={<ConversacionesPage />} />
+          <Route path="proveedores" element={<ProveedoresPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="caja" element={<CajaPage />} />
         </Route>

@@ -16,7 +16,11 @@ export function MessagesPanel() {
   const router = useRouter();
   const { tenant } = useParams();
   const tenantSlug = tenant || "autocheck";
-  const whatsappLogs = useStore((s) => s.whatsappLogs);
+  const allLogs = useStore((s) => s.whatsappLogs);
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+  const whatsappLogs = allLogs.filter((l) => l.tenantId === tenantId);
   const [showAll, setShowAll] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [autoPilot, setAutoPilot] = useState(false);

@@ -31,15 +31,21 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuClick }: TopBarProps) {
-  const maintenanceAlerts = useStore((s) => s.maintenanceAlerts);
-  const whatsappLogs = useStore((s) => s.whatsappLogs);
+  const params = useParams();
+  const tenantSlug = params.tenant || "autocheck";
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+  
+  const allAlerts = useStore((s) => s.maintenanceAlerts);
+  const maintenanceAlerts = allAlerts.filter((a) => a.tenantId === tenantId);
+  const allLogs = useStore((s) => s.whatsappLogs);
+  const whatsappLogs = allLogs.filter((l) => l.tenantId === tenantId);
   const users = useStore((s) => s.users);
   const updateUser = useStore((s) => s.updateUser);
   const currentUserId = useStore((s) => s.currentUserId);
   const setCurrentUserId = useStore((s) => s.setCurrentUserId);
   const navigate = useNavigate();
-  const params = useParams();
-  const tenantSlug = params.tenant || "autocheck";
   
   const pendingAlertsCount = maintenanceAlerts.filter((a: any) => a.status === 'pending').length;
   const pendingMessagesCount = whatsappLogs.filter((l: any) => l.status === 'failed' || l.status === 'pending').length;

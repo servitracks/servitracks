@@ -1,14 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
-  Tenant, TenantUser, PrintSettings, Customer, Vehicle,
+  Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle,
   Service, Product, InventoryMovement, WorkOrder, Invoice,
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
-  Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage
+  Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
+  Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -37,8 +38,17 @@ interface AppState {
   maintenanceHistory: MaintenanceHistoryItem[];
   maintenanceAlerts: MaintenanceAlert[];
   printSettings: PrintSettings;
+  barcodeSettings: BarcodeSettings;
   conversations: Conversation[];
   chatMessages: ChatMessage[];
+
+  // Proveedores
+  suppliers: Supplier[];
+  supplierProducts: SupplierProduct[];
+  purchaseOrders: PurchaseOrder[];
+  goodsReceipts: GoodsReceipt[];
+  accountsPayable: AccountPayable[];
+  quoteRequests: QuoteRequest[];
 
   // Tenant
   setTenants: (tenants: Tenant[]) => void;
@@ -59,6 +69,7 @@ interface AppState {
 
   // Print settings
   updatePrintSettings: (updates: Partial<PrintSettings>) => void;
+  updateBarcodeSettings: (updates: Partial<BarcodeSettings>) => void;
 
   // Customers
   addCustomer: (customer: Customer) => void;
@@ -104,6 +115,22 @@ interface AppState {
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
   addChatMessage: (msg: ChatMessage) => void;
   updateChatMessage: (id: string, updates: Partial<ChatMessage>) => void;
+
+  // Proveedores
+  addSupplier: (supplier: Supplier) => void;
+  updateSupplier: (id: string, updates: Partial<Supplier>) => void;
+  deleteSupplier: (id: string) => void;
+  addSupplierProduct: (sp: SupplierProduct) => void;
+  updateSupplierProduct: (id: string, updates: Partial<SupplierProduct>) => void;
+  deleteSupplierProduct: (id: string) => void;
+  addPurchaseOrder: (po: PurchaseOrder) => void;
+  updatePurchaseOrder: (id: string, updates: Partial<PurchaseOrder>) => void;
+  deletePurchaseOrder: (id: string) => void;
+  addGoodsReceipt: (gr: GoodsReceipt) => void;
+  addAccountPayable: (ap: AccountPayable) => void;
+  updateAccountPayable: (id: string, updates: Partial<AccountPayable>) => void;
+  addQuoteRequest: (qr: QuoteRequest) => void;
+  updateQuoteRequest: (id: string, updates: Partial<QuoteRequest>) => void;
 
   // Maintenance
   addMaintenanceItem: (item: MaintenanceItem) => void;
@@ -193,6 +220,13 @@ export const useStore = create<AppState>()(
         footer: '¡Gracias por su preferencia!',
       },
 
+      barcodeSettings: {
+        width: 1.5,
+        height: 40,
+        showText: true,
+        fontSize: 14,
+      },
+
       customers: [],
 
       vehicles: [],
@@ -219,6 +253,14 @@ export const useStore = create<AppState>()(
       conversations: [],
 
       chatMessages: [],
+
+      // Proveedores
+      suppliers: [],
+      supplierProducts: [],
+      purchaseOrders: [],
+      goodsReceipts: [],
+      accountsPayable: [],
+      quoteRequests: [],
 
       // Actions
       setCurrentUserId: (id) => set({ currentUserId: id }),
@@ -248,6 +290,9 @@ export const useStore = create<AppState>()(
 
       updatePrintSettings: (updates) =>
         set((state) => ({ printSettings: { ...state.printSettings, ...updates } })),
+
+      updateBarcodeSettings: (updates) =>
+        set((state) => ({ barcodeSettings: { ...state.barcodeSettings, ...updates } })),
 
       addCustomer: (customer) => set((state) => ({ customers: [...state.customers, customer] })),
       updateCustomer: (id, updates) =>
@@ -365,6 +410,46 @@ export const useStore = create<AppState>()(
       updateChatMessage: (id, updates) =>
         set((state) => ({
           chatMessages: state.chatMessages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+        })),
+
+      // ──── PROVEEDORES ────────────────────────────────────────────────────────
+      addSupplier: (supplier) =>
+        set((state) => ({ suppliers: [...state.suppliers, supplier] })),
+      updateSupplier: (id, updates) =>
+        set((state) => ({
+          suppliers: state.suppliers.map((s) => (s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s)),
+        })),
+      deleteSupplier: (id) =>
+        set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) })),
+      addSupplierProduct: (sp) =>
+        set((state) => ({ supplierProducts: [...state.supplierProducts, sp] })),
+      updateSupplierProduct: (id, updates) =>
+        set((state) => ({
+          supplierProducts: state.supplierProducts.map((sp) => (sp.id === id ? { ...sp, ...updates } : sp)),
+        })),
+      deleteSupplierProduct: (id) =>
+        set((state) => ({ supplierProducts: state.supplierProducts.filter((sp) => sp.id !== id) })),
+      addPurchaseOrder: (po) =>
+        set((state) => ({ purchaseOrders: [...state.purchaseOrders, po] })),
+      updatePurchaseOrder: (id, updates) =>
+        set((state) => ({
+          purchaseOrders: state.purchaseOrders.map((po) => (po.id === id ? { ...po, ...updates, updatedAt: new Date().toISOString() } : po)),
+        })),
+      deletePurchaseOrder: (id) =>
+        set((state) => ({ purchaseOrders: state.purchaseOrders.filter((po) => po.id !== id) })),
+      addGoodsReceipt: (gr) =>
+        set((state) => ({ goodsReceipts: [...state.goodsReceipts, gr] })),
+      addAccountPayable: (ap) =>
+        set((state) => ({ accountsPayable: [...state.accountsPayable, ap] })),
+      updateAccountPayable: (id, updates) =>
+        set((state) => ({
+          accountsPayable: state.accountsPayable.map((ap) => (ap.id === id ? { ...ap, ...updates } : ap)),
+        })),
+      addQuoteRequest: (qr) =>
+        set((state) => ({ quoteRequests: [...state.quoteRequests, qr] })),
+      updateQuoteRequest: (id, updates) =>
+        set((state) => ({
+          quoteRequests: state.quoteRequests.map((qr) => (qr.id === id ? { ...qr, ...updates } : qr)),
         })),
 
       addMaintenanceItem: (item) =>
@@ -711,6 +796,7 @@ export const useStore = create<AppState>()(
             licencias: [],
             globalConfig: { requirePlanOnRegistration: true, trialDays: 14, defaultPlanId: 'basico' },
             printSettings: _persistedState?.printSettings ?? { paperSize: '80mm', showLogo: true, showNcf: true, showItbis: true, showChange: true, copies: 1, footer: '¡Gracias por su preferencia!' },
+            barcodeSettings: _persistedState?.barcodeSettings ?? { width: 1.5, height: 40, showText: true, fontSize: 14 },
             currentUserId: null,
             isAuthenticated: false,
           };
@@ -732,6 +818,7 @@ export const useStore = create<AppState>()(
         maintenanceHistory: state.maintenanceHistory,
         whatsappLogs: state.whatsappLogs,
         printSettings: state.printSettings,
+        barcodeSettings: state.barcodeSettings,
         cajas: state.cajas,
         cajaMovements: state.cajaMovements,
         plans: state.plans,
@@ -739,6 +826,13 @@ export const useStore = create<AppState>()(
         licencias: state.licencias,
         currentUserId: state.currentUserId,
         isAuthenticated: state.isAuthenticated,
+        // Proveedores
+        suppliers: state.suppliers,
+        supplierProducts: state.supplierProducts,
+        purchaseOrders: state.purchaseOrders,
+        goodsReceipts: state.goodsReceipts,
+        accountsPayable: state.accountsPayable,
+        quoteRequests: state.quoteRequests,
       }),
     }
   )

@@ -4,7 +4,7 @@ import { useState, useRef, useMemo } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
+import { StorageSettingsTab } from "@/components/ui/StorageSettingsTab";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
@@ -22,6 +23,7 @@ const TABS = [
   { id: "print", label: "Impresión", icon: Printer },
   { id: "users", label: "Usuarios y Roles", icon: Users },
   { id: "security", label: "Seguridad", icon: Shield },
+  { id: "storage", label: "Almacenamiento", icon: HardDrive },
 ];
 
 const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
@@ -39,10 +41,11 @@ function roleBadge(r: TenantUser["role"]) {
 }
 
 export default function SettingsPage() {
-  const { tenant } = useParams();
+  const params = useParams();
+  const tenant = (params?.tenant as string) || "";
   const {
-    tenants, users, printSettings, updateTenant, addTenant, deleteTenant,
-    addUser, updateUser, deleteUser, updatePrintSettings
+    tenants, users, printSettings, barcodeSettings, updateTenant, addTenant, deleteTenant,
+    addUser, updateUser, deleteUser, updatePrintSettings, updateBarcodeSettings
   } = useStore();
 
   const currentUserId = useStore((s) => s.currentUserId);
@@ -58,8 +61,8 @@ export default function SettingsPage() {
     return tenants.filter((t) => allowedIds.has(t.id));
   }, [currentUser, users, tenants]);
 
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const taller = currentTenant ?? { id: "1", name: "", address: "", phone: "", email: "", rnc: "", logo: "" };
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
   const [tab, setTab] = useState("taller");
 
   // ── Taller tab state ──
@@ -246,7 +249,9 @@ export default function SettingsPage() {
   };
 
   // ── Print tab state ──
+  const [printTab, setPrintTab] = useState("pos"); // "pos" | "barcode"
   const ps = printSettings;
+  const psBarcode = barcodeSettings;
 
   // ── Users tab state ──
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -303,7 +308,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl w-fit flex-wrap">
+      <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl overflow-x-auto whitespace-nowrap custom-scrollbar">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
@@ -312,6 +317,9 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── ALMACENAMIENTO LOCAL ── */}
+      {tab === "storage" && <StorageSettingsTab />}
 
       {/* ── TALLER ── */}
       {tab === "taller" && (
@@ -366,6 +374,38 @@ export default function SettingsPage() {
               <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer" onClick={saveTaller}>
                 <Check className="h-4 w-4 mr-2" /> Guardar Cambios
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-neutral-100 shadow-sm border-emerald-100">
+            <CardHeader>
+              <CardTitle className="text-emerald-700 flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Inventario Inteligente (Modo Seguro)
+              </CardTitle>
+              <CardDescription>
+                Configura si el inventario debe descontarse automáticamente al registrar una venta en el POS.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between p-4 rounded-xl border border-emerald-100 bg-emerald-50/50">
+                <div>
+                  <h4 className="text-sm font-bold text-neutral-900">Descuento Automático de Inventario</h4>
+                  <p className="text-xs text-neutral-500 mt-1">Al activar, las ventas del POS restarán stock y crearán un registro histórico.</p>
+                </div>
+                <button
+                  onClick={() => {
+                    const currentVal = taller.config?.autoDeductInventory || false;
+                    updateTenant(taller.id, { config: { ...taller.config, autoDeductInventory: !currentVal } });
+                    toast.success(!currentVal ? "Descuento Automático Activado" : "Descuento Automático Desactivado");
+                  }}
+                  className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none shrink-0",
+                    taller.config?.autoDeductInventory ? "bg-emerald-600" : "bg-neutral-200")}
+                >
+                  <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                    taller.config?.autoDeductInventory ? "left-5" : "left-0.5")} />
+                </button>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -698,65 +738,126 @@ export default function SettingsPage() {
 
       {/* ── IMPRESIÓN ── */}
       {tab === "print" && (
-        <Card className="border-neutral-100 shadow-sm">
-          <CardHeader><CardTitle>Configuración de Impresión</CardTitle><CardDescription>Define cómo se verán los recibos del POS.</CardDescription></CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-1.5">
-              <Label>Tamaño de Papel</Label>
-              <div className="flex gap-2">
-                {(["80mm", "58mm", "A4"] as const).map(size => (
-                  <button key={size} onClick={() => updatePrintSettings({ paperSize: size })}
-                    className={cn("px-4 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer",
-                      ps.paperSize === size ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
-                    {size}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <div className="space-y-6">
+          <div className="flex gap-2 p-1 bg-neutral-100/50 rounded-xl max-w-fit">
+            <button
+              onClick={() => setPrintTab("pos")}
+              className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer border-none", printTab === "pos" ? "bg-white text-neutral-900 shadow-sm" : "bg-transparent text-neutral-500 hover:text-neutral-700")}
+            >
+              Recibos POS
+            </button>
+            <button
+              onClick={() => setPrintTab("barcode")}
+              className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer border-none", printTab === "barcode" ? "bg-white text-neutral-900 shadow-sm" : "bg-transparent text-neutral-500 hover:text-neutral-700")}
+            >
+              Códigos de Barras
+            </button>
+          </div>
 
-            <div className="space-y-3">
-              <Label>Opciones del Recibo</Label>
-              {([
-                { key: "showLogo", label: "Mostrar logo del taller" },
-                { key: "showNcf", label: "Mostrar número NCF" },
-                { key: "showItbis", label: "Mostrar ITBIS desglosado" },
-                { key: "showChange", label: "Mostrar cambio/vuelto" },
-              ] as { key: keyof typeof ps; label: string }[]).map(opt => (
-                <div key={opt.key} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 bg-neutral-50">
-                  <span className="text-sm font-medium text-neutral-700">{opt.label}</span>
-                  <button onClick={() => updatePrintSettings({ [opt.key]: !(ps as any)[opt.key] })}
-                    className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none",
-                      (ps as any)[opt.key] ? "bg-black" : "bg-neutral-200")}>
-                    <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
-                      (ps as any)[opt.key] ? "left-5" : "left-0.5")} />
-                  </button>
+          {printTab === "pos" && (
+            <Card className="border-neutral-100 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <CardHeader><CardTitle>Configuración de Impresión</CardTitle><CardDescription>Define cómo se verán los recibos del POS.</CardDescription></CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-1.5">
+                  <Label>Tamaño de Papel</Label>
+                  <div className="flex gap-2">
+                    {(["80mm", "58mm", "A4"] as const).map(size => (
+                      <button key={size} onClick={() => updatePrintSettings({ paperSize: size })}
+                        className={cn("px-4 py-2 rounded-lg border text-sm font-medium transition-all cursor-pointer",
+                          ps.paperSize === size ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
+                        {size}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
 
-            <div className="space-y-1.5">
-              <Label>Número de Copias</Label>
-              <div className="flex items-center gap-3">
-                <button onClick={() => updatePrintSettings({ copies: Math.max(1, ps.copies - 1) })}
-                  className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">−</button>
-                <span className="text-lg font-bold w-8 text-center">{ps.copies}</span>
-                <button onClick={() => updatePrintSettings({ copies: Math.min(5, ps.copies + 1) })}
-                  className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">+</button>
-              </div>
-            </div>
+                <div className="space-y-3">
+                  <Label>Opciones del Recibo</Label>
+                  {([
+                    { key: "showLogo", label: "Mostrar logo del taller" },
+                    { key: "showNcf", label: "Mostrar número NCF" },
+                    { key: "showItbis", label: "Mostrar ITBIS desglosado" },
+                    { key: "showChange", label: "Mostrar cambio/vuelto" },
+                  ] as { key: keyof typeof ps; label: string }[]).map(opt => (
+                    <div key={opt.key} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 bg-neutral-50">
+                      <span className="text-sm font-medium text-neutral-700">{opt.label}</span>
+                      <button onClick={() => updatePrintSettings({ [opt.key]: !(ps as any)[opt.key] })}
+                        className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none",
+                          (ps as any)[opt.key] ? "bg-black" : "bg-neutral-200")}>
+                        <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                          (ps as any)[opt.key] ? "left-5" : "left-0.5")} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
 
-            <div className="space-y-1.5">
-              <Label>Texto de Pie de Página</Label>
-              <Input className="h-10 rounded-xl border-neutral-200" value={ps.footer}
-                onChange={e => updatePrintSettings({ footer: e.target.value })} />
-            </div>
+                <div className="space-y-1.5">
+                  <Label>Número de Copias</Label>
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => updatePrintSettings({ copies: Math.max(1, ps.copies - 1) })}
+                      className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">−</button>
+                    <span className="text-lg font-bold w-8 text-center">{ps.copies}</span>
+                    <button onClick={() => updatePrintSettings({ copies: Math.min(5, ps.copies + 1) })}
+                      className="h-9 w-9 rounded-lg border border-neutral-200 flex items-center justify-center text-lg font-bold hover:bg-neutral-50 cursor-pointer bg-white">+</button>
+                  </div>
+                </div>
 
-            <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer"
-              onClick={() => toast.success("Configuración de impresión guardada")}>
-              <Check className="h-4 w-4 mr-2" /> Guardar Configuración
-            </Button>
-          </CardContent>
-        </Card>
+                <div className="space-y-1.5">
+                  <Label>Texto de Pie de Página</Label>
+                  <Input className="h-10 rounded-xl border-neutral-200" value={ps.footer}
+                    onChange={e => updatePrintSettings({ footer: e.target.value })} />
+                </div>
+
+                <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer"
+                  onClick={() => toast.success("Configuración de impresión guardada")}>
+                  <Check className="h-4 w-4 mr-2" /> Guardar Configuración de Impresión
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {printTab === "barcode" && (
+            <Card className="border-neutral-100 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <CardHeader>
+                <CardTitle>Etiquetas de Código de Barras</CardTitle>
+                <CardDescription>Ajusta el tamaño y formato para impresión térmica de etiquetas del inventario.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Ancho de la barra</Label>
+                    <Input type="number" step="0.1" min="1" className="h-10 rounded-xl border-neutral-200" value={psBarcode?.width ?? 1.5}
+                      onChange={e => updateBarcodeSettings({ width: Number(e.target.value) })} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Altura del código</Label>
+                    <Input type="number" className="h-10 rounded-xl border-neutral-200" value={psBarcode?.height ?? 40}
+                      onChange={e => updateBarcodeSettings({ height: Number(e.target.value) })} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Tamaño de fuente</Label>
+                    <Input type="number" className="h-10 rounded-xl border-neutral-200" value={psBarcode?.fontSize ?? 14}
+                      onChange={e => updateBarcodeSettings({ fontSize: Number(e.target.value) })} />
+                  </div>
+                  <div className="space-y-1.5 flex flex-col justify-center">
+                    <Label className="mb-2">Mostrar texto</Label>
+                    <button onClick={() => updateBarcodeSettings({ showText: !(psBarcode?.showText ?? true) })}
+                      className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none",
+                        (psBarcode?.showText ?? true) ? "bg-black" : "bg-neutral-200")}>
+                      <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                        (psBarcode?.showText ?? true) ? "left-5" : "left-0.5")} />
+                    </button>
+                  </div>
+                </div>
+
+                <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer mt-4"
+                  onClick={() => toast.success("Ajustes de código de barras guardados")}>
+                  <Check className="h-4 w-4 mr-2" /> Guardar Código de Barras
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* ── USUARIOS ── */}

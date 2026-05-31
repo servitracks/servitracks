@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { LocalFileManager } from "@/components/ui/LocalFileManager";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -23,18 +24,18 @@ export default function CustomerDetailPage() {
   const { id, tenant } = useParams();
   const router = useRouter();
   const { customers, vehicles, orders, addVehicle, tenants } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const tenantId = currentTenant?.id || "1";
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
 
-  const customer = customers.find(c => c.id === id);
+  const customer = customers.find(c => c.id === id && c.tenantId === tenantId);
   const [supaVehicles, setSupaVehicles] = useState<any[]>([]);
-  const storeCustomerVehicles = vehicles.filter(v => v.customerId === id);
+  const storeCustomerVehicles = vehicles.filter(v => v.customerId === id && v.tenantId === tenantId);
   // Merge: Supabase + store (Supabase tiene prioridad, evita duplicados por id)
   const customerVehicles = [
     ...supaVehicles,
     ...storeCustomerVehicles.filter(v => !supaVehicles.some(sv => sv.id === v.id))
   ];
-  const customerOrders = orders.filter(o => o.customerId === id);
+  const customerOrders = orders.filter(o => o.customerId === id && o.tenantId === tenantId);
   const totalSpent = customerOrders.reduce((s, o) => s + (o.total || 0), 0);
 
   // Cargar vehículos del cliente desde Supabase
@@ -194,6 +195,9 @@ export default function CustomerDetailPage() {
               <TabsTrigger value="history" className="rounded-lg px-5 py-1.5 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm transition-all">
                 Historial de Servicios
               </TabsTrigger>
+              <TabsTrigger value="documents" className="rounded-lg px-5 py-1.5 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm transition-all">
+                Documentos
+              </TabsTrigger>
             </TabsList>
 
             {/* VEHÍCULOS */}
@@ -298,6 +302,15 @@ export default function CustomerDetailPage() {
                   </CardContent>
                 </Card>
               )}
+            </TabsContent>
+
+            {/* DOCUMENTOS LOCALES */}
+            <TabsContent value="documents" className="space-y-4">
+              <LocalFileManager 
+                entityType="customer" 
+                entityId={customer.id} 
+                title={`Documentos de ${customer.name}`} 
+              />
             </TabsContent>
           </Tabs>
         </div>

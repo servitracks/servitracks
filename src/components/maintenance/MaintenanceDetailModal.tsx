@@ -71,7 +71,7 @@ export function MaintenanceDetailModal({ isOpen, onOpenChange, data }: Maintenan
 
   const handleQueueWhatsApp = (item: any) => {
     const tenantSlug = (params.tenant as string) || '';
-    const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
+    const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
     const tenantName = currentTenant ? currentTenant.name : 'ServiTracks';
     
     const text = `Hola ${customer.name}, te saludo de ${tenantName}. Tu vehículo ${vehicle.brand} ${vehicle.model} tiene el ${item.name} al ${item.currentPercentage}%. Te recomendamos agendar una cita pronto.`;

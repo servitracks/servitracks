@@ -108,8 +108,8 @@ export default function CustomersPage() {
   const { tenant } = useParams();
   const router = useRouter();
   const { customers, vehicles, orders, addCustomer, updateCustomer, deleteCustomer, addVehicle, deleteVehicle, deleteMaintenanceItem, maintenanceItems, tenants } = useStore();
-  const currentTenant = tenants.find((t) => t.slug === tenant) || tenants[0];
-  const tenantId = currentTenant?.id || "1";
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
 
   const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -122,15 +122,19 @@ export default function CustomersPage() {
   const [form, setForm] = useState<CustomerForm>(emptyCustomerForm);
   const [vehForm, setVehForm] = useState<VehicleForm>(emptyVehicleForm);
 
-  const filteredCustomers = customers.filter(
-    (c) => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || (c.email || "").toLowerCase().includes(search.toLowerCase())
-  );
+  const tenantCustomers = customers.filter((c) => !tenantId || c.tenantId === tenantId);
+  const tenantVehicles = vehicles.filter((v) => !tenantId || v.tenantId === tenantId);
 
-  const getVehicleCount = (id: string) => vehicles.filter((v) => v.customerId === id).length;
-  const getOrderCount = (id: string) => orders.filter((o) => o.customerId === id).length;
-  const getCustomerName = (id: string) => customers.find(c => c.id === id)?.name || "Desconocido";
+  const filteredCustomers = tenantCustomers
+    .filter(
+      (c) => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search) || (c.email || "").toLowerCase().includes(search.toLowerCase())
+    );
 
-  const newThisMonth = customers.filter((c) => {
+  const getVehicleCount = (id: string) => tenantVehicles.filter((v) => v.customerId === id).length;
+  const getOrderCount = (id: string) => orders.filter((o) => o.customerId === id && (!tenantId || o.tenantId === tenantId)).length;
+  const getCustomerName = (id: string) => tenantCustomers.find(c => c.id === id)?.name || "Desconocido";
+
+  const newThisMonth = tenantCustomers.filter((c) => {
     const d = new Date(c.createdAt);
     const now = new Date();
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
@@ -237,11 +241,13 @@ export default function CustomersPage() {
     }
   };
 
-  const filteredVehicles = vehicles.filter(v => 
-    v.plate.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    v.brand.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    v.model.toLowerCase().includes(vehicleSearch.toLowerCase())
-  );
+  const filteredVehicles = vehicles
+    .filter((v) => !tenantId || v.tenantId === tenantId)
+    .filter(v =>
+      v.plate.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+      v.brand.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+      v.model.toLowerCase().includes(vehicleSearch.toLowerCase())
+    );
 
   return (
     <div className="space-y-6">
@@ -266,9 +272,9 @@ export default function CustomersPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
-          { label: "Total Clientes", value: customers.length, icon: Users, color: "text-neutral-700", bg: "bg-neutral-50" },
+          { label: "Total Clientes", value: tenantCustomers.length, icon: Users, color: "text-neutral-700", bg: "bg-neutral-50" },
           { label: "Nuevos este mes", value: newThisMonth, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { label: "Vehículos Registrados", value: vehicles.length, icon: Car, color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "Vehículos Registrados", value: tenantVehicles.length, icon: Car, color: "text-blue-600", bg: "bg-blue-50" },
         ].map((kpi) => (
           <Card key={kpi.label} className="border-neutral-100 shadow-sm">
             <CardContent className="flex items-center gap-4 p-5">

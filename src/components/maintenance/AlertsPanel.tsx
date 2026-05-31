@@ -16,17 +16,25 @@ interface AlertsPanelProps {
 export function AlertsPanel({ onClose }: AlertsPanelProps) {
   const router = useRouter();
   const params = useParams();
-  const maintenanceAlerts = useStore((s) => s.maintenanceAlerts);
-  const vehicles = useStore((s) => s.vehicles);
-  const customers = useStore((s) => s.customers);
-  const maintenanceItems = useStore((s) => s.maintenanceItems);
+  const tenants = useStore((s) => s.tenants);
+  const tenantSlug = (params.tenant as string) || '';
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const allAlerts = useStore((s) => s.maintenanceAlerts);
+  const maintenanceAlerts = allAlerts.filter((a) => a.tenantId === tenantId);
+  const allVehicles = useStore((s) => s.vehicles);
+  const vehicles = allVehicles.filter((v) => v.tenantId === tenantId);
+  const allCustomers = useStore((s) => s.customers);
+  const customers = allCustomers.filter((c) => c.tenantId === tenantId);
+  const allMaintenanceItems = useStore((s) => s.maintenanceItems);
+  const maintenanceItems = allMaintenanceItems.filter((m) => m.tenantId === tenantId);
   const updateMaintenanceAlert = useStore((s) => s.updateMaintenanceAlert);
   const addWhatsAppLog = useStore((s) => s.addWhatsAppLog);
   
   const pendingAlerts = maintenanceAlerts.filter(a => a.status === 'pending');
   const criticalAlerts = pendingAlerts.filter(a => a.type === 'critical');
   const preventiveAlerts = pendingAlerts.filter(a => a.type === 'preventive');
-  const tenants = useStore((s) => s.tenants);
 
   const handleVer = (alert: any) => {
     const tenant = params.tenant || 'autocheck';
@@ -42,7 +50,7 @@ export function AlertsPanel({ onClose }: AlertsPanelProps) {
     if (!customer || !vehicle || !item) return;
 
     const tenantSlug = (params.tenant as string) || '';
-    const currentTenant = tenants.find((t) => t.slug === tenantSlug) || tenants[0];
+    const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
     const tenantName = currentTenant ? currentTenant.name : 'ServiTracks';
 
     const text = `Hola ${customer.name}, te saludo de ${tenantName}. Tu vehículo ${vehicle.brand} ${vehicle.model} (${vehicle.plate}) tiene el servicio "${item.name}" al ${alert.percentage}%. Te recomendamos agendar una cita pronto. ¡Gracias!`;

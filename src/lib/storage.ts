@@ -207,7 +207,13 @@ export function setSession(session: any) {
 export function logout() {
   localStorage.removeItem("servitracks-session");
   sessionStorage.removeItem("servitracks-session");
-  useStore.getState().setCurrentTenant?.(null);
+  // Limpiar TODO el estado del tenant en el store para evitar que los datos
+  // del usuario anterior aparezcan en la siguiente sesión (bug de aislamiento).
+  const store = useStore.getState();
+  store.setCurrentTenant?.(null);
+  store.setCurrentUserId?.(null);
+  store.setTenants?.([]);
+  store.setAuthenticated?.(false);
 }
 
 export function formatCedulaRD(val: string) {

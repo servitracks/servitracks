@@ -43,10 +43,20 @@ function getHourGreeting() {
 export default function DashboardPage() {
   const params = useParams();
   const tenantSlug = params?.tenant as string;
-  const orders = useStore((s) => s.orders);
-  const customers = useStore((s) => s.customers);
-  const products = useStore((s) => s.products);
-  const invoices = useStore((s) => s.invoices);
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const allOrders = useStore((s) => s.orders);
+  const allCustomers = useStore((s) => s.customers);
+  const allProducts = useStore((s) => s.products);
+  const allInvoices = useStore((s) => s.invoices);
+
+  // Filtrar por tenant para evitar que datos de otros talleres aparezcan
+  const orders = tenantId ? allOrders.filter((o) => o.tenantId === tenantId) : [];
+  const customers = tenantId ? allCustomers.filter((c) => c.tenantId === tenantId) : [];
+  const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
+  const invoices = tenantId ? allInvoices.filter((inv) => inv.tenantId === tenantId) : [];
 
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 

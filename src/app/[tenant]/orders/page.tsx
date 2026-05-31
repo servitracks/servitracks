@@ -49,10 +49,22 @@ export default function OrdersPage() {
   const router = useRouter();
   const { tenant } = useParams();
   const searchParams = useSearchParams();
-  const orders = useStore((s) => s.orders);
-  const customers = useStore((s) => s.customers);
-  const vehicles = useStore((s) => s.vehicles);
-  const technicians = useStore((s) => s.technicians);
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const allOrders = useStore((s) => s.orders);
+  const orders = tenantId ? allOrders.filter((o) => o.tenantId === tenantId) : [];
+
+  const allCustomers = useStore((s) => s.customers);
+  const customers = tenantId ? allCustomers.filter((c) => c.tenantId === tenantId) : [];
+
+  const allVehicles = useStore((s) => s.vehicles);
+  const vehicles = tenantId ? allVehicles.filter((v) => v.tenantId === tenantId) : [];
+
+  const allTechnicians = useStore((s) => s.technicians);
+  const technicians = tenantId ? allTechnicians.filter((t) => t.tenantId === tenantId) : [];
+
   const updateOrder = useStore((s) => s.updateOrder);
   const deleteOrder = useStore((s) => s.deleteOrder);
   const deliverWorkOrder = useStore((s) => s.deliverWorkOrder);

@@ -66,9 +66,12 @@ function MaintenanceContent() {
   const deleteMaintenanceItem = useStore((s) => s.deleteMaintenanceItem);
   const tenants = useStore((s) => s.tenants);
 
-  const [customers, setLocalCustomers] = useState(storeCustomers);
-  const [vehicles, setLocalVehicles] = useState(storeVehicles);
-  const [maintenanceItems, setLocalItems] = useState(storeMaintenanceItems);
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const tenantId = currentTenant?.id ?? "";
+
+  const [customers, setLocalCustomers] = useState(() => storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
+  const [vehicles, setLocalVehicles] = useState(() => storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
+  const [maintenanceItems, setLocalItems] = useState(() => storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
   const [loading, setLoading] = useState(true);
   const syncedRef = useRef(false);
 
@@ -93,9 +96,9 @@ function MaintenanceContent() {
 
         if (tenantError || !tenantRow) {
           // No Supabase tenant — use store data
-          setLocalCustomers(storeCustomers);
-          setLocalVehicles(storeVehicles);
-          setLocalItems(storeMaintenanceItems);
+          setLocalCustomers(storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
+          setLocalVehicles(storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
+          setLocalItems(storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
           setLoading(false);
           return;
         }
@@ -128,9 +131,9 @@ function MaintenanceContent() {
         setLoading(false);
       } catch (error: any) {
         console.error("[Maintenance] load error:", error);
-        setLocalCustomers(storeCustomers);
-        setLocalVehicles(storeVehicles);
-        setLocalItems(storeMaintenanceItems);
+        setLocalCustomers(storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
+        setLocalVehicles(storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
+        setLocalItems(storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
         setLoading(false);
       }
     }
@@ -195,11 +198,8 @@ function MaintenanceContent() {
     // Filtrar solo las órdenes del tenant actual para garantizar aislamiento por taller
     const deliveredOrders = storeOrders.filter((o) => {
       const statusOk = o.status === 'delivered' || o.status === 'invoiced';
-      // Verificar que la orden pertenece al tenant actual (por slug en URL o por tenantId)
-      const tenantOk = !o.tenantId || !tenant || (
-        o.tenantId === tenant ||          // match por slug (si se guarda así)
-        vehicles.some(v => v.id === o.vehicleId)  // match por vehículo cargado del tenant
-      );
+      // Verificar que la orden pertenece al tenant actual (por tenantId)
+      const tenantOk = !tenantId || o.tenantId === tenantId;
       return statusOk && tenantOk;
     });
 
