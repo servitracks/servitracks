@@ -19,12 +19,16 @@ interface TicketProps {
   mechanicName?: string;
   formato?: "57mm" | "80mm";
   notes?: string;
+  warrantyText?: string;
+  qrUrl?: string;
+  securityCode?: string;
+  signatureDate?: string;
 }
 
 export function Ticket({ 
   invoiceId, ncf, createdAt, tenant, customer, items, 
   subtotal, itbis, total, payMethod, cashReceived, mechanicName, 
-  formato = "80mm", notes 
+  formato = "80mm", notes, warrantyText, qrUrl, securityCode, signatureDate
 }: TicketProps) {
   const w = formato === "57mm" ? "w-[58mm]" : "w-[80mm]";
   const cols = formato === "57mm" ? "max-w-[32ch]" : "max-w-[44ch]";
@@ -33,7 +37,7 @@ export function Ticket({
 
   // Generar URL para el QR de la DGII (e-CF)
   const isECF = ncf?.startsWith("E");
-  const qrData = isECF ? `https://fc.dgii.gov.do/testecf/consultatimbrefc?rncemisor=${tenant.rnc}&encf=${ncf}&montototal=${total}` : "";
+  const qrData = qrUrl || (isECF ? `https://fc.dgii.gov.do/testecf/consultatimbrefc?rncemisor=${tenant.rnc}&encf=${ncf}&montototal=${total}` : "");
 
   let tipoDocumento = "COMPROBANTE FISCAL";
   if (!ncf) tipoDocumento = "RECIBO / CONDUCE";
@@ -66,17 +70,18 @@ export function Ticket({
         <div><b>FECHA:</b> {new Date(createdAt).toLocaleString("es-DO")}</div>
       </div>
       
-      {(!customer || customer.name === "Consumidor Final" || customer.name === "Walk-in") ? (
+      {(!customer || (!customer.name && !customer.rnc) || customer.name === "Consumidor Final" || customer.name === "Walk-in") ? (
         <div className="border-t border-dashed border-black my-1" />
       ) : (
         <>
           <div className="border-t border-dashed border-black my-1" />
-          <div className="text-center font-bold uppercase tracking-widest">Datos del Cliente</div>
+          <div className="text-center font-bold uppercase tracking-widest text-[11px] py-0.5">DATOS DEL CLIENTE</div>
           <div className="border-t border-dashed border-black my-1" />
           <div>
-            <div><b>Cliente:</b> {customer.name}</div>
-            {customer.documentId && <div><b>ID:</b> {customer.documentId}</div>}
+            {customer.name && <div><b>Cliente:</b> {customer.name}</div>}
+            {(customer.rnc || customer.documentId) && <div><b>RNC:</b> {customer.rnc || customer.documentId}</div>}
             {customer.phone && <div><b>Teléfono:</b> {customer.phone}</div>}
+            {customer.address && <div className="truncate"><b>Dirección:</b> {customer.address}</div>}
           </div>
           <div className="border-t border-dashed border-black my-1" />
         </>
@@ -137,6 +142,16 @@ export function Ticket({
         </>
       )}
 
+      {warrantyText && (
+        <>
+          <div className="text-[10px] mt-1 mb-1 leading-snug text-center px-1">
+            <span className="font-bold">&#x1F6E1; </span>
+            <span className="italic">{warrantyText}</span>
+          </div>
+          <div className="border-t border-dashed border-black my-1" />
+        </>
+      )}
+
       <div className="text-center mt-2">
         <div>¡Gracias por su visita!</div>
         <div className="text-[9px] mt-1">ServiTracks Software</div>
@@ -145,13 +160,20 @@ export function Ticket({
       {isECF && qrData && (
         <div className="mt-4 flex flex-col items-center gap-1 border-t border-dashed border-black pt-4">
           <div className="text-[9px] font-bold uppercase text-center">
-            Factura Electrónica
+            Factura de Consumo Electrónica
           </div>
           <div className="p-1 bg-white">
             <QRCodeSVG value={qrData} size={100} level="M" />
           </div>
-          <div className="text-[8px] text-center leading-tight mt-1">
-            Consulte su factura en dgii.gov.do
+          {securityCode && (
+            <div className="text-[10px] text-center mt-1 font-mono">
+              <div>Código de Seguridad: {securityCode}</div>
+              {signatureDate && <div>Fecha Firma: {new Date(signatureDate).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</div>}
+              {!signatureDate && <div>Fecha Firma: {new Date(createdAt).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</div>}
+            </div>
+          )}
+          <div className="text-[10px] text-center mt-2">
+            Consulte su factura en:<br />dgii.gov.do
           </div>
         </div>
       )}

@@ -80,6 +80,9 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
         <Ticket 
            invoiceId={invoice.id}
            ncf={editForm.ncf}
+           qrUrl={invoice.qrUrl}
+           securityCode={invoice.securityCode}
+           signatureDate={invoice.signatureDate}
            createdAt={invoice.createdAt}
            tenant={taller}
            customer={customer}

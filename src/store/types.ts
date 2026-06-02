@@ -17,6 +17,12 @@ export interface Tenant {
     formato_ticket?: '57mm' | '80mm';
     formato_ticket_default?: '57mm' | '80mm';
     autoDeductInventory?: boolean;
+    ecfConfig?: {
+      useOwnCredentials: boolean;
+      clientId?: string;
+      clientSecret?: string;
+      environment: 'sandbox' | 'production';
+    };
   };
   plan_id?: string;
   estado?: 'ACTIVO' | 'TRIAL' | 'SUSPENDIDO' | 'CANCELADO';
@@ -43,6 +49,8 @@ export interface PrintSettings {
   showChange: boolean;
   copies: number;
   footer: string;
+  warrantyText?: string;
+  showWarranty?: boolean;
 }
 
 export interface BarcodeSettings {
@@ -181,6 +189,8 @@ export interface Invoice {
   id: string;
   tenantId: string;
   customerId?: string;
+  customerName?: string;
+  customerRnc?: string;
   vehicleId?: string;
   orderId?: string;
   mechanicId?: string;
@@ -194,6 +204,9 @@ export interface Invoice {
   paymentMethod: 'cash' | 'card' | 'transfer' | 'credit';
   status: 'paid' | 'pending' | 'cancelled';
   ncf?: string;
+  qrUrl?: string;
+  securityCode?: string;
+  signatureDate?: string;
   notes?: string;
   isCommissionPaid?: boolean;
   createdAt: string;

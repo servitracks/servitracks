@@ -6,7 +6,7 @@ import { ImportRow } from "./StepPreviewEditor";
 import { Upload, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
-import { extractProductsWithAI } from "@/app/api/import-ai/route";
+import { extractProductsWithAI } from "@/lib/import-ai";
 
 const CATEGORIES = [
   "Lubricantes",

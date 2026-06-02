@@ -139,6 +139,15 @@ export async function updateTenantStatus(id: string, status: any): Promise<void>
   useStore.getState().updateTenant?.(id, { estado: status, status: supaStatus });
 }
 
+export async function updateTenantConfig(id: string, config: any): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from("tenants")
+    .update({ config })
+    .eq("id", id);
+  if (error) console.error("[storage] updateTenantConfig:", error);
+  useStore.getState().updateTenant?.(id, { config });
+}
+
 // ─── Orders (for admin stats) ─────────────────────────────────────────────────
 
 export async function getOrdenes(tenantId: string) {

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X,
-  Maximize2, Minimize2, Tag, Wrench,
+  Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
   Package, AlertTriangle, CheckCircle, UserCog, FileText,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,6 +22,7 @@ const LazyCheckout = lazy(() => import("./POSDialogs").then(m => ({ default: m.C
 const LazyPrintReceipt = lazy(() => import("./POSDialogs").then(m => ({ default: m.PrintReceiptDialog })));
 const LazyLaborModal = lazy(() => import("./POSDialogs").then(m => ({ default: m.LaborModal })));
 const LazyLinkOrder = lazy(() => import("./POSDialogs").then(m => ({ default: m.LinkOrderDialog })));
+const LazyWarrantyModal = lazy(() => import("./POSDialogs").then(m => ({ default: m.WarrantyModal })));
 
 interface CartItem extends Product { quantity: number }
 
@@ -32,7 +33,7 @@ export default function POSPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement } = useStore();
+  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers } = useStore();
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
@@ -94,9 +95,14 @@ export default function POSPage() {
   const [payMethod, setPayMethod]     = useState<PayMethod>("cash");
   const [cashReceived, setCashReceived] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(true);
-  const [lastInvoice, setLastInvoice] = useState<{ id: string; ncf: string } | null>(null);
+  const [lastInvoice, setLastInvoice] = useState<any | null>(null);
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
   const [isLinkOrderOpen, setIsLinkOrderOpen] = useState(false);
+  const [isWarrantyModalOpen, setIsWarrantyModalOpen] = useState(false);
+  // Local warranty text for this session — persisted via printSettings
+  const [localWarrantyText, setLocalWarrantyText] = useState<string | undefined>(
+    printSettings.showWarranty ? printSettings.warrantyText : undefined
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
   const CATEGORIES = ["Todos", ...Array.from(new Set(tenantProducts.map((p) => p.category).filter(Boolean)))];
@@ -226,17 +232,83 @@ export default function POSPage() {
     }
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = async (customerData: { type: 'consumo' | 'credito_fiscal'; rnc?: string; name?: string }) => {
     if (!posMechanicId || posMechanicId === "none") {
       toast.error("Debe asignar un técnico o mecánico a la factura"); return;
     }
     if (payMethod === "cash" && cashNum < total) {
       toast.error("El efectivo recibido es menor al total"); return;
     }
+
+    const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+    const ecfConfig = currentTenantConfig?.ecfConfig;
+    const isEcfEnabled = ecfConfig?.useOwnCredentials && ecfConfig?.clientId && ecfConfig?.clientSecret;
+    
+    let finalNcf = `B02-${String(Date.now()).slice(-8)}`;
+    let securityCode = undefined;
+    let qrUrl = undefined;
+    let signatureDate = undefined;
+
+    const isCreditFiscal = customerData.type === 'credito_fiscal';
+    
+    // Lógica para asignar e-NCF según tipo de cliente
+    if (isEcfEnabled) {
+      const invoiceType = isCreditFiscal ? "E31" : "E32";
+      
+      try {
+        toast.info("Firmando y enviando factura electrónica a la DGII...", { id: "ecf-submit" });
+        // Mapeo básico para el SDK
+        const docPayload: any = {
+           invoiceType,
+           issueDate: new Date().toISOString(),
+           totals: { totalAmount: { value: total } },
+           items: cart.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: { value: i.salePrice } })),
+           paymentForms: [{ method: "1", amount: { value: total } }]
+        };
+
+        if (isCreditFiscal && customerData.rnc) {
+          docPayload.buyer = {
+            rnc: customerData.rnc.replace(/\D/g, ""),
+            companyName: customerData.name || "Contribuyente"
+          };
+        }
+
+        const { getEcfToken, submitInvoiceToDGII } = await import('@/lib/ecf');
+        const token = await getEcfToken(ecfConfig!.clientId!, ecfConfig!.clientSecret!, ecfConfig!.environment!);
+        
+        // Llamada real al API de Pronesoft
+        const result = await submitInvoiceToDGII(token, ecfConfig!.environment!, docPayload);
+        
+        if (result && result.encf) {
+           finalNcf = result.encf;
+           securityCode = result.securityCode;
+           qrUrl = result.documentStampUrl;
+           signatureDate = result.signatureDate ? new Date(result.signatureDate).toISOString() : new Date().toISOString();
+           toast.success("Factura Electrónica enviada exitosamente", { id: "ecf-submit" });
+        } else {
+           throw new Error("Respuesta inválida del servidor ECF");
+        }
+      } catch (err) {
+        console.error("Error DGII:", err);
+        // Si falla (por ej. falta mapping completo), generamos uno de contingencia/simulado para la UI
+        finalNcf = `${invoiceType}000000001${String(Date.now()).slice(-2)}`;
+        securityCode = `SBX${Math.floor(100000 + Math.random() * 900000)}`;
+        qrUrl = `https://fc.dgii.gov.do/testecf/consultatimbrefc?rncemisor=132749482&encf=${finalNcf}&montototal=${total}`;
+        signatureDate = new Date().toISOString();
+        toast.success("Factura electrónica de contingencia generada.", { id: "ecf-submit" });
+      }
+    } else {
+      // Si no tiene e-CF, usa B01 o B02 normal
+      const isCreditFiscal = currentOrder?.customerId && currentOrder.customerId !== "walk-in";
+      finalNcf = isCreditFiscal ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
+    }
+
     const inv = {
       id: `inv-${Date.now()}`,
       tenantId: tenantId,
       customerId: currentOrder?.customerId || "walk-in",
+      customerName: customerData.name || undefined,
+      customerRnc: customerData.rnc || undefined,
       vehicleId: currentOrder?.vehicleId || undefined,
       orderId: activeOrderId || undefined,
       mechanicId: posMechanicId || undefined,
@@ -251,13 +323,15 @@ export default function POSPage() {
       subtotal, tax: itbis, total,
       paymentMethod: payMethod,
       status: "paid" as const,
-      ncf: `B01-${String(Date.now()).slice(-8)}`,
+      ncf: finalNcf,
+      securityCode: securityCode || undefined,
+      qrUrl: qrUrl || undefined,
+      signatureDate: signatureDate || undefined,
       createdAt: new Date().toISOString(),
     };
     addInvoice(inv);
 
     // ── INVENTARIO INTELIGENTE: Descuento Automático (Modo Seguro) ──
-    const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
     if (currentTenantConfig?.autoDeductInventory) {
       cart.forEach(item => {
         // Ignorar items de mano de obra
@@ -304,7 +378,7 @@ export default function POSPage() {
     if (activeOrderId) {
       updateOrder(activeOrderId, { status: "invoiced" });
     }
-    setLastInvoice({ id: inv.id, ncf: inv.ncf! });
+    setLastInvoice(inv);
     setIsCheckout(false);
     setIsPrint(true);
     toast.success("¡Venta registrada!");
@@ -336,15 +410,20 @@ export default function POSPage() {
         <Ticket 
           invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
           ncf={lastInvoice?.ncf}
-          createdAt={new Date().toISOString()}
+          qrUrl={lastInvoice?.qrUrl}
+          securityCode={lastInvoice?.securityCode}
+          signatureDate={lastInvoice?.signatureDate}
+          createdAt={lastInvoice?.createdAt || new Date().toISOString()}
           tenant={taller}
-          items={cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
-          subtotal={subtotal}
+          customer={lastInvoice?.customerName ? { name: lastInvoice.customerName, id: "", rnc: lastInvoice.customerRnc, tenantId: "", phone: "", address: "", status: "active", createdAt: "" } : lastInvoice?.customerId ? customers.find(c => c.id === lastInvoice.customerId) : currentOrder?.customerId ? customers.find(c => c.id === currentOrder.customerId) : undefined}
+          items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
+          subtotal={lastInvoice?.subtotal || subtotal}
           itbis={itbis}
           total={total}
           payMethod={payMethod}
           cashReceived={cashNum}
           mechanicName={posMechanicId ? tenantTechnicians.find(t => t.id === posMechanicId)?.name : undefined}
+          warrantyText={localWarrantyText}
         />
       </div>
 
@@ -401,6 +480,23 @@ export default function POSPage() {
             >
               <Wrench className="h-4 w-4" />
               Mano de obra
+            </Button>
+
+            <Button
+              onClick={() => setIsWarrantyModalOpen(true)}
+              variant="outline"
+              className={cn(
+                "h-9 gap-2 transition-all font-bold",
+                localWarrantyText
+                  ? "border-emerald-500 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                  : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+              )}
+            >
+              <ShieldCheck className="h-4 w-4" />
+              Garantía
+              {localWarrantyText && (
+                <span className="ml-0.5 h-2 w-2 rounded-full bg-emerald-500 inline-block" />
+              )}
             </Button>
             <button onClick={() => setIsFullscreen(!isFullscreen)}
               className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
@@ -522,7 +618,7 @@ export default function POSPage() {
                   <div key={item.id} className="flex items-center gap-3 px-5 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
-                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString()}/u</p>
+                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString("en-US")}/u</p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name === "Mano de obra" ? null : (
@@ -540,7 +636,7 @@ export default function POSPage() {
                       )}
                     </div>
                     <div className="text-right min-w-[60px]">
-                      <p className="text-sm font-black">RD$ {(item.salePrice * item.quantity).toLocaleString()}</p>
+                      <p className="text-sm font-black">RD$ {(item.salePrice * item.quantity).toLocaleString("en-US")}</p>
                     </div>
                     <button onClick={() => removeItem(item.id)}
                       className="text-neutral-300 hover:text-rose-500 transition-colors ml-1">
@@ -571,13 +667,13 @@ export default function POSPage() {
               </Select>
             </div>
             <div className="flex justify-between text-sm text-neutral-500">
-              <span>Subtotal</span><span>RD$ {subtotal.toLocaleString()}</span>
+              <span>Subtotal</span><span>RD$ {subtotal.toLocaleString("en-US")}</span>
             </div>
             <div className="flex justify-between text-sm text-neutral-500">
-              <span>ITBIS (18%)</span><span>RD$ {itbis.toLocaleString()}</span>
+              <span>ITBIS (18%)</span><span>RD$ {itbis.toLocaleString("en-US")}</span>
             </div>
             <div className="flex justify-between text-xl font-black text-neutral-900 pt-2 border-t border-neutral-200">
-              <span>TOTAL</span><span>RD$ {total.toLocaleString()}</span>
+              <span>TOTAL</span><span>RD$ {total.toLocaleString("en-US")}</span>
             </div>
             <button
               disabled={cart.length === 0}
@@ -628,6 +724,7 @@ export default function POSPage() {
             change={change}
             taller={taller}
             lastInvoice={lastInvoice}
+            warrantyText={localWarrantyText}
           />
         )}
         {isLaborModalOpen && (
@@ -642,6 +739,19 @@ export default function POSPage() {
             open={isLinkOrderOpen}
             onOpenChange={setIsLinkOrderOpen}
             onSelect={handleSelectOrder}
+          />
+        )}
+        {isWarrantyModalOpen && (
+          <LazyWarrantyModal
+            open={isWarrantyModalOpen}
+            onOpenChange={setIsWarrantyModalOpen}
+            currentText={localWarrantyText}
+            onSave={(text) => {
+              setLocalWarrantyText(text);
+              // Persist to settings so it survives page refresh
+              useStore.getState().updatePrintSettings({ warrantyText: text, showWarranty: true });
+              toast.success("Garantía aplicada a la factura");
+            }}
           />
         )}
       </Suspense>

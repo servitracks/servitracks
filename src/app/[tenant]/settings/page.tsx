@@ -4,7 +4,7 @@ import { useState, useRef, useMemo } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,10 +15,12 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
 import { StorageSettingsTab } from "@/components/ui/StorageSettingsTab";
+import { EcfSettings } from "@/components/settings/EcfSettings";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
   { id: "tenants", label: "Sucursales", icon: Store },
+  { id: "ecf", label: "Facturación e-CF", icon: FileCheck2 },
   { id: "whatsapp", label: "WhatsApp", icon: Bell },
   { id: "print", label: "Impresión", icon: Printer },
   { id: "users", label: "Usuarios y Roles", icon: Users },
@@ -249,7 +251,7 @@ export default function SettingsPage() {
   };
 
   // ── Print tab state ──
-  const [printTab, setPrintTab] = useState("pos"); // "pos" | "barcode"
+  const [printTab, setPrintTab] = useState("pos"); // "pos" | "barcode" | "warranty"
   const ps = printSettings;
   const psBarcode = barcodeSettings;
 
@@ -668,6 +670,11 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* ── FACTURACIÓN E-CF ── */}
+      {tab === "ecf" && (
+        <EcfSettings tenant={taller} />
+      )}
+
       {/* ── WHATSAPP ── */}
       {tab === "whatsapp" && (
         <Card className="border-neutral-100 shadow-sm">
@@ -752,6 +759,12 @@ export default function SettingsPage() {
             >
               Códigos de Barras
             </button>
+            <button
+              onClick={() => setPrintTab("warranty")}
+              className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer border-none", printTab === "warranty" ? "bg-white text-neutral-900 shadow-sm" : "bg-transparent text-neutral-500 hover:text-neutral-700")}
+            >
+              Garantía en Factura
+            </button>
           </div>
 
           {printTab === "pos" && (
@@ -811,6 +824,72 @@ export default function SettingsPage() {
                 <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer"
                   onClick={() => toast.success("Configuración de impresión guardada")}>
                   <Check className="h-4 w-4 mr-2" /> Guardar Configuración de Impresión
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {printTab === "warranty" && (
+            <Card className="border-neutral-100 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <CardHeader>
+                <CardTitle>Garantía en Factura</CardTitle>
+                <CardDescription>Configura los textos de garantía que se imprimen en los recibos.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-3 p-4 rounded-2xl border border-emerald-100 bg-emerald-50/40">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                      <Label className="text-sm font-bold text-neutral-800 cursor-default">Imprimir Garantía</Label>
+                    </div>
+                    <button
+                      onClick={() => updatePrintSettings({ showWarranty: !(ps.showWarranty ?? true) })}
+                      className={cn("h-6 w-11 rounded-full transition-all relative cursor-pointer border-none",
+                        (ps.showWarranty ?? true) ? "bg-emerald-600" : "bg-neutral-200")}
+                    >
+                      <div className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                        (ps.showWarranty ?? true) ? "left-5" : "left-0.5")} />
+                    </button>
+                  </div>
+
+                  {(ps.showWarranty ?? true) && (
+                    <>
+                      <p className="text-xs text-neutral-500">Selecciona una plantilla o escribe tu propio texto de garantía.</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          "Garantía: 30 días en mano de obra.",
+                          "Garantía: 90 días en piezas y mano de obra.",
+                          "Garantía: 15 días en mano de obra. Sin garantía en piezas.",
+                          "Sin garantía en repuestos suministrados por el cliente.",
+                          "Garantía limitada según condiciones del fabricante.",
+                        ].map((tpl) => (
+                          <button
+                            key={tpl}
+                            onClick={() => updatePrintSettings({ warrantyText: tpl })}
+                            className={cn(
+                              "px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-all cursor-pointer",
+                              ps.warrantyText === tpl
+                                ? "bg-emerald-600 text-white border-emerald-600"
+                                : "bg-white text-neutral-600 border-neutral-200 hover:border-emerald-300 hover:bg-emerald-50"
+                            )}
+                          >
+                            {tpl.length > 38 ? tpl.slice(0, 38) + "\u2026" : tpl}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        className="w-full min-h-[72px] rounded-xl border border-neutral-200 text-sm p-2.5 resize-none focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-200 bg-white"
+                        placeholder="Ej: Garantía: 30 días en mano de obra y 90 días en piezas."
+                        value={ps.warrantyText ?? ""}
+                        onChange={e => updatePrintSettings({ warrantyText: e.target.value })}
+                      />
+                    </>
+                  )}
+                </div>
+
+                <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer"
+                  onClick={() => toast.success("Configuración de garantía guardada")}>
+                  <Check className="h-4 w-4 mr-2" /> Guardar Garantía
                 </Button>
               </CardContent>
             </Card>

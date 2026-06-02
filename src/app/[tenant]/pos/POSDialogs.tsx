@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check } from "lucide-react";
+import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { User, Truck } from "lucide-react";
 
 import { useStore, WorkOrder, Customer, Vehicle, Invoice } from "@/store/useStore";
 import { Ticket } from "@/components/pos/Ticket";
@@ -29,23 +30,119 @@ interface CheckoutProps {
   setPayMethod: (m: PayMethod) => void;
   cashReceived: string;
   setCashReceived: (v: string) => void;
-  onConfirm: () => void;
+  onConfirm: (customerData: { type: 'consumo' | 'credito_fiscal'; rnc?: string; name?: string }) => void;
 }
 
 export function CheckoutDialog({ open, onOpenChange, total, payMethod, setPayMethod, cashReceived, setCashReceived, onConfirm }: CheckoutProps) {
   const cashNum = parseFloat(cashReceived.replace(/,/g, "")) || 0;
   const change = Math.max(0, cashNum - total);
 
+  const [invoiceType, setInvoiceType] = useState<'consumo' | 'credito_fiscal'>('consumo');
+  const [rnc, setRnc] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [isSearchingRnc, setIsSearchingRnc] = useState(false);
+
+  // Auto-fetch RNC when length is 9 or 11
+  useEffect(() => {
+    const cleanRnc = rnc.replace(/\D/g, "");
+    if (cleanRnc.length === 9 || cleanRnc.length === 11) {
+      const fetchRnc = async () => {
+        setIsSearchingRnc(true);
+        try {
+          // Utiliza el proxy de Vite configurado en vite.config.ts
+          const response = await fetch(`/api/dgii/${cleanRnc}`);
+          const data = await response.json();
+          if (data && data.name) {
+            setCompanyName(data.name);
+          }
+        } catch (error) {
+          console.error("Error fetching RNC:", error);
+        } finally {
+          setIsSearchingRnc(false);
+        }
+      };
+      fetchRnc();
+    }
+  }, [rnc]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm rounded-2xl">
+      <DialogContent className="sm:max-w-md rounded-2xl">
         <DialogHeader>
           <DialogTitle className="text-2xl font-black">Cobrar Venta</DialogTitle>
         </DialogHeader>
-        <div className="bg-neutral-900 text-white rounded-xl px-5 py-4 flex justify-between items-center">
+        <div className="bg-neutral-900 text-white rounded-xl px-5 py-4 flex justify-between items-center mt-2">
           <span className="text-sm text-neutral-400">Total a cobrar</span>
-          <span className="text-3xl font-black">RD$ {total.toLocaleString()}</span>
+          <span className="text-3xl font-black">RD$ {total.toLocaleString("en-US")}</span>
         </div>
+
+        {/* ── SELECCIÓN DE CLIENTE (TIPO DE COMPROBANTE) ── */}
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          <button
+            onClick={() => setInvoiceType('consumo')}
+            className={cn(
+              "flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
+              invoiceType === 'consumo' ? "bg-slate-50 border-slate-700 text-slate-800" : "bg-white border-neutral-100 text-neutral-500 hover:bg-neutral-50"
+            )}
+          >
+            <div className={cn("p-2 rounded-full", invoiceType === 'consumo' ? "bg-slate-200" : "bg-neutral-100")}>
+              <User className="h-5 w-5" />
+            </div>
+            <div className="text-left flex-1">
+              <div className="font-bold text-sm">Consumidor Final</div>
+              <div className="text-[9px] uppercase font-black tracking-wider opacity-60">Factura de Consumo</div>
+            </div>
+          </button>
+          
+          <button
+            onClick={() => setInvoiceType('credito_fiscal')}
+            className={cn(
+              "flex items-center gap-3 p-3 rounded-xl border-2 transition-all",
+              invoiceType === 'credito_fiscal' ? "bg-blue-50 border-blue-600 text-blue-800" : "bg-white border-neutral-100 text-neutral-500 hover:bg-neutral-50"
+            )}
+          >
+            <div className={cn("p-2 rounded-full", invoiceType === 'credito_fiscal' ? "bg-blue-200" : "bg-neutral-100")}>
+              <Truck className="h-5 w-5" />
+            </div>
+            <div className="text-left flex-1">
+              <div className="font-bold text-sm">Empresa / RNC</div>
+              <div className="text-[9px] uppercase font-black tracking-wider opacity-60">Crédito Fiscal</div>
+            </div>
+          </button>
+        </div>
+
+        {invoiceType === 'credito_fiscal' && (
+          <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-3 mt-1 animate-in slide-in-from-top-2">
+            <div className="text-xs font-semibold text-blue-800 mb-1">Datos del Contribuyente</div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-blue-900/60 uppercase">RNC o Cédula</label>
+              <div className="relative">
+                <Input
+                  placeholder="Ej. 131123456"
+                  value={rnc}
+                  onChange={(e) => setRnc(e.target.value)}
+                  className="bg-white border-blue-200 focus-visible:ring-blue-500 pr-10"
+                />
+                {isSearchingRnc && (
+                  <div className="absolute inset-y-0 right-3 flex items-center">
+                    <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-blue-900/60 uppercase">Razón Social</label>
+              <Input
+                placeholder="Ej. Mi Empresa SRL"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                className="bg-white border-blue-200 focus-visible:ring-blue-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── MÉTODOS DE PAGO ── */}
         <div className="grid grid-cols-3 gap-2">
           {PAY_METHODS.map(({ key, label, icon: Icon, color }) => (
             <button key={key} onClick={() => setPayMethod(key)}
@@ -71,20 +168,20 @@ export function CheckoutDialog({ open, onOpenChange, total, payMethod, setPayMet
             {cashNum >= total && (
               <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
                 <span className="text-sm text-emerald-700 font-semibold">Cambio</span>
-                <span className="text-xl font-black text-emerald-700">RD$ {change.toLocaleString()}</span>
+                <span className="text-xl font-black text-emerald-700">RD$ {change.toLocaleString("en-US")}</span>
               </div>
             )}
             {cashNum > 0 && cashNum < total && (
               <div className="text-center text-xs text-rose-500 font-medium">
-                Faltan RD$ {(total - cashNum).toLocaleString()}
+                Faltan RD$ {(total - cashNum).toLocaleString("en-US")}
               </div>
             )}
           </div>
         )}
         <button
-          onClick={onConfirm}
-          disabled={payMethod === "cash" && cashNum < total && cashReceived !== ""}
-          className="w-full py-4 rounded-xl bg-emerald-600 text-white font-black text-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+          onClick={() => onConfirm({ type: invoiceType, rnc, name: companyName })}
+          disabled={(payMethod === "cash" && cashNum < total && cashReceived !== "") || (invoiceType === 'credito_fiscal' && (!rnc || !companyName))}
+          className="w-full py-4 rounded-xl bg-emerald-600 text-white font-black text-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors mt-2">
           ✓ Confirmar Pago
         </button>
       </DialogContent>
@@ -103,13 +200,15 @@ interface PrintReceiptProps {
   payMethod: PayMethod;
   cashNum: number;
   change: number;
-  taller: { name: string; logo?: string; address?: string; phone?: string };
-  lastInvoice: { id: string; ncf: string } | null;
+  taller: { name: string; logo?: string; address?: string; phone?: string; rnc?: string };
+  lastInvoice: any | null;
   mechanicId?: string;
+  warrantyText?: string;
 }
 
-export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total, payMethod, cashNum, change, taller, lastInvoice, mechanicId }: PrintReceiptProps) {
+export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total, payMethod, cashNum, change, taller, lastInvoice, mechanicId, warrantyText }: PrintReceiptProps) {
   const technicians = useStore((s) => s.technicians);
+  const customers = useStore((s) => s.customers);
   const techName = mechanicId ? (technicians.find(t => t.id === mechanicId)?.name ?? undefined) : undefined;
 
   return (
@@ -125,15 +224,26 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
           <Ticket 
             invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
             ncf={lastInvoice?.ncf}
-            createdAt={new Date().toISOString()}
+            qrUrl={lastInvoice?.qrUrl}
+            securityCode={lastInvoice?.securityCode}
+            signatureDate={lastInvoice?.signatureDate}
+            createdAt={lastInvoice?.createdAt || new Date().toISOString()}
             tenant={taller}
-            items={cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
-            subtotal={subtotal}
+            customer={
+              lastInvoice?.customerName 
+                ? { name: lastInvoice.customerName, rnc: lastInvoice.customerRnc } 
+                : lastInvoice?.customerId 
+                  ? customers.find(c => c.id === lastInvoice.customerId) 
+                  : undefined
+            }
+            items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
+            subtotal={lastInvoice?.subtotal || subtotal}
             itbis={itbis}
             total={total}
             payMethod={payMethod}
             cashReceived={cashNum}
             mechanicName={techName}
+            warrantyText={warrantyText}
           />
         </div>
         <div className="flex gap-3">
@@ -207,6 +317,138 @@ export function LaborModal({ open, onOpenChange, onConfirm }: LaborModalProps) {
               className="h-12 rounded-xl bg-black text-white font-bold hover:bg-neutral-800"
             >
               Autorizar
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Warranty Modal ──
+interface WarrantyModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (text: string) => void;
+  currentText?: string;
+}
+
+export function WarrantyModal({ open, onOpenChange, onSave, currentText }: WarrantyModalProps) {
+  // Parse existing values from currentText if it exists
+  const parseExisting = () => {
+    if (!currentText) return { qty: "30", unit: "días", coverage: "mano de obra" };
+    const m = currentText.match(/(\d+)\s*(días|meses|años)\s+en\s+(.+)\.?$/);
+    if (m) return { qty: m[1], unit: m[2], coverage: m[3].replace(/\.$/, "") };
+    return { qty: "30", unit: "días", coverage: "mano de obra" };
+  };
+
+  const initial = parseExisting();
+  const [qty, setQty] = useState(initial.qty);
+  const [unit, setUnit] = useState(initial.unit);
+  const [coverage, setCoverage] = useState(initial.coverage);
+
+  const UNITS = ["días", "meses", "años"];
+  const COVERAGES = [
+    "mano de obra",
+    "piezas y mano de obra",
+    "repuestos y mano de obra",
+    "piezas instaladas",
+  ];
+
+  const preview = `Garantía: ${qty || "?"} ${unit} en ${coverage}.`;
+
+  const handleSave = () => {
+    if (!qty || parseInt(qty) <= 0) return;
+    onSave(preview);
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-black flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-emerald-600" />
+            Garantía
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          {/* Duración */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-neutral-700">Duración de la garantía</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min="1"
+                max="999"
+                autoFocus
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                className="w-24 h-11 rounded-xl border border-neutral-200 px-3 text-xl font-black text-center focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-200"
+              />
+              <div className="flex gap-1 flex-1">
+                {UNITS.map((u) => (
+                  <button
+                    key={u}
+                    onClick={() => setUnit(u)}
+                    className={cn(
+                      "flex-1 h-11 rounded-xl text-sm font-bold border transition-all cursor-pointer",
+                      unit === u
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:border-emerald-300"
+                    )}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Cobertura */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-neutral-700">Cubre</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {COVERAGES.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCoverage(c)}
+                  className={cn(
+                    "h-9 px-3 rounded-xl text-[12px] font-semibold border transition-all cursor-pointer text-left",
+                    coverage === c
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-white text-neutral-600 border-neutral-200 hover:border-emerald-300"
+                  )}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preview */}
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+            <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+            <span className="text-sm font-medium text-emerald-800 italic">{preview}</span>
+          </div>
+
+          {/* Buttons */}
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="h-11 rounded-xl font-bold"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={!qty || parseInt(qty) <= 0}
+              className="h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold border-none"
+            >
+              <Check className="h-4 w-4 mr-1" /> Aplicar
             </Button>
           </div>
         </div>
