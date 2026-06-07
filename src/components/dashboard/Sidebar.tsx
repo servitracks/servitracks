@@ -20,6 +20,7 @@ import {
   Wallet,
   MessageCircle,
   Truck,
+  Briefcase
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,18 +30,20 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const navigation = [
-  { name: "Dashboard", href: "", icon: LayoutDashboard },
-  { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench },
-  { name: "Clientes", href: "/customers", icon: Users },
-  { name: "Inventario", href: "/inventory", icon: Package },
-  { name: "Proveedores", href: "/proveedores", icon: Truck },
-  { name: "Servicios", href: "/services", icon: LayoutDashboard },
-  { name: "Facturación POS", href: "/pos", icon: ReceiptText },
-  { name: "Control de Caja", href: "/caja", icon: Wallet },
-  { name: "Recordatorios", href: "/reminders", icon: Bell },
-  { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle },
-  { name: "Reportes", href: "/reports", icon: BarChart3 },
-  { name: "Mantenimiento", href: "/maintenance", icon: Activity },
+  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
+  { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
+  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner'] },
+  { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
+  { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
+  { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'cashier'] },
+  { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Mis Comisiones", href: "/mis-comisiones", icon: Wallet, roles: ['mechanic'] },
+  { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner'] },
+  { name: "Mantenimiento", href: "/maintenance", icon: Activity, roles: ['owner', 'cashier'] },
+  { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
 ];
 
 interface SidebarProps {
@@ -87,6 +90,11 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
     const newPath = currentPath.replace(`/${tenantSlug}`, `/${newSlug}`);
     router.push(newPath);
   };
+
+  const filteredNavigation = navigation.filter((item) => {
+    if (!currentUser) return false;
+    return item.roles.includes(currentUser.role || 'owner'); // default to owner if no role
+  });
 
   return (
     <>
@@ -167,7 +175,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto space-y-0.5 px-3 py-4">
-          {navigation.map((item) => {
+          {filteredNavigation.map((item) => {
             const href = `/${tenantSlug}${item.href}`;
             const isActive =
               item.href === ""
@@ -224,20 +232,22 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
           })}
         </nav>
 
-        {/* Bottom settings */}
-        <div className="border-t border-neutral-100 p-3">
-          <Link
-            href={`/${tenantSlug}/settings`}
-            onClick={onClose}
-            className={cn(
-              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-neutral-500 transition-all hover:bg-neutral-50 hover:text-neutral-900",
-              pathname.includes("/settings") && "bg-neutral-50 text-neutral-900"
-            )}
-          >
-            <Settings className="h-4 w-4 text-neutral-400" />
-            Configuración
-          </Link>
-        </div>
+        {/* Bottom settings (only for owners) */}
+        {(!currentUser || currentUser.role === 'owner') && (
+          <div className="border-t border-neutral-100 p-3">
+            <Link
+              href={`/${tenantSlug}/settings`}
+              onClick={onClose}
+              className={cn(
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-neutral-500 transition-all hover:bg-neutral-50 hover:text-neutral-900",
+                pathname.includes("/settings") && "bg-neutral-50 text-neutral-900"
+              )}
+            >
+              <Settings className="h-4 w-4 text-neutral-400" />
+              Configuración
+            </Link>
+          </div>
+        )}
       </div>
     </>
   );

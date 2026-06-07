@@ -36,7 +36,7 @@ export interface TenantUser {
   tenantId: string;
   name: string;
   email: string;
-  role: 'owner' | 'mechanic' | 'cashier' | 'receptionist';
+  role: 'owner' | 'mechanic' | 'cashier' | 'receptionist' | 'warehouse';
   status: 'active' | 'invited' | 'inactive';
   createdAt: string;
 }
@@ -66,6 +66,7 @@ export interface Customer {
   name: string;
   phone: string;
   email?: string;
+  rnc?: string;
   address?: string;
   notes?: string;
   tags?: string[];
@@ -96,6 +97,7 @@ export interface Service {
   name: string;
   description?: string;
   price: number;
+  laborPrice?: number; // Comisión del técnico / Costo de mano de obra
   duration?: string;
   category?: string;
   /** Categoría interna de mantenimiento que dispara este servicio */
@@ -117,6 +119,7 @@ export interface Product {
   type?: string;
   costPrice: number;
   salePrice: number;
+  laborPrice?: number; // Comisión del técnico si este producto incluye mano de obra o es un servicio
   stock: number;
   minStock: number;
   tax: number;
@@ -131,6 +134,10 @@ export interface Product {
   lifespanKm?: number;
   /** Vida útil en días que otorga este producto al vehículo */
   lifespanDays?: number;
+  /** Compatibilidad de vehículo */
+  vehicleMake?: string;
+  vehicleModel?: string;
+  vehicleYear?: string;
 }
 
 export interface ProductVariant {
@@ -166,6 +173,7 @@ export interface WorkOrder {
   status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced';
   description: string;
   serviceIds?: string[]; // Multiple services selected
+  parts?: { productId: string; quantity: number }[]; // Parts dispatched from warehouse
   estimatedTime?: string;
   notes?: string;
   checklist?: { item: string; completed: boolean }[];
@@ -181,6 +189,7 @@ export interface InvoiceItem {
   name: string;
   quantity: number;
   unitPrice: number;
+  laborPrice?: number; // Comisión del técnico extraída en el momento de la venta
   discount?: number;
   tax: number;
 }
@@ -218,6 +227,8 @@ export interface Technician {
   name: string;
   phone?: string;
   status: 'active' | 'inactive';
+  pagoNomina?: number;
+  tipoPago?: 'porcentaje' | 'fijo';
   createdAt: string;
 }
 
@@ -286,7 +297,7 @@ export interface Caja {
   notas_cierre?: string;
 }
 
-export type TipoMovimiento = 'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'VENTA' | 'ABONO';
+export type TipoMovimiento = 'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'VENTA' | 'ABONO' | 'PAGO_NOMINA';
 export type MetodoPago = 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA';
 
 export interface MovimientoCaja {
@@ -294,6 +305,7 @@ export interface MovimientoCaja {
   tenant_id: string;
   caja_id: string;
   empleado_id: string;
+  tecnico_id?: string;
   tipo: TipoMovimiento;
   concepto: string;
   monto: number;
@@ -463,6 +475,8 @@ export interface PurchaseOrder {
   tenantId: string;
   supplierId: string;
   number: string;            // OC-2026-001
+  invoiceNumber?: string;    // Factura/NCF del proveedor
+  paymentStatus: 'paid' | 'pending' | 'partial';
   status: PurchaseOrderStatus;
   items: PurchaseOrderItem[];
   subtotal: number;

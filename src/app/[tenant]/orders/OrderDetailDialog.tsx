@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useStore } from "@/store/useStore";
-import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X } from "lucide-react";
+import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, PackageOpen, Plus, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
@@ -22,8 +22,11 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
   const customers = useStore((s) => s.customers);
   const vehicles = useStore((s) => s.vehicles);
   const technicians = useStore((s) => s.technicians);
+  const products = useStore((s) => s.products);
   const deleteOrder = useStore((s) => s.deleteOrder);
   const updateOrder = useStore((s) => s.updateOrder);
+  const updateProduct = useStore((s) => s.updateProduct);
+  const addMovement = useStore((s) => s.addMovement);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -33,6 +36,10 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     notes: order.notes || "",
     mechanicId: order.mechanicId || ""
   });
+
+  const [showPartSelector, setShowPartSelector] = useState(false);
+  const [selectedPartId, setSelectedPartId] = useState("");
+  const [partQuantity, setPartQuantity] = useState(1);
 
   useEffect(() => {
     setEditForm({
@@ -65,6 +72,75 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     });
     toast.success("Orden de trabajo actualizada correctamente");
     setIsEditing(false);
+  };
+
+  const handleAddPart = () => {
+    if (!selectedPartId || partQuantity < 1) return;
+    const product = products.find(p => p.id === selectedPartId);
+    if (!product) return;
+
+    if (product.stock < partQuantity) {
+      toast.error(`Stock insuficiente. Solo quedan ${product.stock} unidades de ${product.name}`);
+      return;
+    }
+
+    // 1. Añadir a la orden
+    const currentParts = order.parts || [];
+    const existingPartIndex = currentParts.findIndex(p => p.productId === selectedPartId);
+    let newParts = [...currentParts];
+    if (existingPartIndex >= 0) {
+      newParts[existingPartIndex].quantity += partQuantity;
+    } else {
+      newParts.push({ productId: selectedPartId, quantity: partQuantity });
+    }
+    
+    updateOrder(order.id, { parts: newParts });
+
+    // 2. Descontar inventario
+    updateProduct(product.id, { stock: product.stock - partQuantity });
+
+    // 3. Registrar movimiento
+    addMovement({
+      id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      tenantId: order.tenantId,
+      productId: product.id,
+      productName: product.name,
+      type: "out",
+      quantity: partQuantity,
+      reason: `Despacho a Orden #${order.id.slice(-6).toUpperCase()}`,
+      date: new Date().toISOString()
+    });
+
+    toast.success(`${partQuantity}x ${product.name} despachado(s) a la orden`);
+    setShowPartSelector(false);
+    setSelectedPartId("");
+    setPartQuantity(1);
+  };
+
+  const handleRemovePart = (productId: string, quantityToRemove: number) => {
+    const product = products.find(p => p.id === productId);
+    
+    // 1. Quitar de la orden
+    const currentParts = order.parts || [];
+    const newParts = currentParts.filter(p => p.productId !== productId);
+    updateOrder(order.id, { parts: newParts });
+
+    // 2. Reversar inventario si el producto existe
+    if (product) {
+      updateProduct(product.id, { stock: product.stock + quantityToRemove });
+      addMovement({
+        id: `mov-rev-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        tenantId: order.tenantId,
+        productId: product.id,
+        productName: product.name,
+        type: "in",
+        quantity: quantityToRemove,
+        reason: `Reversión de despacho - Orden #${order.id.slice(-6).toUpperCase()}`,
+        date: new Date().toISOString()
+      });
+    }
+
+    toast.success("Pieza retornada al inventario exitosamente");
   };
 
   return (
@@ -242,6 +318,96 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
                 <p className="text-sm text-neutral-600 italic leading-snug">{order.notes}</p>
               </div>
             )}
+
+            {/* SECCIÓN DE ALMACÉN / REPUESTOS */}
+            <div className="border border-neutral-100 rounded-xl overflow-hidden mt-4">
+              <div className="bg-neutral-50 p-3 border-b border-neutral-100 flex justify-between items-center">
+                <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <PackageOpen className="h-3.5 w-3.5" /> Repuestos Despachados
+                </p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-7 text-[10px] font-bold rounded-lg"
+                  onClick={() => setShowPartSelector(!showPartSelector)}
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Despachar Pieza
+                </Button>
+              </div>
+
+              {showPartSelector && (
+                <div className="p-3 bg-blue-50/30 border-b border-neutral-100 space-y-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs font-bold text-neutral-600">Buscar Pieza en Inventario</Label>
+                    <Select value={selectedPartId} onValueChange={(v) => setSelectedPartId(v || "")}>
+                      <SelectTrigger className="h-9 rounded-lg bg-white text-xs">
+                        {selectedPartId ? products.find(p => p.id === selectedPartId)?.name : "Seleccione una pieza..."}
+                      </SelectTrigger>
+                      <SelectContent className="max-h-48 z-[200]">
+                        {products.filter(p => p.tenantId === order.tenantId && p.stock > 0).map(p => (
+                          <SelectItem key={p.id} value={p.id} className="text-xs">
+                            {p.name} <span className="text-neutral-400 ml-1">(Stock: {p.stock})</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex gap-2 items-end">
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs font-bold text-neutral-600">Cantidad</Label>
+                      <Input 
+                        type="number" 
+                        min="1" 
+                        className="h-9 rounded-lg text-xs" 
+                        value={partQuantity} 
+                        onChange={(e) => setPartQuantity(Number(e.target.value))} 
+                      />
+                    </div>
+                    <Button 
+                      className="h-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4"
+                      onClick={handleAddPart}
+                      disabled={!selectedPartId}
+                    >
+                      Añadir
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-0">
+                {(!order.parts || order.parts.length === 0) ? (
+                  <div className="p-4 text-center text-xs text-neutral-400 italic">
+                    No se han despachado piezas para esta orden.
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-neutral-50">
+                    {order.parts.map((part, idx) => {
+                      const p = products.find(prod => prod.id === part.productId);
+                      return (
+                        <li key={idx} className="flex items-center justify-between p-3 hover:bg-neutral-50 transition-colors">
+                          <div>
+                            <p className="text-sm font-bold text-neutral-800">{p?.name || "Pieza desconocida"}</p>
+                            <p className="text-[10px] text-neutral-500 font-mono">{p?.sku || ""}</p>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className="text-xs font-black bg-neutral-100 text-neutral-700 px-2 py-1 rounded-md">
+                              x{part.quantity}
+                            </span>
+                            <button 
+                              onClick={() => handleRemovePart(part.productId, part.quantity)}
+                              className="text-rose-400 hover:text-rose-600 p-1 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors"
+                              title="Retornar a inventario"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
 
             <div className="flex gap-2 pt-4 border-t border-neutral-100">
               <Button 

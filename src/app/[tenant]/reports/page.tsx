@@ -28,19 +28,44 @@ export default function ReportsPage() {
   const allOrders = useStore((s) => s.orders);
   const orders = tenantId ? allOrders.filter((o) => o.tenantId === tenantId) : [];
 
+  const allMovements = useStore((s) => s.cajaMovements);
+  const cajaMovements = tenantId ? allMovements.filter((m) => m.tenant_id === tenantId) : [];
+
   const allCustomers = useStore((s) => s.customers);
   const customers = tenantId ? allCustomers.filter((c) => c.tenantId === tenantId) : [];
 
   const [period, setPeriod] = useState<"week" | "month" | "year">("month");
 
-  const paidInvoices = invoices.filter((i) => i.status === "paid");
+  // Filtering logic
+  const now = new Date().getTime();
+  const getFilterDate = () => {
+    if (period === "week") return new Date(now - 7 * 24 * 60 * 60 * 1000).getTime();
+    if (period === "month") return new Date(now - 30 * 24 * 60 * 60 * 1000).getTime();
+    if (period === "year") return new Date(now - 365 * 24 * 60 * 60 * 1000).getTime();
+    return 0;
+  };
+
+  const filterDate = getFilterDate();
+
+  const filteredInvoices = invoices.filter(i => new Date(i.createdAt).getTime() >= filterDate);
+  const filteredOrders = orders.filter(o => new Date(o.createdAt).getTime() >= filterDate);
+  const filteredCajaMovements = cajaMovements.filter(m => new Date(m.creado_en).getTime() >= filterDate);
+
+  const paidInvoices = filteredInvoices.filter((i) => i.status === "paid");
   const totalRevenue = paidInvoices.reduce((acc, inv) => acc + inv.total, 0);
-  const avgTicket = invoices.length > 0 ? Math.round(totalRevenue / invoices.length) : 0;
-  const conversionRate = orders.length > 0 ? Math.round((invoices.length / orders.length) * 100) : 0;
+  
+  const totalEgresos = filteredCajaMovements
+    .filter((m) => ["EGRESO", "RETIRO", "GASTO_CAJA_CHICA", "PAGO_NOMINA"].includes(m.tipo))
+    .reduce((acc, m) => acc + m.monto, 0);
+    
+  const netProfit = totalRevenue - totalEgresos;
+
+  const avgTicket = filteredInvoices.length > 0 ? Math.round(totalRevenue / filteredInvoices.length) : 0;
+  const conversionRate = filteredOrders.length > 0 ? Math.round((filteredInvoices.length / filteredOrders.length) * 100) : 0;
 
   // Top products/services from invoice items
   const productSales: Record<string, { name: string; qty: number; revenue: number }> = {};
-  invoices.forEach((inv) => {
+  filteredInvoices.forEach((inv) => {
     inv.items.forEach((item) => {
       const key = item.name;
       if (!productSales[key]) productSales[key] = { name: item.name, qty: 0, revenue: 0 };
@@ -52,16 +77,48 @@ export default function ReportsPage() {
 
   // Order status for pie
   const statusData = [
-    { name: "Pendiente", value: orders.filter((o) => o.status === "pending").length },
-    { name: "Reparando", value: orders.filter((o) => o.status === "repairing").length },
-    { name: "Finalizado", value: orders.filter((o) => o.status === "finished").length },
-    { name: "Entregado", value: orders.filter((o) => o.status === "delivered").length },
+    { name: "Pendiente", value: filteredOrders.filter((o) => o.status === "pending").length },
+    { name: "Reparando", value: filteredOrders.filter((o) => o.status === "repairing").length },
+    { name: "Finalizado", value: filteredOrders.filter((o) => o.status === "finished").length },
+    { name: "Entregado", value: filteredOrders.filter((o) => o.status === "delivered").length },
   ].filter((d) => d.value > 0);
+
+  // Exportar a CSV
+  const handleExport = () => {
+    const csvRows = [];
+    csvRows.push(["Factura", "Cliente", "Total (RD$)", "ITBIS (RD$)", "Metodo", "Estado", "Fecha"]);
+    
+    filteredInvoices.forEach(inv => {
+      const customer = customers.find(c => c.id === inv.customerId);
+      const row = [
+        inv.ncf || inv.id.slice(-8).toUpperCase(),
+        customer?.name || "Sin Nombre",
+        inv.total,
+        inv.tax,
+        inv.paymentMethod,
+        inv.status === "paid" ? "Pagada" : "Pendiente",
+        new Date(inv.createdAt).toLocaleDateString("es-DO")
+      ];
+      csvRows.push(row.join(","));
+    });
+    
+    const csvString = csvRows.join("\\n");
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `reporte_facturas_${period}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const kpis = [
     { label: "Ingresos Totales", value: `RD$ ${totalRevenue.toLocaleString("es-DO")}`, change: "+18.2%", trend: "up" as const, icon: DollarSign },
-    { label: "Total Facturas", value: invoices.length, change: "+5 este mes", trend: "up" as const, icon: ShoppingCart },
+    { label: "Egresos Totales", value: `RD$ ${totalEgresos.toLocaleString("es-DO")}`, change: "-5.3%", trend: "down" as const, icon: ArrowDownRight },
+    { label: "Rentabilidad Neta", value: `RD$ ${netProfit.toLocaleString("es-DO")}`, change: "+12.4%", trend: netProfit >= 0 ? "up" : "down" as const, icon: TrendingUp },
     { label: "Ticket Promedio", value: `RD$ ${avgTicket.toLocaleString("es-DO")}`, change: `+RD$ ${(320).toLocaleString("es-DO")}`, trend: "up" as const, icon: TrendingUp },
+    { label: "Total Facturas", value: invoices.length, change: "+5 este mes", trend: "up" as const, icon: ShoppingCart },
     { label: "Conversión OT→Factura", value: `${conversionRate}%`, change: "+3.1%", trend: "up" as const, icon: BarChart3 },
   ];
 
@@ -83,14 +140,14 @@ export default function ReportsPage() {
               </button>
             ))}
           </div>
-          <Button variant="outline" className="rounded-lg gap-2">
+          <Button variant="outline" className="rounded-lg gap-2" onClick={handleExport}>
             <Download className="h-4 w-4" /> Exportar
           </Button>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {kpis.map((kpi) => (
           <Card key={kpi.label} className="border-neutral-100 shadow-sm hover:shadow-md transition-all">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -147,7 +204,7 @@ export default function ReportsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-50">
-                {[...invoices].reverse().map((inv) => {
+                {[...filteredInvoices].reverse().map((inv) => {
                   const customer = customers.find((c) => c.id === inv.customerId);
                   return (
                     <tr key={inv.id} className="hover:bg-neutral-50/50 transition-colors">

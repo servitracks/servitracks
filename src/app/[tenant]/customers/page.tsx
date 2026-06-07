@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useStore, Customer, Vehicle } from "@/store/useStore";
 import {
   UserPlus, Search, MoreVertical, Car, Phone, Mail, Calendar,
-  ChevronRight, Users, TrendingUp, Edit, Trash2, X, Tag, User as UserIcon
+  ChevronRight, Users, TrendingUp, Edit, Trash2, X, Tag, User as UserIcon, Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useParams, useRouter } from "@/lib/next-compat";
+import BulkCustomerImportModal from "@/components/customers/BulkCustomerImportModal";
 
 type CustomerForm = {
   name: string; phone: string; email: string;
@@ -116,6 +117,7 @@ export default function CustomersPage() {
   const [createStep, setCreateStep] = useState<1 | 2>(1);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isVehiclesModalOpen, setIsVehiclesModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState("");
   
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -261,6 +263,10 @@ export default function CustomersPage() {
           <Button variant="outline" className="rounded-lg gap-2 cursor-pointer bg-white"
             onClick={() => setIsVehiclesModalOpen(true)}>
             <Car className="h-4 w-4 text-neutral-500" /> Vehículos
+          </Button>
+          <Button variant="outline" className="rounded-lg gap-2 cursor-pointer bg-white"
+            onClick={() => setIsImportModalOpen(true)}>
+            <Upload className="h-4 w-4" /> Importar
           </Button>
           <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2 cursor-pointer"
             onClick={() => { setForm(emptyCustomerForm); setVehForm(emptyVehicleForm); setCreateStep(1); setIsCreateOpen(true); }}>
@@ -519,6 +525,12 @@ export default function CustomersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <BulkCustomerImportModal
+        open={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        tenantId={tenantId}
+      />
     </div>
   );
 }

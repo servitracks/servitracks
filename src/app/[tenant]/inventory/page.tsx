@@ -69,15 +69,18 @@ const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctri
 type ProductForm = {
   name: string; sku: string; barcode: string; category: string;
   brand: string; supplier: string; costPrice: string; salePrice: string;
+  laborPrice: string;
   stock: string; minStock: string; tax: string; location: string;
   serviceIds: string[];
+  vehicleMake: string; vehicleModel: string; vehicleYear: string;
 };
 
 const emptyForm: ProductForm = {
   name: "", sku: "", barcode: "", category: "",
-  brand: "", supplier: "", costPrice: "", salePrice: "",
+  brand: "", supplier: "", costPrice: "", salePrice: "", laborPrice: "",
   stock: "0", minStock: "5", tax: "18", location: "",
   serviceIds: [],
+  vehicleMake: "", vehicleModel: "", vehicleYear: "",
 };
 
 interface ProductFieldsProps {
@@ -239,9 +242,19 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
         <Input 
           type="number" 
           placeholder="0" 
-          className="h-10 rounded-xl border-neutral-200"
+          className="h-10 rounded-xl border-neutral-200 font-bold"
           value={form.salePrice} 
           onChange={(e) => setForm((prev) => ({ ...prev, salePrice: e.target.value }))} 
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Comisión Técnico (%)</Label>
+        <Input 
+          type="number" 
+          placeholder="Ej: 25" 
+          className="h-10 rounded-xl border-neutral-200 text-blue-600 bg-blue-50/50 font-bold"
+          value={form.laborPrice} 
+          onChange={(e) => setForm((prev) => ({ ...prev, laborPrice: e.target.value }))} 
         />
       </div>
       <div className="space-y-1.5">
@@ -306,6 +319,24 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
           onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))} 
         />
       </div>
+
+      <div className="col-span-2 mt-4 pt-4 border-t border-neutral-100">
+        <h4 className="font-semibold text-neutral-900 mb-3 text-sm">Compatibilidad de Vehículo</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="space-y-1.5">
+            <Label>Marca de Vehículo</Label>
+            <Input placeholder="Ej: Toyota" className="h-10 rounded-xl border-neutral-200" value={form.vehicleMake} onChange={(e) => setForm(p => ({...p, vehicleMake: e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Modelo</Label>
+            <Input placeholder="Ej: Corolla" className="h-10 rounded-xl border-neutral-200" value={form.vehicleModel} onChange={(e) => setForm(p => ({...p, vehicleModel: e.target.value}))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Año</Label>
+            <Input placeholder="Ej: 2010-2015" className="h-10 rounded-xl border-neutral-200" value={form.vehicleYear} onChange={(e) => setForm(p => ({...p, vehicleYear: e.target.value}))} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -316,6 +347,13 @@ export default function InventoryPage() {
   const tenants = useStore((s) => s.tenants);
   const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
   const tenantId = currentTenant?.id ?? "";
+
+  const currentUserId = useStore((s) => s.currentUserId);
+  const users = useStore((s) => s.users);
+  const currentUser = currentUserId === 'admin' 
+    ? { role: 'owner' } 
+    : users.find((u) => u.id === currentUserId);
+  const isOwner = currentUser?.role === 'owner';
 
   const { addProduct, updateProduct, deleteProduct, addMovement } = useStore();
   const allProducts = useStore((s) => s.products);
@@ -349,7 +387,10 @@ export default function InventoryPage() {
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase()) ||
       (p.barcode || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.brand || "").toLowerCase().includes(search.toLowerCase());
+      (p.brand || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleMake || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
     const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
     return matchSearch && matchCat;
   });
@@ -382,11 +423,15 @@ export default function InventoryPage() {
       supplier: form.supplier,
       costPrice: Number(form.costPrice) || 0,
       salePrice: Number(form.salePrice) || 0,
+      laborPrice: Number(form.laborPrice) || 0,
       stock: Number(form.stock) || 0,
       minStock: Number(form.minStock) || 0,
       tax: Number(form.tax) || 18,
       location: form.location,
       serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
+      vehicleMake: form.vehicleMake,
+      vehicleModel: form.vehicleModel,
+      vehicleYear: form.vehicleYear,
     };
     addProduct(newProduct);
     addMovement({
@@ -410,10 +455,14 @@ export default function InventoryPage() {
       name: product.name, sku: product.sku, barcode: product.barcode || "",
       category: product.category, brand: product.brand || "",
       supplier: product.supplier || "", costPrice: String(product.costPrice),
-      salePrice: String(product.salePrice), stock: String(product.stock),
+      salePrice: String(product.salePrice), laborPrice: String(product.laborPrice || ""), 
+      stock: String(product.stock),
       minStock: String(product.minStock), tax: String(product.tax),
       location: product.location || "",
       serviceIds: product.serviceIds || [],
+      vehicleMake: product.vehicleMake || "",
+      vehicleModel: product.vehicleModel || "",
+      vehicleYear: product.vehicleYear || "",
     }));
     setIsEditOpen(true);
   };
@@ -425,8 +474,12 @@ export default function InventoryPage() {
       name: form.name, sku: form.sku, barcode: form.barcode,
       category: form.category, brand: form.brand, supplier: form.supplier,
       costPrice: Number(form.costPrice) || 0, salePrice: Number(form.salePrice) || 0,
+      laborPrice: Number(form.laborPrice) || 0,
       minStock: Number(form.minStock) || 0, tax: Number(form.tax) || 18, location: form.location,
       serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
+      vehicleMake: form.vehicleMake,
+      vehicleModel: form.vehicleModel,
+      vehicleYear: form.vehicleYear,
     });
     toast.success("Producto actualizado");
     setIsEditOpen(false);
@@ -558,11 +611,11 @@ export default function InventoryPage() {
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         {[
-          { label: "Total Productos", value: products.length, icon: Package, color: "text-neutral-700", bg: "bg-neutral-50" },
-          { label: "Stock Bajo", value: lowStockCount, icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50" },
-          { label: "Sin Stock", value: outOfStockCount, icon: X, color: "text-rose-600", bg: "bg-rose-50" },
-          { label: "Valor Total", value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50" },
-        ].map((kpi) => (
+          { label: "Total Productos", value: products.length, icon: Package, color: "text-neutral-700", bg: "bg-neutral-50", show: true },
+          { label: "Stock Bajo", value: lowStockCount, icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50", show: true },
+          { label: "Sin Stock", value: outOfStockCount, icon: X, color: "text-rose-600", bg: "bg-rose-50", show: true },
+          { label: "Valor Total", value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50", show: isOwner },
+        ].filter(kpi => kpi.show).map((kpi) => (
           <Card key={kpi.label} className="border-neutral-100 shadow-sm">
             <CardContent className="flex items-center gap-4 p-5">
               <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
@@ -613,7 +666,7 @@ export default function InventoryPage() {
                   <TableHead>Categoría</TableHead>
                   <TableHead>Precio Venta</TableHead>
                   <TableHead>Stock</TableHead>
-                  <TableHead>Margen</TableHead>
+                  {isOwner && <TableHead>Margen</TableHead>}
                   <TableHead>Estado</TableHead>
                   <TableHead className="w-[50px]" />
                 </TableRow>
@@ -638,7 +691,14 @@ export default function InventoryPage() {
                           </div>
                           <div>
                             <p className="font-semibold text-neutral-900 text-sm">{product.name}</p>
-                            <p className="text-xs text-neutral-400 font-mono">{product.sku}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-xs text-neutral-400 font-mono">{product.sku}</p>
+                              {(product.vehicleMake || product.vehicleModel || product.vehicleYear) && (
+                                <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                  {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </TableCell>
@@ -656,9 +716,11 @@ export default function InventoryPage() {
                           <span className="text-neutral-400 text-xs"> / mín {product.minStock}</span>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
-                      </TableCell>
+                      {isOwner && (
+                        <TableCell>
+                          <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
+                        </TableCell>
+                      )}
                       <TableCell>
                         {product.stock <= 0 ? (
                           <Badge className="bg-rose-100 text-rose-700 border-none text-xs">Agotado</Badge>
@@ -675,9 +737,11 @@ export default function InventoryPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
                             <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
-                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openEdit(product)}>
-                              <Edit className="h-4 w-4" /> Editar
-                            </DropdownMenuItem>
+                            {isOwner && (
+                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openEdit(product)}>
+                                <Edit className="h-4 w-4" /> Editar
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openAdjust(product)}>
                               <ArrowUpDown className="h-4 w-4" /> Ajustar Stock
                             </DropdownMenuItem>
@@ -690,11 +754,15 @@ export default function InventoryPage() {
                             <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}>
                               <Printer className="h-4 w-4" /> Imprimir Etiqueta
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
-                              onClick={() => handleDelete(product.id, product.name)}>
-                              <Trash2 className="h-4 w-4" /> Eliminar
-                            </DropdownMenuItem>
+                            {isOwner && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
+                                  onClick={() => handleDelete(product.id, product.name)}>
+                                  <Trash2 className="h-4 w-4" /> Eliminar
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>

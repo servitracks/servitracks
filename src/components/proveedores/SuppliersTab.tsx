@@ -21,6 +21,12 @@ export default function SuppliersTab({ tenantId }: { tenantId: string }) {
   const allSuppliers = useStore((s) => s.suppliers);
   const suppliers = allSuppliers.filter((s) => s.tenantId === tenantId);
   const { deleteSupplier } = useStore();
+  
+  const currentUserId = useStore((s) => s.currentUserId);
+  const users = useStore((s) => s.users);
+  const currentUser = currentUserId === 'admin' ? { role: 'owner' } : users.find((u) => u.id === currentUserId);
+  const isOwner = currentUser?.role === 'owner';
+  
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("Todos");
@@ -118,9 +124,13 @@ export default function SuppliersTab({ tenantId }: { tenantId: string }) {
                       <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none"><MoreVertical className="h-4 w-4 text-neutral-400" /></DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
                         <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setDetailSupplier(s)}><Eye className="h-4 w-4" /> Ver Detalle</DropdownMenuItem>
-                        <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setEditSupplier(s)}><Edit className="h-4 w-4" /> Editar</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2" onClick={() => handleDelete(s)}><Trash2 className="h-4 w-4" /> Eliminar</DropdownMenuItem>
+                        {isOwner && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setEditSupplier(s)}><Edit className="h-4 w-4" /> Editar</DropdownMenuItem>}
+                        {isOwner && (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2" onClick={() => handleDelete(s)}><Trash2 className="h-4 w-4" /> Eliminar</DropdownMenuItem>
+                          </>
+                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

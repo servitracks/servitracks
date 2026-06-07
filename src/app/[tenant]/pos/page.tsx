@@ -6,9 +6,10 @@ import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X,
   Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
-  Package, AlertTriangle, CheckCircle, UserCog, FileText,
+  Package, AlertTriangle, CheckCircle, UserCog, FileText, User
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,10 @@ export default function POSPage() {
 
   const currentOrder = activeOrderId ? tenantOrders.find(o => o.id === activeOrderId) : null;
   const [posMechanicId, setPosMechanicId] = useState<string>("");
+  const [posCustomerId, setPosCustomerId] = useState<string>("");
+  const [posCustomerSearch, setPosCustomerSearch] = useState<string>("");
+  const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false);
+  const tenantCustomers = tenantId ? customers.filter((c) => c.tenantId === tenantId) : [];
 
   const serviceToProduct = (s: Service): Product => ({
     id: s.id,
@@ -64,6 +69,7 @@ export default function POSPage() {
     category: s.category || "Servicios",
     costPrice: 0,
     salePrice: s.price,
+    laborPrice: s.laborPrice ? (s.price * s.laborPrice) / 100 : undefined,
     stock: 9999,
     minStock: 0,
     tax: 0.18,
@@ -78,6 +84,9 @@ export default function POSPage() {
   useEffect(() => {
     if (currentOrder && currentOrder.mechanicId) {
       setPosMechanicId(currentOrder.mechanicId);
+    }
+    if (currentOrder && currentOrder.customerId) {
+      setPosCustomerId(currentOrder.customerId);
     }
   }, [currentOrder]);
 
@@ -167,9 +176,10 @@ export default function POSPage() {
   const addToCart = (product: Product) => {
     if (product.stock <= 0) { toast.error("Sin stock disponible"); return; }
     setCart((prev) => {
+      const calculatedLaborPrice = product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined;
       const ex = prev.find((i) => i.id === product.id);
       if (ex) return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice }];
     });
   };
 
@@ -204,6 +214,7 @@ export default function POSPage() {
       category: "Servicios",
       costPrice: 0,
       salePrice: amount,
+      laborPrice: amount,
       stock: 9999,
       minStock: 0,
       tax: 0.18,
@@ -225,10 +236,47 @@ export default function POSPage() {
     setActiveServiceIds(sids);
     setCategory("Todos");
 
-    if (sids.length > 0) {
-      toast.success(`Orden vinculada — Servicios de la orden agregados al catálogo`);
+    if (sids.length > 0 || (order.parts && order.parts.length > 0)) {
+      setCart(prev => {
+        let newCart = [...prev];
+        
+        // Add services
+        if (sids.length > 0) {
+          const servicesToAdd = tenantServices.filter(s => sids.includes(s.id));
+          servicesToAdd.forEach(s => {
+            if (s.price > 0 || s.laborPrice) {
+              const productForm = serviceToProduct(s);
+              const ex = newCart.find(i => i.id === productForm.id);
+              if (ex) {
+                newCart = newCart.map(i => i.id === productForm.id ? { ...i, quantity: i.quantity + 1 } : i);
+              } else {
+                newCart.push({ ...productForm, quantity: 1 });
+              }
+            }
+          });
+        }
+
+        // Add parts dispatched by warehouse
+        if (order.parts && order.parts.length > 0) {
+          order.parts.forEach(part => {
+            const product = filteredProducts.find(p => p.id === part.productId);
+            if (product) {
+              const ex = newCart.find(i => i.id === product.id);
+              if (ex) {
+                newCart = newCart.map(i => i.id === product.id ? { ...i, quantity: i.quantity + part.quantity } : i);
+              } else {
+                const calculatedLaborPrice = product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined;
+                newCart.push({ ...product, quantity: part.quantity, laborPrice: calculatedLaborPrice });
+              }
+            }
+          });
+        }
+
+        return newCart;
+      });
+      toast.success(`Orden vinculada — Servicios y repuestos agregados al carrito`);
     } else {
-      toast.info("La orden no tiene servicios asociados");
+      toast.info("La orden no tiene servicios ni repuestos asociados");
     }
   };
 
@@ -299,15 +347,17 @@ export default function POSPage() {
       }
     } else {
       // Si no tiene e-CF, usa B01 o B02 normal
-      const isCreditFiscal = currentOrder?.customerId && currentOrder.customerId !== "walk-in";
+      const isCreditFiscal = customerData.type === 'credito_fiscal' || (posCustomerId && posCustomerId !== "walk-in" && customers.find(c => c.id === posCustomerId)?.rnc);
       finalNcf = isCreditFiscal ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
     }
+
+    const finalCustomerId = currentOrder?.customerId || posCustomerId || "walk-in";
 
     const inv = {
       id: `inv-${Date.now()}`,
       tenantId: tenantId,
-      customerId: currentOrder?.customerId || "walk-in",
-      customerName: customerData.name || undefined,
+      customerId: finalCustomerId,
+      customerName: customerData.name || (finalCustomerId !== "walk-in" ? customers.find(c => c.id === finalCustomerId)?.name : undefined),
       customerRnc: customerData.rnc || undefined,
       vehicleId: currentOrder?.vehicleId || undefined,
       orderId: activeOrderId || undefined,
@@ -318,7 +368,8 @@ export default function POSPage() {
         name: i.name, 
         quantity: i.quantity, 
         unitPrice: i.salePrice, 
-        tax: Math.round(i.salePrice * i.quantity * 0.18) 
+        tax: Math.round(i.salePrice * i.quantity * 0.18),
+        laborPrice: i.laborPrice,
       })),
       subtotal, tax: itbis, total,
       paymentMethod: payMethod,
@@ -357,10 +408,15 @@ export default function POSPage() {
     }
 
     if (activeCaja) {
-      const laborTotal = cart
-        .filter(i => i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.category === "Servicios")
-        .reduce((sum, item) => sum + (item.salePrice * item.quantity), 0);
-      const monto_mano_obra = Math.round(laborTotal * 1.18); // Incluyendo ITBIS base del 18%
+      let laborTotal = 0;
+      cart.forEach(item => {
+        if (item.id.startsWith("labor-") || item.name.toLowerCase() === "mano de obra") {
+          laborTotal += ((item.laborPrice ?? item.salePrice) || 0) * item.quantity;
+        } else {
+          laborTotal += (item.laborPrice || 0) * item.quantity;
+        }
+      });
+      const monto_mano_obra = laborTotal;
 
       addCajaMovement({
         id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -389,6 +445,9 @@ export default function POSPage() {
     setCashReceived(""); setPayMethod("cash");
     setActiveOrderId(null);
     setActiveServiceIds([]);
+    setPosCustomerId("");
+    setPosMechanicId("");
+    setPosCustomerSearch("");
     setCategory("Todos");
     searchRef.current?.focus();
   };
@@ -648,6 +707,51 @@ export default function POSPage() {
             )}
           </div>
           <div className="border-t border-neutral-100 bg-neutral-50 px-5 py-4 space-y-2">
+            <div className="flex justify-between items-center text-sm text-neutral-500 py-1.5 border-b border-dashed border-neutral-200">
+              <span className="font-semibold text-xs flex items-center gap-1"><User className="h-3.5 w-3.5 text-neutral-400" /> Cliente:</span>
+              <Popover open={customerPopoverOpen} onOpenChange={setCustomerPopoverOpen}>
+                <PopoverTrigger className="flex items-center justify-between px-3 h-8 w-48 rounded-lg border border-neutral-200 bg-white text-[11px] font-bold hover:border-neutral-300 transition-colors focus:outline-none">
+                  <span className="truncate">
+                    {posCustomerId
+                      ? tenantCustomers.find((c) => c.id === posCustomerId)?.name ?? "Consumidor Final"
+                      : "Consumidor Final"}
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent className="w-[300px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="end">
+                  <Input 
+                    placeholder="Buscar por nombre, teléfono o RNC..." 
+                    value={posCustomerSearch}
+                    onChange={(e) => setPosCustomerSearch(e.target.value)}
+                    className="h-9 mb-2 text-xs rounded-lg border-neutral-200"
+                  />
+                  <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
+                    <button 
+                      onClick={() => { setPosCustomerId(""); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
+                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posCustomerId ? "bg-black text-white" : "hover:bg-neutral-100")}
+                    >
+                      Consumidor Final (Ticket Normal)
+                    </button>
+                    {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).map(c => (
+                      <button 
+                        key={c.id}
+                        onClick={() => { setPosCustomerId(c.id); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
+                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors flex flex-col", posCustomerId === c.id ? "bg-black text-white" : "hover:bg-neutral-100")}
+                      >
+                        <div className="font-bold">{c.name}</div>
+                        {(c.phone || c.rnc) && (
+                          <div className={cn("text-[10px] mt-0.5", posCustomerId === c.id ? "text-neutral-300" : "text-neutral-500")}>
+                            {[c.phone, c.rnc ? `RNC: ${c.rnc}` : ''].filter(Boolean).join(" • ")}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                    {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).length === 0 && (
+                      <div className="text-center text-xs text-neutral-400 py-4">No se encontraron clientes</div>
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
             <div className="flex justify-between items-center text-sm text-neutral-500 py-1.5 border-b border-dashed border-neutral-200">
               <span className="font-semibold text-xs flex items-center gap-1"><UserCog className="h-3.5 w-3.5 text-neutral-400" /> Técnico:</span>
               <Select value={posMechanicId || "none"} onValueChange={(v) => setPosMechanicId(!v || v === "none" ? "" : v)}>

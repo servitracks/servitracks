@@ -58,10 +58,17 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
               text-overflow: ellipsis;
               width: 100%;
             }
-            .price {
-              font-size: 10px;
-              font-weight: 900;
+            .vehicle-info {
+              font-size: 8px;
+              font-weight: bold;
               margin-bottom: 2px;
+              color: #333;
+              text-align: center;
+              max-height: 10px;
+              overflow: hidden;
+              white-space: nowrap;
+              text-overflow: ellipsis;
+              width: 100%;
             }
             .loc {
               font-size: 7px;
@@ -79,7 +86,9 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
         </head>
         <body>
           <div class="name">${product.name}</div>
-          <div class="price">RD$ ${product.salePrice.toLocaleString("es-DO")}</div>
+          ${[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).length > 0 
+            ? `<div class="vehicle-info">${[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}</div>` 
+            : ''}
           <div class="barcode-container">
             ${printRef.current.innerHTML}
           </div>
@@ -115,7 +124,11 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
           {/* Vista Previa Visual (no es exactamente la de impresión) */}
           <div className="w-[50mm] h-[25mm] bg-white border border-neutral-300 shadow-sm flex flex-col items-center justify-center p-1 relative overflow-hidden">
             <div className="text-[7px] font-bold text-center leading-tight truncate w-full px-1">{product.name}</div>
-            <div className="text-[8px] font-black mt-0.5">RD$ {product.salePrice.toLocaleString("es-DO")}</div>
+            {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).length > 0 && (
+              <div className="text-[7px] font-bold text-neutral-700 mt-0.5 truncate w-full text-center px-1">
+                {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
+              </div>
+            )}
             <div ref={printRef} className="mt-0.5 w-full flex justify-center overflow-hidden">
               <Barcode 
                 value={codeToPrint} 

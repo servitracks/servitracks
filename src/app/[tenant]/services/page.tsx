@@ -29,6 +29,7 @@ const emptyService: Partial<Service> = {
   name: "",
   category: "Otros",
   price: 0,
+  laborPrice: 0,
   duration: "1h",
   description: "",
 };
@@ -37,6 +38,8 @@ const emptyTechnician: Partial<Technician> = {
   name: "",
   phone: "",
   status: "active",
+  pagoNomina: 0,
+  tipoPago: "porcentaje",
 };
 
 export default function ServicesPage() {
@@ -132,6 +135,8 @@ export default function ServicesPage() {
         name: techForm.name,
         phone: techForm.phone || undefined,
         status: (techForm.status as "active" | "inactive") || "active",
+        pagoNomina: techForm.pagoNomina || 0,
+        tipoPago: techForm.tipoPago || "porcentaje",
         createdAt: new Date().toISOString(),
       };
       addTechnician(newTechnician);
@@ -226,6 +231,14 @@ export default function ServicesPage() {
                     {service.category}
                   </Badge>
                   <h3 className="font-bold text-neutral-900 leading-tight">{service.name}</h3>
+                  <div className="flex gap-2 mt-1">
+                    <span className="text-xs font-black text-neutral-900">RD$ {service.price.toLocaleString()}</span>
+                    {service.laborPrice ? (
+                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
+                        Comisión: {service.laborPrice}%
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger className="opacity-0 group-hover:opacity-100 h-8 w-8 flex items-center justify-center rounded-full hover:bg-neutral-100 transition-all">
@@ -243,7 +256,7 @@ export default function ServicesPage() {
                 </DropdownMenu>
               </div>
               
-              <div className="mt-4 flex items-center justify-between border-t border-neutral-50 pt-3">
+              <div className="mt-2 flex items-center justify-between border-t border-neutral-50 pt-2">
                 <div className="flex items-center gap-2 text-xs text-neutral-500">
                   <Clock className="h-3.5 w-3.5 text-neutral-400" />
                   <span>{service.duration || "—"}</span>
@@ -276,6 +289,29 @@ export default function ServicesPage() {
                 value={form.name} 
                 onChange={(e) => setForm({ ...form, name: e.target.value })} 
               />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Precio al Cliente (RD$) *</Label>
+                <Input 
+                  type="number"
+                  placeholder="Ej: 1500" 
+                  className="h-10 rounded-xl font-bold"
+                  value={form.price || ""} 
+                  onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} 
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Comisión Técnico (%)</Label>
+                <Input 
+                  type="number"
+                  placeholder="Ej: 25" 
+                  className="h-10 rounded-xl text-blue-600 font-bold bg-blue-50/50"
+                  value={form.laborPrice || ""} 
+                  onChange={(e) => setForm({ ...form, laborPrice: Number(e.target.value) })} 
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -518,6 +554,34 @@ export default function ServicesPage() {
                   <SelectItem value="inactive">Inactivo (No Disponible)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Tipo de Pago *</Label>
+                <Select 
+                  value={techForm.tipoPago || "porcentaje"} 
+                  onValueChange={(v) => setTechForm({ ...techForm, tipoPago: v as "porcentaje" | "fijo" })}
+                >
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <SelectValue placeholder="Tipo de Pago" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="porcentaje">Porcentaje (%)</SelectItem>
+                    <SelectItem value="fijo">Monto Fijo ($)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Monto / Porcentaje *</Label>
+                <Input 
+                  type="number"
+                  placeholder={techForm.tipoPago === 'fijo' ? "Ej: 500" : "Ej: 30"}
+                  className="h-10 rounded-xl"
+                  value={techForm.pagoNomina || ""} 
+                  onChange={(e) => setTechForm({ ...techForm, pagoNomina: parseFloat(e.target.value) || 0 })} 
+                />
+              </div>
             </div>
             <DialogFooter className="gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setIsTechFormOpen(false)} className="rounded-xl">

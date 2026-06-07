@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/store/types";
@@ -57,6 +58,9 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
   const [isServicePicker, setIsServicePicker] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("Todos");
+
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [isCustomerPopoverOpen, setIsCustomerPopoverOpen] = useState(false);
 
   const [isAddingVehicle, setIsAddingVehicle] = useState(false);
   const [newVehicleForm, setNewVehicleForm] = useState({
@@ -189,18 +193,44 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               {/* Cliente */}
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-neutral-600">Cliente *</Label>
-                <Select 
-                  value={form.customerId || undefined} 
-                  onValueChange={(v) => setForm(prev => ({ ...prev, customerId: v || "", vehicleId: "" }))}
-                  items={customers.map((c) => ({ value: c.id, label: `${c.name} — ${c.phone}` }))}
-                >
-                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                    <SelectValue placeholder="Seleccionar cliente" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl z-[200]">
-                    {customers.map((c) => <SelectItem key={c.id} value={c.id}>{`${c.name} — ${c.phone}`}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <Popover open={isCustomerPopoverOpen} onOpenChange={setIsCustomerPopoverOpen}>
+                  <PopoverTrigger className="flex w-full items-center justify-between px-3 h-10 rounded-xl border border-neutral-200 bg-white text-sm hover:border-neutral-300 transition-colors focus:outline-none">
+                    <span className={cn("truncate", !form.customerId && "text-neutral-500")}>
+                      {form.customerId
+                        ? customers.find((c) => c.id === form.customerId)?.name ?? "Seleccionar cliente"
+                        : "Seleccionar cliente"}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-neutral-500 opacity-50" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
+                    <Input 
+                      placeholder="Buscar por nombre, teléfono o RNC..." 
+                      value={customerSearch}
+                      onChange={(e) => setCustomerSearch(e.target.value)}
+                      className="h-9 mb-2 text-xs rounded-lg border-neutral-200"
+                    />
+                    <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
+                      {customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.phone && c.phone.includes(customerSearch)) || (c.rnc && c.rnc.includes(customerSearch))).map(c => (
+                        <button 
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setForm(prev => ({ ...prev, customerId: c.id, vehicleId: "" })); setIsCustomerPopoverOpen(false); setCustomerSearch(""); }}
+                          className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors flex flex-col", form.customerId === c.id ? "bg-black text-white" : "hover:bg-neutral-100")}
+                        >
+                          <div className="font-bold">{c.name}</div>
+                          {(c.phone || c.rnc) && (
+                            <div className={cn("text-[10px] mt-0.5", form.customerId === c.id ? "text-neutral-300" : "text-neutral-500")}>
+                              {[c.phone, c.rnc ? `RNC: ${c.rnc}` : ''].filter(Boolean).join(" • ")}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                      {customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || (c.phone && c.phone.includes(customerSearch)) || (c.rnc && c.rnc.includes(customerSearch))).length === 0 && (
+                        <div className="text-center text-xs text-neutral-400 py-4">No se encontraron clientes</div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {/* Vehículo */}

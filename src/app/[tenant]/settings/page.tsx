@@ -32,6 +32,7 @@ const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
   { value: "owner", label: "Dueño", color: "bg-black text-white" },
   { value: "mechanic", label: "Mecánico", color: "bg-amber-100 text-amber-800" },
   { value: "cashier", label: "Cajero", color: "bg-blue-100 text-blue-800" },
+  { value: "warehouse", label: "Almacén", color: "bg-emerald-100 text-emerald-800" },
   { value: "receptionist", label: "Recepción", color: "bg-violet-100 text-violet-800" },
 ];
 
@@ -258,14 +259,80 @@ export default function SettingsPage() {
   // ── Users tab state ──
   const [inviteOpen, setInviteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TenantUser | null>(null);
-  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "mechanic" as TenantUser["role"] });
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", password: "", role: "mechanic" as TenantUser["role"] });
+  const [isInviting, setIsInviting] = useState(false);
 
-  const handleInvite = () => {
-    if (!inviteForm.name || !inviteForm.email) { toast.error("Nombre y correo son requeridos"); return; }
-    addUser({ id: `u${Date.now()}`, tenantId: taller.id, status: "invited", createdAt: new Date().toISOString(), ...inviteForm });
-    toast.success(`Invitación enviada a ${inviteForm.email}`);
+  const handleInvite = async () => {
+    if (!inviteForm.name || !inviteForm.email || !inviteForm.password) { 
+      toast.error("Nombre, correo y contraseña son requeridos"); 
+      return; 
+    }
+    if (inviteForm.password.length < 6) {
+      toast.error("La contraseña debe tener al menos 6 caracteres");
+      return;
+    }
+
+    setIsInviting(true);
+
+    // 1. Crear usuario en Supabase Auth directamente (sin email de confirmación)
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email: inviteForm.email,
+      password: inviteForm.password,
+      email_confirm: true,
+      user_metadata: { name: inviteForm.name },
+    });
+
+    if (authError) {
+      console.error("Error creating user in Supabase:", authError);
+      
+      let errorMessage = authError.message;
+      if (errorMessage.includes("already been registered") || errorMessage.includes("User already registered")) {
+        errorMessage = "Ya existe un empleado registrado con este correo electrónico.";
+      } else if (errorMessage.includes("Password should be at least")) {
+        errorMessage = "La contraseña es muy débil o corta.";
+      } else if (errorMessage.includes("Email rate limit exceeded")) {
+        errorMessage = "Demasiados intentos. Por favor, intenta de nuevo más tarde.";
+      }
+
+      toast.error(`Error al crear usuario: ${errorMessage}`);
+      setIsInviting(false);
+      return;
+    }
+
+    const newUserId = authData.user.id;
+
+    // 2. Insertar en tenant_users
+    const { error: dbError } = await supabaseAdmin
+      .from("tenant_users")
+      .insert({
+        user_id: newUserId,
+        tenant_id: taller.id,
+        name: inviteForm.name,
+        email: inviteForm.email,
+        role: inviteForm.role,
+        status: "active"
+      });
+
+    if (dbError) {
+      console.error("Error inserting tenant_user:", dbError);
+      // Fallback a solo local si la DB falla
+    }
+
+    // 3. Guardar en store local
+    addUser({ 
+      id: newUserId, 
+      tenantId: taller.id, 
+      status: "active", 
+      createdAt: new Date().toISOString(), 
+      name: inviteForm.name,
+      email: inviteForm.email,
+      role: inviteForm.role
+    });
+
+    toast.success(`Usuario "${inviteForm.name}" creado con éxito. Ya puede iniciar sesión.`);
     setInviteOpen(false);
-    setInviteForm({ name: "", email: "", role: "mechanic" });
+    setInviteForm({ name: "", email: "", password: "", role: "mechanic" });
+    setIsInviting(false);
   };
 
   const confirmDelete = () => {
@@ -1047,7 +1114,7 @@ export default function SettingsPage() {
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="sm:max-w-sm rounded-2xl bg-white p-6 shadow-2xl border-none max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in-50 zoom-in-95 duration-200">
           <DialogHeader className="pb-3 border-b border-neutral-100 flex-shrink-0">
-            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Invitar Usuario</DialogTitle>
+            <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Crear Nuevo Empleado</DialogTitle>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto pr-2 py-4 my-1 space-y-4 custom-scrollbar">
@@ -1066,6 +1133,14 @@ export default function SettingsPage() {
                 onChange={e => setInviteForm({ ...inviteForm, email: e.target.value })} />
             </div>
             <div className="space-y-1.5">
+              <Label>Contraseña</Label>
+              <Input type="text" className="h-10 rounded-xl border-neutral-200"
+                placeholder="Ej. mecanico123"
+                value={inviteForm.password}
+                onChange={e => setInviteForm({ ...inviteForm, password: e.target.value })} />
+              <p className="text-[10px] text-neutral-400">El empleado usará esta contraseña para iniciar sesión.</p>
+            </div>
+            <div className="space-y-1.5">
               <Label>Rol</Label>
               <div className="grid grid-cols-2 gap-2">
                 {ROLES.filter(r => r.value !== "owner").map(r => (
@@ -1080,8 +1155,10 @@ export default function SettingsPage() {
           </div>
 
           <DialogFooter className="gap-2 pt-3 border-t border-neutral-100 flex-shrink-0">
-            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setInviteOpen(false)}>Cancelar</Button>
-            <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleInvite}>Enviar Invitación</Button>
+            <Button variant="outline" className="rounded-xl flex-1 cursor-pointer" onClick={() => setInviteOpen(false)} disabled={isInviting}>Cancelar</Button>
+            <Button className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800 cursor-pointer border-none" onClick={handleInvite} disabled={isInviting}>
+              {isInviting ? "Creando..." : "Crear Usuario"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

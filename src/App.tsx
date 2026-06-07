@@ -22,6 +22,8 @@ import SettingsPage from "./app/[tenant]/settings/page";
 import CajaPage from "./app/[tenant]/caja/page";
 import ConversacionesPage from "./app/[tenant]/conversaciones/page";
 import ProveedoresPage from "./app/[tenant]/proveedores/page";
+import NominaPage from "./app/[tenant]/nomina/page";
+import MisComisionesPage from "./app/[tenant]/mis-comisiones/page";
 import Admin from "./app/admin/page";
 import BlogIndex from "./app/blog/page";
 import BlogPost from "./app/blog/[slug]/page";
@@ -74,6 +76,8 @@ export default function App() {
           <Route path="proveedores" element={<ProveedoresPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="caja" element={<CajaPage />} />
+          <Route path="nomina" element={<NominaPage />} />
+          <Route path="mis-comisiones" element={<MisComisionesPage />} />
         </Route>
 
         {/* Fallback 404 Route */}

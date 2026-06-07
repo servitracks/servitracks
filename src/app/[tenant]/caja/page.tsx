@@ -4,9 +4,9 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { 
   Wallet, Lock, ArrowDownLeft, ArrowUpRight, AlertTriangle, Plus, 
   CheckCircle2, Printer, Search, FileText, PiggyBank, Coins, 
-  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck
+  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users
 } from "lucide-react";
-import { useStore, Caja, MovimientoCaja, Empleado, Tenant } from "@/store/useStore";
+import { useStore, Caja, MovimientoCaja, Empleado, Tenant, Invoice } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,9 +62,12 @@ export default function CajaPage() {
     cajas = [], 
     cajaMovements = [], 
     addCaja, 
-    updateCaja, 
+    updateCaja,
     addCajaMovement, 
-    updateTenant 
+    updateTenant,
+    technicians = [],
+    invoices = [],
+    updateInvoice
   } = useStore();
 
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
@@ -139,6 +142,60 @@ export default function CajaPage() {
     };
   }, [activeCaja, activeMovements]);
 
+  // Calculate global pending commission for ALL technicians (past and present shifts)
+  const totalGlobalPending = useMemo(() => {
+    let globalTotal = 0;
+    const pendingInvoices = invoices.filter(inv => 
+      inv.tenantId === tenantId && 
+      inv.status === 'paid' && 
+      !inv.isCommissionPaid && 
+      inv.mechanicId && 
+      inv.mechanicId !== 'none'
+    );
+    
+    pendingInvoices.forEach(inv => {
+      (inv.items || []).forEach(item => {
+        if (!item) return;
+        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+        if (isManoObra) {
+          globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+        } else {
+          globalTotal += (item.laborPrice || 0) * (item.quantity || 1);
+        }
+      });
+    });
+    return globalTotal;
+  }, [invoices, tenantId]);
+
+  // Helper to calculate pending labor sum for a technician
+  const calculateTechCommission = (techId: string) => {
+    const tech = technicians.find(t => t.id === techId);
+    if (!tech) return { total: 0, pendingIds: [] };
+
+    const pending = invoices.filter(inv => 
+      inv.tenantId === tenantId && 
+      inv.status === 'paid' && 
+      inv.mechanicId === techId && 
+      !inv.isCommissionPaid
+    );
+
+    let total = 0;
+    pending.forEach(inv => {
+      let invTotal = 0;
+      (inv.items || []).forEach(item => {
+        if (!item) return;
+        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+        if (isManoObra) {
+          invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+        } else {
+          invTotal += (item.laborPrice || 0) * (item.quantity || 1);
+        }
+      });
+      total += invTotal;
+    });
+    return { total, pendingIds: pending.map(i => i.id) };
+  };
+
   // Dialog open states
   const [isAperturaOpen, setIsAperturaOpen] = useState(false);
   const [isCierreOpen, setIsCierreOpen] = useState(false);
@@ -147,18 +204,111 @@ export default function CajaPage() {
   const [isHistoricoOpen, setIsHistoricoOpen] = useState(false);
   const [isTicketPreviewOpen, setIsTicketPreviewOpen] = useState(false);
   const [selectedTicketCaja, setSelectedTicketCaja] = useState<Caja | null>(null);
+  const [isCxcOpen, setIsCxcOpen] = useState(false);
+  const [cxcSearch, setCxcSearch] = useState("");
+  
+  // -- PAGO TECNICO LIQUIDACION --
+  const [isPagoTecnicoOpen, setIsPagoTecnicoOpen] = useState(false);
+  const [selectedTechToPay, setSelectedTechToPay] = useState("");
 
+  const pendingTechInvoices = useMemo(() => {
+    if (!selectedTechToPay) return [];
+    return invoices.filter(inv => 
+      inv.tenantId === tenantId && 
+      inv.status === 'paid' && 
+      inv.mechanicId === selectedTechToPay && 
+      !inv.isCommissionPaid
+    );
+  }, [invoices, tenantId, selectedTechToPay]);
+
+  const techCommissionInfo = useMemo(() => {
+    const tech = technicians.find(t => t.id === selectedTechToPay);
+    if (!tech) return { total: 0, items: [] };
+
+    let totalGlobal = 0;
+    const items = pendingTechInvoices.map(inv => {
+      let comisionTotal = 0;
+      let manoObraTotal = 0;
+
+      (inv.items || []).forEach(item => {
+        if (!item) return;
+        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+        if (isManoObra) {
+          manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+        } else {
+          comisionTotal += (item.laborPrice || 0) * (item.quantity || 1);
+        }
+      });
+      
+      const totalFila = comisionTotal + manoObraTotal;
+      totalGlobal += totalFila;
+
+      return {
+        inv,
+        comisionTotal,
+        manoObraTotal,
+        totalFila
+      };
+    });
+
+    return { total: totalGlobal, items };
+  }, [pendingTechInvoices, technicians, selectedTechToPay]);
+
+  const handleLiquidarTecnico = () => {
+    if (!activeCaja) return;
+    if (!selectedTechToPay || techCommissionInfo.total <= 0) return;
+
+    const tech = technicians.find(t => t.id === selectedTechToPay);
+    const monto = techCommissionInfo.total;
+
+    const nuevoMov: MovimientoCaja = {
+      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      tenant_id: tenantId,
+      caja_id: activeCaja.id,
+      empleado_id: activeCaja.empleado_id,
+      tecnico_id: selectedTechToPay,
+      tipo: 'PAGO_NOMINA',
+      concepto: `[Pago Técnico] Liquidación a ${tech?.name} por ${pendingTechInvoices.length} facturas`,
+      monto,
+      metodo: 'EFECTIVO',
+      creado_en: new Date().toISOString()
+    };
+
+    addCajaMovement(nuevoMov);
+    
+    // Marcar facturas como pagadas
+    pendingTechInvoices.forEach(inv => {
+      updateInvoice(inv.id, { isCommissionPaid: true });
+    });
+
+    setIsPagoTecnicoOpen(false);
+    setSelectedTechToPay("");
+    toast.success("Liquidación a técnico registrada con éxito");
+  };
+  
+  const cxcInvoices = useMemo(() => {
+    return invoices.filter(inv => inv.tenantId === tenantId && inv.status === 'pending' && inv.paymentMethod === 'credit');
+  }, [invoices, tenantId]);
+
+  const processedCxcInvoices = useMemo(() => {
+    if (!cxcSearch) return cxcInvoices;
+    return cxcInvoices.filter(inv => 
+      (inv.customerName || '').toLowerCase().includes(cxcSearch.toLowerCase()) ||
+      inv.id.toLowerCase().includes(cxcSearch.toLowerCase())
+    );
+  }, [cxcInvoices, cxcSearch]);
   // Apertura Form States
   const [aperturaMonto, setAperturaMonto] = useState("");
   const [aperturaCajero, setAperturaCajero] = useState(DEFAULT_EMPLEADOS[0].id);
   const [aperturaNotas, setAperturaNotas] = useState("");
 
   // Movimiento Form States
-  const [movTipo, setMovTipo] = useState<'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA'>('INGRESO');
+  const [movTipo, setMovTipo] = useState<'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'PAGO_NOMINA'>('INGRESO');
   const [movMonto, setMovMonto] = useState("");
   const [movConcepto, setMovConcepto] = useState("");
   const [movMetodo, setMovMetodo] = useState<'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA'>('EFECTIVO');
   const [movGastoCategoria, setMovGastoCategoria] = useState(CATEGORIAS_GASTOS[0]);
+  const [movTecnicoId, setMovTecnicoId] = useState("");
 
   // Cierre Form States
   const [contadoEfectivo, setContadoEfectivo] = useState("");
@@ -177,6 +327,9 @@ export default function CajaPage() {
 
   // Search movements
   const [movSearch, setMovSearch] = useState("");
+
+  // Sort configuration for movements table
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
 
   // Open Caja Shift
   const handleAperturaSubmit = (e: React.FormEvent) => {
@@ -241,17 +394,29 @@ export default function CajaPage() {
       tenant_id: tenantId,
       caja_id: activeCaja.id,
       empleado_id: activeCaja.empleado_id,
-      tipo: movTipo === 'GASTO_CAJA_CHICA' ? 'EGRESO' : movTipo,
-      concepto: movTipo === 'GASTO_CAJA_CHICA' ? `[Caja Chica - ${movGastoCategoria}] ${movConcepto}` : movConcepto,
+      tecnico_id: movTipo === 'PAGO_NOMINA' ? movTecnicoId : undefined,
+      tipo: movTipo === 'GASTO_CAJA_CHICA' || movTipo === 'PAGO_NOMINA' ? 'EGRESO' : movTipo,
+      concepto: movTipo === 'GASTO_CAJA_CHICA' ? `[Caja Chica - ${movGastoCategoria}] ${movConcepto}` : 
+                movTipo === 'PAGO_NOMINA' ? `[Pago Nómina] ${movConcepto}` : movConcepto,
       monto,
-      metodo: movTipo === 'GASTO_CAJA_CHICA' ? 'EFECTIVO' : movMetodo,
+      metodo: movTipo === 'GASTO_CAJA_CHICA' || movTipo === 'PAGO_NOMINA' ? 'EFECTIVO' : movMetodo,
       creado_en: new Date().toISOString()
     };
 
     addCajaMovement(nuevoMov);
+    
+    // Si es pago de nómina, marcamos las facturas pendientes como pagadas
+    if (movTipo === 'PAGO_NOMINA' && movTecnicoId) {
+      const { pendingIds } = calculateTechCommission(movTecnicoId);
+      pendingIds.forEach(id => {
+        updateInvoice(id, { isCommissionPaid: true });
+      });
+    }
+
     setIsMovOpen(false);
     setMovMonto("");
     setMovConcepto("");
+    setMovTecnicoId("");
     toast.success("Movimiento registrado con éxito");
   };
 
@@ -342,13 +507,72 @@ export default function CajaPage() {
     toast.success("Fondo de Caja Chica reiniciado y configurado correctamente");
   };
 
-  // Filtered movements for search
-  const filteredActiveMovements = useMemo(() => {
-    return activeMovements.filter(m => 
+  // Filtered and Sorted movements
+  const processedActiveMovements = useMemo(() => {
+    let result = activeMovements.filter(m => 
       m.concepto.toLowerCase().includes(movSearch.toLowerCase()) ||
-      m.tipo.toLowerCase().includes(movSearch.toLowerCase())
+      m.tipo.toLowerCase().includes(movSearch.toLowerCase()) ||
+      m.metodo.toLowerCase().includes(movSearch.toLowerCase())
     );
-  }, [activeMovements, movSearch]);
+
+    if (sortConfig !== null) {
+      result.sort((a, b) => {
+        let aValue: any = a[sortConfig.key as keyof typeof a];
+        let bValue: any = b[sortConfig.key as keyof typeof b];
+
+        // Especial para HORA
+        if (sortConfig.key === 'creado_en') {
+           aValue = new Date(a.creado_en).getTime();
+           bValue = new Date(b.creado_en).getTime();
+        }
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+      // Default: más recientes primero
+      result.sort((a,b) => new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime());
+    }
+
+    return result;
+  }, [activeMovements, movSearch, sortConfig]);
+
+  // Request sort
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const handlePayCxc = (invoice: Invoice, metodo: 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA' = 'EFECTIVO') => {
+    if (!activeCaja) {
+      toast.error("Debe abrir la caja primero para recibir un pago.");
+      return;
+    }
+
+    // Mark as paid
+    updateInvoice(invoice.id, {
+      status: 'paid'
+    });
+
+    const nuevoMov: MovimientoCaja = {
+      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      tenant_id: tenantId,
+      caja_id: activeCaja.id,
+      empleado_id: activeCaja.empleado_id,
+      tipo: 'INGRESO',
+      concepto: `Cobro de Factura Crédito #${invoice.id.slice(-6).toUpperCase()} - ${invoice.customerName || 'Cliente'}`,
+      monto: invoice.total,
+      metodo,
+      creado_en: new Date().toISOString()
+    };
+    addCajaMovement(nuevoMov);
+    
+    toast.success("Pago registrado con éxito");
+  };
 
   // Closed shifts for history
   const closedShifts = useMemo(() => {
@@ -371,7 +595,7 @@ export default function CajaPage() {
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-shrink-0">
           <Button 
             className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-bold gap-2 h-11"
-            onClick={() => toast.info("Módulo de Cuentas x Cobrar en desarrollo")}
+            onClick={() => setIsCxcOpen(true)}
           >
             Cuentas x Cobrar
           </Button>
@@ -493,16 +717,11 @@ export default function CajaPage() {
             <div className="mt-3">
               <Button 
                 variant="outline" 
-                disabled={!activeCaja || metrics.totalManoObra <= 0}
-                onClick={() => { 
-                  setMovTipo('EGRESO'); 
-                  setMovMonto(metrics.totalManoObra.toString()); 
-                  setMovConcepto('Pago de mano de obra a técnicos del turno'); 
-                  setIsMovOpen(true); 
-                }}
+                disabled={!activeCaja || totalGlobalPending <= 0}
+                onClick={() => setIsPagoTecnicoOpen(true)}
                 className="w-full h-9 rounded-xl border-blue-200 text-blue-700 font-bold bg-blue-50 hover:bg-blue-100 cursor-pointer text-xs"
               >
-                Pagar a Técnicos ({formatRD(metrics.totalManoObra)})
+                Pagar a Técnicos ({formatRD(totalGlobalPending)})
               </Button>
             </div>
           </CardContent>
@@ -526,8 +745,8 @@ export default function CajaPage() {
                 <span className="font-bold text-rose-600">{formatRD(metrics.egresosEfectivo)}</span>
               </div>
               <div className="flex justify-between text-xs text-blue-800 bg-blue-50/80 px-2 py-1.5 rounded-md border border-blue-100">
-                <span className="font-semibold">Fondo Mano de Obra</span>
-                <span className="font-bold">{formatRD(metrics.totalManoObra)}</span>
+                <span className="font-semibold">Comisiones Pendientes</span>
+                <span className="font-bold">{formatRD(totalGlobalPending)}</span>
               </div>
               <div className="pt-2 mt-1 border-t border-neutral-100 flex justify-between text-sm">
                 <span className="font-bold text-neutral-800">Total esperado</span>
@@ -542,36 +761,56 @@ export default function CajaPage() {
       
       {/* Movimientos del Turno */}
       <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden mt-2">
-        <CardHeader className="p-5 border-b border-neutral-100 flex flex-row items-center justify-between bg-white">
-          <CardTitle className="font-heading text-lg font-bold text-neutral-900 flex items-center gap-2">
-            Movimientos del turno
-          </CardTitle>
-          <Badge variant="outline" className="rounded-full px-3 py-0.5 border-neutral-200 text-neutral-600 bg-white">
-            {activeMovements.length}
-          </Badge>
+        <CardHeader className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white">
+          <div className="flex items-center gap-2">
+            <CardTitle className="font-heading text-lg font-bold text-neutral-900 flex items-center gap-2">
+              Movimientos del turno
+            </CardTitle>
+            <Badge variant="outline" className="rounded-full px-3 py-0.5 border-neutral-200 text-neutral-600 bg-white">
+              {processedActiveMovements.length}
+            </Badge>
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+            <Input 
+              placeholder="Buscar movimiento..." 
+              value={movSearch}
+              onChange={(e) => setMovSearch(e.target.value)}
+              className="pl-9 h-9 text-xs rounded-xl border-neutral-200"
+            />
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-neutral-50 border-b border-neutral-100 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
-                  <th className="p-4 w-40">Hora</th>
-                  <th className="p-4 w-32">Tipo</th>
-                  <th className="p-4">Concepto</th>
-                  <th className="p-4 w-32 text-center">Método</th>
-                  <th className="p-4 w-32 text-right">Monto</th>
+                  <th className="p-4 w-40 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('creado_en')}>
+                    Hora {sortConfig?.key === 'creado_en' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="p-4 w-32 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('tipo')}>
+                    Tipo {sortConfig?.key === 'tipo' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="p-4 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('concepto')}>
+                    Concepto {sortConfig?.key === 'concepto' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="p-4 w-32 text-center cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('metodo')}>
+                    Método {sortConfig?.key === 'metodo' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="p-4 w-32 text-right cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('monto')}>
+                    Monto {sortConfig?.key === 'monto' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {activeMovements.length === 0 ? (
+                {processedActiveMovements.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-10 text-center text-neutral-400 font-semibold">
-                      No se han registrado movimientos en este turno aún
+                      No se encontraron movimientos registrados.
                     </td>
                   </tr>
                 ) : (
-                  // Sort by most recent first
-                  [...activeMovements].sort((a,b) => new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime()).map((mov) => {
+                  processedActiveMovements.map((mov) => {
                     const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
                     const isEgreso = ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA'].includes(mov.tipo);
                     return (
@@ -946,6 +1185,7 @@ export default function CajaPage() {
                   { value: 'EGRESO', label: 'Egreso Extra' },
                   { value: 'RETIRO', label: 'Retiro / Remesa' },
                   { value: 'GASTO_CAJA_CHICA', label: 'Caja Chica' },
+                  { value: 'PAGO_NOMINA', label: 'Pago Nómina' },
                 ].map(opt => (
                   <button
                     key={opt.value}
@@ -982,7 +1222,7 @@ export default function CajaPage() {
                 </div>
               </div>
 
-              {movTipo !== 'GASTO_CAJA_CHICA' ? (
+              {movTipo !== 'GASTO_CAJA_CHICA' && movTipo !== 'PAGO_NOMINA' && (
                 <div className="space-y-1.5">
                   <Label htmlFor="mov-metodo" className="text-xs font-semibold text-neutral-600">Forma de Pago</Label>
                   <Select value={movMetodo} onValueChange={(val) => val && setMovMetodo(val as any)}>
@@ -996,7 +1236,8 @@ export default function CajaPage() {
                     </SelectContent>
                   </Select>
                 </div>
-              ) : (
+              )}
+              {movTipo === 'GASTO_CAJA_CHICA' && (
                 <div className="space-y-1.5">
                   <Label htmlFor="mov-gasto-cat" className="text-xs font-semibold text-neutral-600">Categoría Gasto</Label>
                   <Select value={movGastoCategoria} onValueChange={(val) => val && setMovGastoCategoria(val)}>
@@ -1006,6 +1247,30 @@ export default function CajaPage() {
                     <SelectContent className="rounded-xl">
                       {CATEGORIAS_GASTOS.map(cat => (
                         <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {movTipo === 'PAGO_NOMINA' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="mov-tecnico" className="text-xs font-semibold text-neutral-600">Técnico a Pagar</Label>
+                  <Select value={movTecnicoId} onValueChange={(val) => {
+                      if (!val) return;
+                      setMovTecnicoId(val);
+                      const tech = technicians.find(t => t.id === val);
+                      if (tech) {
+                        const { total, pendingIds } = calculateTechCommission(val);
+                        setMovMonto(total.toString());
+                        setMovConcepto(`Pago Nómina a ${tech.name} (${pendingIds.length} facturas pendientes)`);
+                      }
+                    }}>
+                    <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-xs">
+                      <SelectValue placeholder="Seleccione Técnico" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {technicians.filter(t => t.tenantId === tenantId).map(tech => (
+                        <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1425,6 +1690,182 @@ export default function CajaPage() {
         </DialogContent>
       </Dialog>
       
+      {/* DIALOG 7: Cuentas x Cobrar */}
+      <Dialog open={isCxcOpen} onOpenChange={setIsCxcOpen}>
+        <DialogContent className="sm:max-w-3xl rounded-2xl p-6 overflow-y-auto max-h-[85vh]">
+          <DialogHeader className="border-b border-neutral-100 pb-3">
+            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-blue-600" /> Cuentas por Cobrar
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Visualice las facturas a crédito pendientes y registre su pago total.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              <Input 
+                placeholder="Buscar por cliente o número de factura..."
+                value={cxcSearch}
+                onChange={(e) => setCxcSearch(e.target.value)}
+                className="pl-9 h-10 rounded-xl border-neutral-200 text-sm"
+              />
+            </div>
+
+            <div className="border border-neutral-200 rounded-xl overflow-hidden bg-white">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="p-3">Factura</th>
+                    <th className="p-3">Cliente</th>
+                    <th className="p-3">Fecha</th>
+                    <th className="p-3 text-right">Total (RD$)</th>
+                    <th className="p-3 text-center">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {processedCxcInvoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-neutral-400 font-medium">
+                        No hay facturas de crédito pendientes.
+                      </td>
+                    </tr>
+                  ) : (
+                    processedCxcInvoices.map((inv) => (
+                      <tr key={inv.id} className="hover:bg-neutral-50/50 transition-colors">
+                        <td className="p-3 font-mono font-bold text-neutral-800">#{inv.id.slice(-6).toUpperCase()}</td>
+                        <td className="p-3 text-neutral-700 font-medium">{inv.customerName || 'Cliente No Registrado'}</td>
+                        <td className="p-3 text-neutral-500">{formatDateTimeRD(inv.createdAt).split(',')[0]}</td>
+                        <td className="p-3 text-right font-black text-neutral-900">{formatRD(inv.total)}</td>
+                        <td className="p-3 text-center">
+                          <Button
+                            size="sm"
+                            className="h-8 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-xs gap-1.5 shadow-sm"
+                            onClick={() => handlePayCxc(inv, 'EFECTIVO')}
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Cobrar
+                          </Button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => setIsCxcOpen(false)}
+              className="rounded-xl border-neutral-200"
+            >
+              Cerrar Panel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* DIALOG 8: Liquidación de Técnicos (Pago Técnico Detallado) */}
+      <Dialog open={isPagoTecnicoOpen} onOpenChange={setIsPagoTecnicoOpen}>
+        <DialogContent className="sm:max-w-[700px] rounded-2xl p-0 overflow-hidden bg-white">
+          <DialogHeader className="p-6 pb-4 border-b border-neutral-100">
+            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+              <Users className="h-5 w-5 text-blue-600" /> Liquidación por Técnico
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Desglose detallado de comisiones por mano de obra pendientes de pago.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-1.5 max-w-sm">
+              <Label className="text-xs font-semibold text-neutral-600">Seleccione el Técnico a Liquidar</Label>
+              <Select value={selectedTechToPay} onValueChange={(val) => val && setSelectedTechToPay(val)}>
+                <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-sm">
+                  <SelectValue placeholder="Seleccione Técnico" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  {technicians.filter(t => t.tenantId === tenantId).map(tech => (
+                    <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {selectedTechToPay && (
+              <>
+                {techCommissionInfo.items.length === 0 ? (
+                  <div className="bg-neutral-50 p-6 rounded-xl border border-neutral-200 text-center">
+                    <CheckCircle2 className="h-8 w-8 text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-neutral-700">El técnico está al día</p>
+                    <p className="text-xs text-neutral-500">No hay facturas pendientes de comisión.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase">
+                          <tr>
+                            <th className="p-3 font-bold">Factura / Fecha</th>
+                            <th className="p-3 font-bold text-right text-purple-700">Comisión</th>
+                            <th className="p-3 font-bold text-right text-blue-700">Mano de Obra</th>
+                            <th className="p-3 font-bold text-right text-neutral-900">Total Fila</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-100">
+                          {techCommissionInfo.items.map((item, idx) => (
+                            <tr key={idx} className="hover:bg-neutral-50 transition-colors">
+                              <td className="p-3">
+                                <div className="font-bold text-neutral-800">#{item.inv.id.slice(-6).toUpperCase()}</div>
+                                <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
+                              </td>
+                              <td className="p-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
+                              <td className="p-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>
+                              <td className="p-3 text-right font-black text-neutral-900">{formatRD(item.totalFila)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-blue-50 border-t border-blue-100">
+                          <tr>
+                            <td colSpan={3} className="p-3 text-right font-bold text-blue-800 uppercase text-xs">
+                              Total a Liquidar:
+                            </td>
+                            <td className="p-3 text-right font-black text-blue-900 text-sm">
+                              {formatRD(techCommissionInfo.total)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="p-6 bg-neutral-50 border-t border-neutral-100">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => setIsPagoTecnicoOpen(false)}
+              className="rounded-xl border-neutral-200 h-10"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleLiquidarTecnico}
+              disabled={!selectedTechToPay || techCommissionInfo.total <= 0}
+              className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-bold h-10 shadow-lg shadow-blue-600/20"
+            >
+              Liquidar Técnico ({formatRD(techCommissionInfo.total)})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

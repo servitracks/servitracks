@@ -97,6 +97,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
         tenantId,
         supplierId,
         number: generateNumber(),
+        paymentStatus: 'pending',
         status: "borrador",
         items: validItems,
         subtotal,
