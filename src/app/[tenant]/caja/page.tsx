@@ -4,7 +4,8 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { 
   Wallet, Lock, ArrowDownLeft, ArrowUpRight, AlertTriangle, Plus, 
   CheckCircle2, Printer, Search, FileText, PiggyBank, Coins, 
-  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users
+  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users,
+  CreditCard, Smartphone
 } from "lucide-react";
 import { useStore, Caja, MovimientoCaja, Empleado, Tenant, Invoice } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
@@ -1690,77 +1691,117 @@ export default function CajaPage() {
         </DialogContent>
       </Dialog>
       
-      {/* DIALOG 7: Cuentas x Cobrar */}
+      {/* DIALOG 7: Cuentas x Cobrar Épico */}
       <Dialog open={isCxcOpen} onOpenChange={setIsCxcOpen}>
-        <DialogContent className="sm:max-w-3xl rounded-2xl p-6 overflow-y-auto max-h-[85vh]">
-          <DialogHeader className="border-b border-neutral-100 pb-3">
-            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-blue-600" /> Cuentas por Cobrar
-            </DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">
-              Visualice las facturas a crédito pendientes y registre su pago total.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-4xl rounded-3xl p-0 overflow-hidden bg-neutral-50/80 backdrop-blur-md border-neutral-200/50">
+          <div className="bg-white/90 p-6 border-b border-neutral-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl opacity-50 -mr-20 -mt-20 pointer-events-none"></div>
+            <div className="relative z-10">
+              <DialogTitle className="font-heading text-2xl font-black flex items-center gap-2 text-neutral-900">
+                <Wallet className="h-6 w-6 text-blue-600" /> Cuentas por Cobrar
+              </DialogTitle>
+              <DialogDescription className="text-sm text-neutral-500 mt-1">
+                Gestión de facturas a crédito pendientes y recepción de pagos.
+              </DialogDescription>
+            </div>
+            
+            {/* Top Metrics Cards */}
+            <div className="flex gap-3 relative z-10">
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl p-4 shadow-lg shadow-blue-600/20 min-w-[150px] border border-blue-400/20">
+                <p className="text-[10px] uppercase font-bold text-blue-200 tracking-wider mb-1">Total Pendiente</p>
+                <p className="text-2xl font-black">{formatRD(processedCxcInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0))}</p>
+              </div>
+              <div className="bg-white border border-neutral-200 text-neutral-800 rounded-2xl p-4 shadow-sm min-w-[100px]">
+                <p className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider mb-1">Facturas</p>
+                <p className="text-2xl font-black">{processedCxcInvoices.length}</p>
+              </div>
+            </div>
+          </div>
 
-          <div className="space-y-4 pt-3">
+          <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
               <Input 
                 placeholder="Buscar por cliente o número de factura..."
                 value={cxcSearch}
                 onChange={(e) => setCxcSearch(e.target.value)}
-                className="pl-9 h-10 rounded-xl border-neutral-200 text-sm"
+                className="pl-12 h-12 rounded-2xl border-neutral-200 text-sm shadow-sm focus:ring-blue-500 bg-white"
               />
             </div>
 
-            <div className="border border-neutral-200 rounded-xl overflow-hidden bg-white">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="p-3">Factura</th>
-                    <th className="p-3">Cliente</th>
-                    <th className="p-3">Fecha</th>
-                    <th className="p-3 text-right">Total (RD$)</th>
-                    <th className="p-3 text-center">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-100">
-                  {processedCxcInvoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="p-8 text-center text-neutral-400 font-medium">
-                        No hay facturas de crédito pendientes.
-                      </td>
-                    </tr>
-                  ) : (
-                    processedCxcInvoices.map((inv) => (
-                      <tr key={inv.id} className="hover:bg-neutral-50/50 transition-colors">
-                        <td className="p-3 font-mono font-bold text-neutral-800">#{inv.id.slice(-6).toUpperCase()}</td>
-                        <td className="p-3 text-neutral-700 font-medium">{inv.customerName || 'Cliente No Registrado'}</td>
-                        <td className="p-3 text-neutral-500">{formatDateTimeRD(inv.createdAt).split(',')[0]}</td>
-                        <td className="p-3 text-right font-black text-neutral-900">{formatRD(inv.total)}</td>
-                        <td className="p-3 text-center">
-                          <Button
-                            size="sm"
-                            className="h-8 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-bold text-xs gap-1.5 shadow-sm"
-                            onClick={() => handlePayCxc(inv, 'EFECTIVO')}
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" /> Cobrar
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="space-y-3 mt-4">
+              {processedCxcInvoices.length === 0 ? (
+                <div className="bg-white p-12 rounded-3xl border border-neutral-200 text-center shadow-sm">
+                  <div className="h-16 w-16 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto mb-4 rotate-3">
+                    <CheckCircle2 className="h-8 w-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-neutral-800">Todo al día</h3>
+                  <p className="text-neutral-500 text-sm mt-1">No hay facturas de crédito pendientes por cobrar en este momento.</p>
+                </div>
+              ) : (
+                processedCxcInvoices.map((inv) => (
+                  <div key={inv.id} className="group bg-white p-4 sm:p-5 rounded-2xl border border-neutral-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all duration-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-50/0 to-blue-50/0 group-hover:to-blue-50/50 transition-colors pointer-events-none"></div>
+                    
+                    <div className="flex items-center gap-4 relative z-10">
+                      <div className="h-12 w-12 bg-neutral-100 rounded-2xl flex items-center justify-center flex-shrink-0 text-neutral-500 font-black text-lg border border-neutral-200 group-hover:bg-blue-100 group-hover:text-blue-600 group-hover:border-blue-200 transition-colors shadow-inner">
+                        {inv.customerName ? inv.customerName.charAt(0).toUpperCase() : '?'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-neutral-900 text-base">{inv.customerName || 'Cliente No Registrado'}</h4>
+                          <Badge variant="outline" className="text-[10px] h-5 bg-neutral-50 border-neutral-200 text-neutral-500 font-mono">#{inv.id.slice(-6).toUpperCase()}</Badge>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1.5 text-xs text-neutral-500 font-medium">
+                          <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-neutral-400" /> {formatDateTimeRD(inv.createdAt).split(',')[0]}</span>
+                          <span className="flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> Pendiente</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:items-end gap-3 relative z-10 border-t sm:border-none pt-4 sm:pt-0 border-neutral-100">
+                      <div className="font-black text-2xl text-neutral-900 tracking-tight">{formatRD(inv.total)}</div>
+                      
+                      <div className="flex items-center gap-2 bg-neutral-50 p-1.5 rounded-xl border border-neutral-100">
+                        <span className="text-[10px] font-bold uppercase text-neutral-400 ml-2 mr-1">Cobrar:</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2.5 rounded-lg hover:bg-emerald-100 hover:text-emerald-700 text-emerald-600 transition-all text-xs font-bold gap-1.5"
+                          onClick={() => handlePayCxc(inv, 'EFECTIVO')}
+                        >
+                          <Coins className="h-4 w-4" /> <span className="hidden sm:inline">Efectivo</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2.5 rounded-lg hover:bg-blue-100 hover:text-blue-700 text-blue-600 transition-all text-xs font-bold gap-1.5"
+                          onClick={() => handlePayCxc(inv, 'TARJETA')}
+                        >
+                          <CreditCard className="h-4 w-4" /> <span className="hidden sm:inline">Tarjeta</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 px-2.5 rounded-lg hover:bg-purple-100 hover:text-purple-700 text-purple-600 transition-all text-xs font-bold gap-1.5"
+                          onClick={() => handlePayCxc(inv, 'TRANSFERENCIA')}
+                        >
+                          <Smartphone className="h-4 w-4" /> <span className="hidden sm:inline">Transf.</span>
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
+          <DialogFooter className="p-4 border-t border-neutral-100 bg-white/90">
             <Button 
               type="button" 
               variant="outline" 
               onClick={() => setIsCxcOpen(false)}
-              className="rounded-xl border-neutral-200"
+              className="rounded-xl border-neutral-200 h-11 w-full sm:w-auto font-semibold px-8"
             >
               Cerrar Panel
             </Button>

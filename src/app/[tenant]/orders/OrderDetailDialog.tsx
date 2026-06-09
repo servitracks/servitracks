@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useStore } from "@/store/useStore";
-import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, PackageOpen, Plus, Minus } from "lucide-react";
+import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, PackageOpen, Plus, Minus, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/store/types";
 import { cn } from "@/lib/utils";
+
+const LazyInspectionDialog = lazy(() => import("./InspectionDialog"));
 
 interface OrderDetailDialogProps {
   open: boolean;
@@ -29,6 +31,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
   const addMovement = useStore((s) => s.addMovement);
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isInspectionOpen, setIsInspectionOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     description: order.description,
     km: order.km?.toString() || "",
@@ -50,6 +53,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       mechanicId: order.mechanicId || ""
     });
     setIsEditing(false);
+    setIsInspectionOpen(false);
   }, [order, open]);
 
   const getCustomerName = (id: string) => customers.find((c) => c.id === id)?.name || "Desconocido";
@@ -419,21 +423,36 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
               </Button>
               <Button 
                 variant="outline" 
+                className="flex-1 rounded-xl text-xs font-bold gap-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100"
+                onClick={() => setIsInspectionOpen(true)}
+              >
+                <Shield className="h-3.5 w-3.5" /> Inspección
+              </Button>
+              <Button 
+                variant="outline" 
                 className="flex-1 rounded-xl text-xs font-bold gap-1 text-neutral-700 hover:bg-neutral-50"
                 onClick={() => setIsEditing(true)}
               >
                 <Edit2 className="h-3.5 w-3.5 text-neutral-500" /> Editar
               </Button>
-              <Button 
-                className="flex-1 rounded-xl bg-black text-white hover:bg-neutral-800 text-xs font-bold"
-                onClick={() => onOpenChange(false)}
-              >
-                Cerrar
-              </Button>
             </div>
           </div>
         )}
       </DialogContent>
+
+      {/* Inspection Dialog - RENDERIZADO AFUERA PARA EVITAR COLISIÓN DE MODALES */}
+      <Suspense fallback={null}>
+        {isInspectionOpen && (
+          <LazyInspectionDialog
+            open={isInspectionOpen}
+            onOpenChange={setIsInspectionOpen}
+            vehicleId={order.vehicleId}
+            customerId={order.customerId}
+            workOrderId={order.id}
+            tenantId={order.tenantId}
+          />
+        )}
+      </Suspense>
     </Dialog>
   );
 }

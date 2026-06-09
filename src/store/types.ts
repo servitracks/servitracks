@@ -552,3 +552,31 @@ export interface QuoteRequest {
   status: QuoteRequestStatus;
   createdAt: string;
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MÓDULO DE INSPECCIONES DIGITALES (MPI - Multi-Point Inspection)
+// ════════════════════════════════════════════════════════════════════════════════
+
+export interface InspectionItem {
+  id: string;
+  category: string; // Ej: "Frenos", "Líquidos", "Neumáticos"
+  name: string; // Ej: "Pastillas delanteras"
+  condition: 'ok' | 'warning' | 'critical' | 'unchecked';
+  notes?: string;
+  photoUrl?: string; // Evidencia fotográfica
+}
+
+export interface Inspection {
+  id: string;
+  tenantId: string;
+  vehicleId: string;
+  customerId: string;
+  workOrderId?: string;
+  technicianId?: string;
+  status: 'draft' | 'completed';
+  fuelLevel: 'empty' | '1/4' | '1/2' | '3/4' | 'full';
+  bodyDamageNotes?: string;
+  items: InspectionItem[];
+  createdAt: string;
+  completedAt?: string;
+}

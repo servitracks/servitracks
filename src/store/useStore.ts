@@ -5,11 +5,12 @@ import type {
   Service, Product, InventoryMovement, WorkOrder, Invoice,
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
-  Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest
+  Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest,
+  Inspection, InspectionItem
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -41,6 +42,9 @@ interface AppState {
   barcodeSettings: BarcodeSettings;
   conversations: Conversation[];
   chatMessages: ChatMessage[];
+
+  // Inspecciones Digitales (MPI)
+  inspections: Inspection[];
 
   // Proveedores
   suppliers: Supplier[];
@@ -115,6 +119,11 @@ interface AppState {
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
   addChatMessage: (msg: ChatMessage) => void;
   updateChatMessage: (id: string, updates: Partial<ChatMessage>) => void;
+
+  // Inspecciones
+  addInspection: (inspection: Inspection) => void;
+  updateInspection: (id: string, updates: Partial<Inspection>) => void;
+  deleteInspection: (id: string) => void;
 
   // Proveedores
   addSupplier: (supplier: Supplier) => void;
@@ -255,6 +264,8 @@ export const useStore = create<AppState>()(
       conversations: [],
 
       chatMessages: [],
+
+      inspections: [],
 
       // Proveedores
       suppliers: [],
@@ -412,6 +423,17 @@ export const useStore = create<AppState>()(
       updateChatMessage: (id, updates) =>
         set((state) => ({
           chatMessages: state.chatMessages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+        })),
+
+      addInspection: (inspection) =>
+        set((state) => ({ inspections: [inspection, ...state.inspections] })),
+      updateInspection: (id, updates) =>
+        set((state) => ({
+          inspections: state.inspections.map((i) => (i.id === id ? { ...i, ...updates } : i)),
+        })),
+      deleteInspection: (id) =>
+        set((state) => ({
+          inspections: state.inspections.filter((i) => i.id !== id),
         })),
 
       // ──── PROVEEDORES ────────────────────────────────────────────────────────
