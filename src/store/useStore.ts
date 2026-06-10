@@ -857,6 +857,7 @@ export const useStore = create<AppState>()(
         goodsReceipts: state.goodsReceipts,
         accountsPayable: state.accountsPayable,
         quoteRequests: state.quoteRequests,
+        inspections: state.inspections,
       }),
     }
   )

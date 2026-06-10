@@ -29,6 +29,13 @@ export default function ProveedoresPage() {
 
   const [compareSearch, setCompareSearch] = useState("");
 
+  const users = useStore((s) => s.users);
+  const currentUserId = useStore((s) => s.currentUserId);
+  const currentUser = useMemo(() => {
+    return users.find((u) => u.id === currentUserId) || users[0];
+  }, [users, currentUserId]);
+  const isWarehouse = currentUser?.role === "warehouse";
+
   // KPIs
   const activeCount = suppliers.filter((s) => s.status === "activo").length;
   const suspendedCount = suppliers.filter((s) => s.status === "suspendido").length;
@@ -57,6 +64,10 @@ export default function ProveedoresPage() {
   }, [purchaseOrders, suppliers]);
 
   const topSupplier = ranking[0]?.supplier?.commercialName || "—";
+
+  const pendingReceiptOrdersCount = useMemo(() => {
+    return purchaseOrders.filter((po) => po.status === "pendiente" || po.status === "enviada" || po.status === "recibida_parcial").length;
+  }, [purchaseOrders]);
 
   // Alerts
   const alerts = useMemo(() => {
@@ -105,6 +116,24 @@ export default function ProveedoresPage() {
     return result.slice(0, 8);
   }, [suppliers, purchaseOrders, accountsPayable, supplierProducts, products]);
 
+  const kpis = useMemo(() => {
+    if (isWarehouse) {
+      return [
+        { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50" },
+        { label: "Órdenes Activas", value: `${pendingReceiptOrdersCount} pendientes`, sub: "Por recibir en almacén", icon: ShoppingCart, color: "text-blue-600", bg: "bg-blue-50" },
+      ];
+    }
+    return [
+      { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50" },
+      { label: "Compras del Mes", value: `RD$ ${monthPurchases.toLocaleString("es-DO")}`, icon: ShoppingCart, color: "text-emerald-600", bg: "bg-emerald-50" },
+      { label: "Facturas Pendientes", value: `RD$ ${pendingPayables.toLocaleString("es-DO")}`, sub: overduePayables > 0 ? `${overduePayables} vencidas` : undefined, icon: CreditCard, color: overduePayables > 0 ? "text-rose-600" : "text-blue-600", bg: overduePayables > 0 ? "bg-rose-50" : "bg-blue-50" },
+      { label: "Proveedor Top", value: topSupplier, icon: Star, color: "text-amber-600", bg: "bg-amber-50" },
+      { label: "Alertas", value: alerts.length > 0 ? `${alerts.length} activas` : "Sin alertas", icon: AlertTriangle, color: alerts.length > 0 ? "text-rose-600" : "text-emerald-600", bg: alerts.length > 0 ? "bg-rose-50" : "bg-emerald-50" },
+    ];
+  }, [isWarehouse, activeCount, suspendedCount, pendingReceiptOrdersCount, monthPurchases, pendingPayables, overduePayables, topSupplier, alerts]);
+
+
+
   // Price Comparator
   const compareResults = useMemo(() => {
     if (!compareSearch.trim()) return [];
@@ -130,14 +159,8 @@ export default function ProveedoresPage() {
       </div>
 
       {/* Executive Dashboard */}
-      <div className="grid gap-4 md:grid-cols-5">
-        {[
-          { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50" },
-          { label: "Compras del Mes", value: `RD$ ${monthPurchases.toLocaleString("es-DO")}`, icon: ShoppingCart, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { label: "Facturas Pendientes", value: `RD$ ${pendingPayables.toLocaleString("es-DO")}`, sub: overduePayables > 0 ? `${overduePayables} vencidas` : undefined, icon: CreditCard, color: overduePayables > 0 ? "text-rose-600" : "text-blue-600", bg: overduePayables > 0 ? "bg-rose-50" : "bg-blue-50" },
-          { label: "Proveedor Top", value: topSupplier, icon: Star, color: "text-amber-600", bg: "bg-amber-50" },
-          { label: "Alertas", value: alerts.length > 0 ? `${alerts.length} activas` : "Sin alertas", icon: AlertTriangle, color: alerts.length > 0 ? "text-rose-600" : "text-emerald-600", bg: alerts.length > 0 ? "bg-rose-50" : "bg-emerald-50" },
-        ].map((kpi) => (
+      <div className={cn("grid gap-4", isWarehouse ? "md:grid-cols-2" : "md:grid-cols-5")}>
+        {kpis.map((kpi) => (
           <Card key={kpi.label} className="border-neutral-100 shadow-sm">
             <CardContent className="flex items-center gap-4 p-5">
               <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
@@ -154,7 +177,7 @@ export default function ProveedoresPage() {
       </div>
 
       {/* Alerts Bar */}
-      {alerts.length > 0 && (
+      {!isWarehouse && alerts.length > 0 && (
         <div className="rounded-xl border border-neutral-100 bg-white p-4 shadow-sm">
           <p className="text-xs font-black uppercase text-neutral-400 tracking-wider mb-3 flex items-center gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5" /> Alertas Inteligentes
@@ -174,14 +197,14 @@ export default function ProveedoresPage() {
         <TabsList className="bg-neutral-100 rounded-xl p-1">
           <TabsTrigger value="suppliers" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><Truck className="h-3.5 w-3.5" /> Proveedores</TabsTrigger>
           <TabsTrigger value="orders" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><Package className="h-3.5 w-3.5" /> Órdenes de Compra</TabsTrigger>
-          <TabsTrigger value="payables" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Cuentas por Pagar</TabsTrigger>
+          {!isWarehouse && <TabsTrigger value="payables" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Cuentas por Pagar</TabsTrigger>}
           <TabsTrigger value="compare" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><Scale className="h-3.5 w-3.5" /> Comparador</TabsTrigger>
-          <TabsTrigger value="ranking" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Ranking</TabsTrigger>
+          {!isWarehouse && <TabsTrigger value="ranking" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Ranking</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="suppliers" className="mt-4"><SuppliersTab tenantId={tenantId} /></TabsContent>
         <TabsContent value="orders" className="mt-4"><PurchaseOrdersTab tenantId={tenantId} /></TabsContent>
-        <TabsContent value="payables" className="mt-4"><AccountsPayableTab tenantId={tenantId} /></TabsContent>
+        {!isWarehouse && <TabsContent value="payables" className="mt-4"><AccountsPayableTab tenantId={tenantId} /></TabsContent>}
 
         {/* Price Comparator */}
         <TabsContent value="compare" className="mt-4 space-y-4">

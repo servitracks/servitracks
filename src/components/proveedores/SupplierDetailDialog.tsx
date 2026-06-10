@@ -63,6 +63,10 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
   const purchaseOrders = useStore((s) => s.purchaseOrders).filter((po) => po.tenantId === tenantId && po.supplierId === supplier?.id);
   const accountsPayable = useStore((s) => s.accountsPayable).filter((ap) => ap.tenantId === tenantId && ap.supplierId === supplier?.id);
   const { updateSupplier } = useStore();
+  const currentUserId = useStore((s) => s.currentUserId);
+  const users = useStore((s) => s.users);
+  const currentUser = currentUserId === 'admin' ? { role: 'owner' } : users.find((u) => u.id === currentUserId);
+  const isWarehouse = currentUser?.role === 'warehouse';
 
   if (!supplier) return null;
 
@@ -122,11 +126,11 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
             </div>
           </div>
           {/* Quick Stats */}
-          <div className="grid grid-cols-4 gap-3 mt-5">
+          <div className={cn("grid gap-3 mt-5", isWarehouse ? "grid-cols-2" : "grid-cols-4")}>
             {[
-              { label: "Total Comprado", value: `RD$ ${totalPurchased.toLocaleString("es-DO")}`, icon: ShoppingCart },
+              ...(!isWarehouse ? [{ label: "Total Comprado", value: `RD$ ${totalPurchased.toLocaleString("es-DO")}`, icon: ShoppingCart }] : []),
               { label: "Órdenes", value: totalOrders, icon: Package },
-              { label: "Balance Pendiente", value: `RD$ ${pendingBalance.toLocaleString("es-DO")}`, icon: CreditCard },
+              ...(!isWarehouse ? [{ label: "Balance Pendiente", value: `RD$ ${pendingBalance.toLocaleString("es-DO")}`, icon: CreditCard }] : []),
               { label: "Score", value: `${avgRating}/5`, icon: Star },
             ].map((s) => (
               <div key={s.label} className="bg-white/10 rounded-xl p-3 backdrop-blur-sm">
@@ -142,12 +146,12 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
 
         {/* Tabs Content */}
         <Tabs defaultValue="general" className="p-6 pt-4">
-          <TabsList className="bg-neutral-100 rounded-xl p-1 w-full grid grid-cols-5">
+          <TabsList className={cn("bg-neutral-100 rounded-xl p-1 w-full grid", isWarehouse ? "grid-cols-3" : "grid-cols-5")}>
             <TabsTrigger value="general" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">General</TabsTrigger>
-            <TabsTrigger value="commercial" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Comercial</TabsTrigger>
+            {!isWarehouse && <TabsTrigger value="commercial" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Comercial</TabsTrigger>}
             <TabsTrigger value="catalog" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Catálogo</TabsTrigger>
             <TabsTrigger value="history" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compras</TabsTrigger>
-            <TabsTrigger value="rating" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Evaluación</TabsTrigger>
+            {!isWarehouse && <TabsTrigger value="rating" className="rounded-lg text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Evaluación</TabsTrigger>}
           </TabsList>
 
           {/* General Tab */}
@@ -208,39 +212,41 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
           </TabsContent>
 
           {/* Commercial Tab */}
-          <TabsContent value="commercial" className="mt-4 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: "Límite de Crédito", value: supplier.creditLimit ? `RD$ ${supplier.creditLimit.toLocaleString("es-DO")}` : "No definido" },
-                { label: "Días de Crédito", value: supplier.creditDays ? `${supplier.creditDays} días` : "No definido" },
-                { label: "Descuento General", value: supplier.generalDiscount ? `${supplier.generalDiscount}%` : "Sin descuento" },
-                { label: "Descuento por Volumen", value: supplier.volumeDiscount ? `${supplier.volumeDiscount}%` : "Sin descuento" },
-                { label: "Moneda", value: supplier.currency },
-                { label: "Balance Pendiente", value: `RD$ ${pendingBalance.toLocaleString("es-DO")}` },
-                { label: "Balance Vencido", value: overdueBalance > 0 ? `RD$ ${overdueBalance.toLocaleString("es-DO")}` : "RD$ 0" },
-              ].map((item) => (
-                <div key={item.label} className="p-3 rounded-xl bg-neutral-50 border border-neutral-100">
-                  <p className="text-xs font-medium text-neutral-500">{item.label}</p>
-                  <p className="text-lg font-bold text-neutral-900 mt-0.5">{item.value}</p>
-                </div>
-              ))}
-            </div>
-            {supplier.creditLimit && pendingBalance > 0 && (
-              <div>
-                <p className="text-xs font-medium text-neutral-500 mb-1">Uso de Crédito</p>
-                <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      (pendingBalance / supplier.creditLimit) > 0.9 ? "bg-rose-500" : (pendingBalance / supplier.creditLimit) > 0.7 ? "bg-amber-500" : "bg-emerald-500"
-                    )}
-                    style={{ width: `${Math.min(100, (pendingBalance / supplier.creditLimit) * 100)}%` }}
-                  />
-                </div>
-                <p className="text-xs text-neutral-400 mt-1">{Math.round((pendingBalance / supplier.creditLimit) * 100)}% utilizado</p>
+          {!isWarehouse && (
+            <TabsContent value="commercial" className="mt-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { label: "Límite de Crédito", value: supplier.creditLimit ? `RD$ ${supplier.creditLimit.toLocaleString("es-DO")}` : "No definido" },
+                  { label: "Días de Crédito", value: supplier.creditDays ? `${supplier.creditDays} días` : "No definido" },
+                  { label: "Descuento General", value: supplier.generalDiscount ? `${supplier.generalDiscount}%` : "Sin descuento" },
+                  { label: "Descuento por Volumen", value: supplier.volumeDiscount ? `${supplier.volumeDiscount}%` : "Sin descuento" },
+                  { label: "Moneda", value: supplier.currency },
+                  { label: "Balance Pendiente", value: `RD$ ${pendingBalance.toLocaleString("es-DO")}` },
+                  { label: "Balance Vencido", value: overdueBalance > 0 ? `RD$ ${overdueBalance.toLocaleString("es-DO")}` : "RD$ 0" },
+                ].map((item) => (
+                  <div key={item.label} className="p-3 rounded-xl bg-neutral-50 border border-neutral-100">
+                    <p className="text-xs font-medium text-neutral-500">{item.label}</p>
+                    <p className="text-lg font-bold text-neutral-900 mt-0.5">{item.value}</p>
+                  </div>
+                ))}
               </div>
-            )}
-          </TabsContent>
+              {supplier.creditLimit && pendingBalance > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-neutral-500 mb-1">Uso de Crédito</p>
+                  <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        (pendingBalance / supplier.creditLimit) > 0.9 ? "bg-rose-500" : (pendingBalance / supplier.creditLimit) > 0.7 ? "bg-amber-500" : "bg-emerald-500"
+                      )}
+                      style={{ width: `${Math.min(100, (pendingBalance / supplier.creditLimit) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-neutral-400 mt-1">{Math.round((pendingBalance / supplier.creditLimit) * 100)}% utilizado</p>
+                </div>
+              )}
+            </TabsContent>
+          )}
 
           {/* Catalog Tab */}
           <TabsContent value="catalog" className="mt-4">
@@ -289,11 +295,13 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
 
           {/* History Tab */}
           <TabsContent value="history" className="mt-4 space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-100 text-center">
-                <p className="text-xs text-neutral-500">Total Comprado</p>
-                <p className="text-xl font-black text-neutral-900">RD$ {totalPurchased.toLocaleString("es-DO")}</p>
-              </div>
+            <div className={cn("grid gap-3", isWarehouse ? "grid-cols-2" : "grid-cols-3")}>
+              {!isWarehouse && (
+                <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-100 text-center">
+                  <p className="text-xs text-neutral-500">Total Comprado</p>
+                  <p className="text-xl font-black text-neutral-900">RD$ {totalPurchased.toLocaleString("es-DO")}</p>
+                </div>
+              )}
               <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-100 text-center">
                 <p className="text-xs text-neutral-500">Nº Órdenes</p>
                 <p className="text-xl font-black text-neutral-900">{totalOrders}</p>
@@ -314,7 +322,7 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
                     <TableRow>
                       <TableHead>Nº OC</TableHead>
                       <TableHead>Fecha</TableHead>
-                      <TableHead>Total</TableHead>
+                      {!isWarehouse && <TableHead>Total</TableHead>}
                       <TableHead>Estado</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -323,7 +331,7 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
                       <TableRow key={po.id} className="hover:bg-neutral-50/50">
                         <TableCell className="font-mono font-bold text-sm">{po.number}</TableCell>
                         <TableCell className="text-sm text-neutral-600">{new Date(po.createdAt).toLocaleDateString("es-DO")}</TableCell>
-                        <TableCell className="font-bold text-sm">RD$ {po.total.toLocaleString("es-DO")}</TableCell>
+                        {!isWarehouse && <TableCell className="font-bold text-sm">RD$ {po.total.toLocaleString("es-DO")}</TableCell>}
                         <TableCell>
                           <Badge className={cn("text-xs border-none", {
                             "bg-neutral-100 text-neutral-600": po.status === "borrador",
@@ -343,28 +351,30 @@ export default function SupplierDetailDialog({ supplier, open, onOpenChange, ten
           </TabsContent>
 
           {/* Rating Tab */}
-          <TabsContent value="rating" className="mt-4 space-y-5">
-            <div className="space-y-4">
-              {([
-                { key: "ratingDelivery" as const, label: "Entrega", desc: "Puntualidad en entregas" },
-                { key: "ratingQuality" as const, label: "Calidad", desc: "Calidad de productos" },
-                { key: "ratingPrice" as const, label: "Precio", desc: "Competitividad de precios" },
-                { key: "ratingService" as const, label: "Servicio", desc: "Atención al cliente" },
-              ]).map((item) => (
-                <div key={item.key} className="flex items-center justify-between p-4 rounded-xl bg-neutral-50 border border-neutral-100">
-                  <div>
-                    <p className="font-semibold text-sm text-neutral-900">{item.label}</p>
-                    <p className="text-xs text-neutral-500">{item.desc}</p>
+          {!isWarehouse && (
+            <TabsContent value="rating" className="mt-4 space-y-5">
+              <div className="space-y-4">
+                {([
+                  { key: "ratingDelivery" as const, label: "Entrega", desc: "Puntualidad en entregas" },
+                  { key: "ratingQuality" as const, label: "Calidad", desc: "Calidad de productos" },
+                  { key: "ratingPrice" as const, label: "Precio", desc: "Competitividad de precios" },
+                  { key: "ratingService" as const, label: "Servicio", desc: "Atención al cliente" },
+                ]).map((item) => (
+                  <div key={item.key} className="flex items-center justify-between p-4 rounded-xl bg-neutral-50 border border-neutral-100">
+                    <div>
+                      <p className="font-semibold text-sm text-neutral-900">{item.label}</p>
+                      <p className="text-xs text-neutral-500">{item.desc}</p>
+                    </div>
+                    <StarRating value={supplier[item.key]} onChange={(v) => handleRatingChange(item.key, v)} />
                   </div>
-                  <StarRating value={supplier[item.key]} onChange={(v) => handleRatingChange(item.key, v)} />
-                </div>
-              ))}
-            </div>
-            <div className="p-5 rounded-xl bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 text-center">
-              <p className="text-xs font-medium text-amber-600 uppercase tracking-wider mb-1">Score General</p>
-              <p className="text-4xl font-black text-amber-700">{avgRating}<span className="text-lg text-amber-500">/5</span></p>
-            </div>
-          </TabsContent>
+                ))}
+              </div>
+              <div className="p-5 rounded-xl bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200 text-center">
+                <p className="text-xs font-medium text-amber-600 uppercase tracking-wider mb-1">Score General</p>
+                <p className="text-4xl font-black text-amber-700">{avgRating}<span className="text-lg text-amber-500">/5</span></p>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

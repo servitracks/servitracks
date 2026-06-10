@@ -34,7 +34,7 @@ const navigation = [
   { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
   { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
-  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner'] },
+  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
   { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
   { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'cashier'] },

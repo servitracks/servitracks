@@ -32,6 +32,11 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
 
   const [isEditing, setIsEditing] = useState(false);
   const [isInspectionOpen, setIsInspectionOpen] = useState(false);
+
+  const inspections = useStore((s) => s.inspections);
+  const existingInspection = inspections.find(
+    (i) => i.workOrderId === order.id && i.tenantId === order.tenantId
+  );
   const [editForm, setEditForm] = useState({
     description: order.description,
     km: order.km?.toString() || "",
@@ -423,10 +428,22 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
               </Button>
               <Button 
                 variant="outline" 
-                className="flex-1 rounded-xl text-xs font-bold gap-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100"
+                className={cn(
+                  "flex-1 rounded-xl text-xs font-bold gap-1",
+                  existingInspection?.status === "completed"
+                    ? "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-100 bg-emerald-50/50"
+                    : existingInspection?.status === "draft"
+                    ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-100 bg-amber-50/50"
+                    : "text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100"
+                )}
                 onClick={() => setIsInspectionOpen(true)}
               >
-                <Shield className="h-3.5 w-3.5" /> Inspección
+                <Shield className="h-3.5 w-3.5" />
+                {existingInspection?.status === "completed"
+                  ? "Ver Inspección"
+                  : existingInspection?.status === "draft"
+                  ? "Continuar Insp."
+                  : "Inspección"}
               </Button>
               <Button 
                 variant="outline" 
@@ -450,6 +467,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
             customerId={order.customerId}
             workOrderId={order.id}
             tenantId={order.tenantId}
+            existingInspection={existingInspection}
           />
         )}
       </Suspense>

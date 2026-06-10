@@ -68,9 +68,11 @@ export default function SuppliersTab({ tenantId }: { tenantId: string }) {
             </SelectContent>
           </Select>
         </div>
-        <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2" onClick={() => setIsCreateOpen(true)}>
-          <Plus className="h-4 w-4" /> Nuevo Proveedor
-        </Button>
+        {isOwner && (
+          <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2" onClick={() => setIsCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> Nuevo Proveedor
+          </Button>
+        )}
       </div>
 
       <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
