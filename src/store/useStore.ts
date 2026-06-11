@@ -6,11 +6,11 @@ import type {
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
   Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest,
-  Inspection, InspectionItem
+  Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -45,6 +45,9 @@ interface AppState {
 
   // Inspecciones Digitales (MPI)
   inspections: Inspection[];
+
+  // Cotizaciones
+  quotes: Quote[];
 
   // Proveedores
   suppliers: Supplier[];
@@ -124,6 +127,11 @@ interface AppState {
   addInspection: (inspection: Inspection) => void;
   updateInspection: (id: string, updates: Partial<Inspection>) => void;
   deleteInspection: (id: string) => void;
+
+  // Cotizaciones
+  addQuote: (quote: Quote) => void;
+  updateQuote: (id: string, updates: Partial<Quote>) => void;
+  deleteQuote: (id: string) => void;
 
   // Proveedores
   addSupplier: (supplier: Supplier) => void;
@@ -266,6 +274,7 @@ export const useStore = create<AppState>()(
       chatMessages: [],
 
       inspections: [],
+      quotes: [],
 
       // Proveedores
       suppliers: [],
@@ -435,6 +444,17 @@ export const useStore = create<AppState>()(
         set((state) => ({
           inspections: state.inspections.filter((i) => i.id !== id),
         })),
+
+      addQuote: (quote) =>
+        set((state) => ({ quotes: [quote, ...state.quotes] })),
+      updateQuote: (id, updates) =>
+        set((state) => ({
+          quotes: state.quotes.map((q) =>
+            q.id === id ? { ...q, ...updates, updatedAt: new Date().toISOString() } : q
+          ),
+        })),
+      deleteQuote: (id) =>
+        set((state) => ({ quotes: state.quotes.filter((q) => q.id !== id) })),
 
       // ──── PROVEEDORES ────────────────────────────────────────────────────────
       addSupplier: (supplier) =>

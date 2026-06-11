@@ -580,3 +580,40 @@ export interface Inspection {
   createdAt: string;
   completedAt?: string;
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MÓDULO DE COTIZACIONES (CLIENTES)
+// ════════════════════════════════════════════════════════════════════════════════
+
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+
+export interface QuoteItem {
+  id: string;
+  productId?: string;
+  serviceId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  taxPercentage: number;
+  discountPercentage?: number;
+  total: number;
+}
+
+export interface Quote {
+  id: string;
+  tenantId: string;
+  customerId: string;
+  vehicleId: string;
+  quoteNumber: string; // Ej: COT-2026-0001
+  status: QuoteStatus;
+  validUntil?: string; // Formato YYYY-MM-DD
+  subtotal: number;
+  tax: number;
+  discount?: number;
+  total: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+  items: QuoteItem[];
+}
+

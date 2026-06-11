@@ -20,7 +20,8 @@ import {
   Wallet,
   MessageCircle,
   Truck,
-  Briefcase
+  Briefcase,
+  FileText
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -32,18 +33,19 @@ import {
 const navigation = [
   { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
-  { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
-  { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
-  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
-  { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
+  { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
   { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'cashier'] },
-  { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
+  { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
+  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
   { name: "Mis Comisiones", href: "/mis-comisiones", icon: Wallet, roles: ['mechanic'] },
+  { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
   { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner'] },
   { name: "Mantenimiento", href: "/maintenance", icon: Activity, roles: ['owner', 'cashier'] },
-  { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
 ];
 
 interface SidebarProps {
