@@ -68,8 +68,10 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
     }));
   };
 
+  const selectedSupplier = suppliers.find(s => s.id === supplierId);
+  const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const tax = Math.round(subtotal * 0.18);
+  const tax = Math.round(subtotal * (supplierItbis / 100));
   const total = subtotal + tax;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -183,12 +185,12 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Cantidad</Label>
                       <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs"
-                        value={item.quantity} onChange={(e) => updateItem(i, { quantity: Number(e.target.value) || 1 })} />
+                        value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Precio Unit.</Label>
                       <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs"
-                        value={item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) || 0 })} />
+                        value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Subtotal</Label>
@@ -216,7 +218,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                 <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-neutral-500">ITBIS (18%)</span>
+                <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
                 <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
               </div>
               <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">

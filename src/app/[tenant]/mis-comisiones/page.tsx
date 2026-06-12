@@ -15,7 +15,7 @@ export default function MisComisionesPage() {
 
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
-  const currentUser = users.find((u) => u.id === currentUserId) || users[0];
+  const currentUser = users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === tenantId) || null;
 
   const technicians = useStore((s) => s.technicians);
   const invoices = useStore((s) => s.invoices);
@@ -75,7 +75,10 @@ export default function MisComisionesPage() {
     return { totalComision: globalTotal, itemsPendientes: items };
   }, [pendingInvoices]);
 
-  if (!currentUser || (currentUser.role !== 'mechanic' && currentUser.role !== 'owner')) {
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+  const activeRole = simulatedRole || currentUser?.role || 'receptionist';
+
+  if (!currentUser || (activeRole !== 'mechanic' && activeRole !== 'owner')) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <ShieldAlert className="h-16 w-16 text-rose-500 mb-4 opacity-50" />

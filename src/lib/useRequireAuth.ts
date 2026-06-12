@@ -10,7 +10,7 @@ export function useRequireAuth() {
     ? (localStorage.getItem("servitracks-session") || sessionStorage.getItem("servitracks-session"))
     : null;
 
-  let activeUser = users.find(u => u.id === currentUserId) || users[0];
+  let activeUser = users.find(u => u.id === currentUserId) || null;
 
   if (sessionStr) {
     try {
@@ -28,9 +28,10 @@ export function useRequireAuth() {
         };
       }
 
-      // ── Tenant user: formato legacy (empleado_id) ──
-      if (session.empleado_id) {
-        const found = users.find(u => u.id === session.empleado_id);
+      // ── Tenant user ──
+      const activeId = session.empleado_id || session.user_id;
+      if (activeId) {
+        const found = users.find(u => u.id === activeId) || users.find(u => u.email.toLowerCase().trim() === session.email?.toLowerCase().trim());
         if (found) {
           activeUser = found;
           setTimeout(() => setCurrentUserId(found.id), 0);
@@ -52,10 +53,10 @@ export function useRequireAuth() {
 
   return {
     empleado: {
-      id: activeUser?.id || "u1",
-      name: activeUser?.name || "Yeri Orlando",
-      email: activeUser?.email || "yeri@tallergarcia.do",
-      role: activeUser?.role || "owner"
+      id: activeUser?.id || "guest",
+      name: activeUser?.name || "Cargando...",
+      email: activeUser?.email || "",
+      role: activeUser?.role || "receptionist"
     }
   };
 }

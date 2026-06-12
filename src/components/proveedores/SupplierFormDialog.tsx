@@ -43,6 +43,7 @@ interface FormState {
   creditDays: string;
   generalDiscount: string;
   volumeDiscount: string;
+  itbis: string;
   currency: Currency;
   notes: string;
   contacts: SupplierContact[];
@@ -53,6 +54,7 @@ const emptyForm: FormState = {
   type: "repuestos", status: "activo",
   country: "República Dominicana", province: "", city: "", address: "", googleMapsUrl: "",
   creditLimit: "", creditDays: "30", generalDiscount: "", volumeDiscount: "",
+  itbis: "18",
   currency: "DOP", notes: "",
   contacts: [{ name: "", role: "", phone: "", whatsapp: "", email: "" }],
 };
@@ -79,6 +81,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         creditDays: editSupplier.creditDays ? String(editSupplier.creditDays) : "30",
         generalDiscount: editSupplier.generalDiscount ? String(editSupplier.generalDiscount) : "",
         volumeDiscount: editSupplier.volumeDiscount ? String(editSupplier.volumeDiscount) : "",
+        itbis: editSupplier.itbis !== undefined ? String(editSupplier.itbis) : "18",
         currency: editSupplier.currency,
         notes: editSupplier.notes || "",
         contacts: editSupplier.contacts.length > 0 ? editSupplier.contacts : [{ name: "", role: "", phone: "", whatsapp: "", email: "" }],
@@ -134,6 +137,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         creditDays: Number(form.creditDays) || undefined,
         generalDiscount: Number(form.generalDiscount) || undefined,
         volumeDiscount: Number(form.volumeDiscount) || undefined,
+        itbis: form.itbis !== "" ? Number(form.itbis) : undefined,
         currency: form.currency,
         notes: form.notes.trim() || undefined,
       });
@@ -158,6 +162,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         creditDays: Number(form.creditDays) || undefined,
         generalDiscount: Number(form.generalDiscount) || undefined,
         volumeDiscount: Number(form.volumeDiscount) || undefined,
+        itbis: form.itbis !== "" ? Number(form.itbis) : undefined,
         currency: form.currency,
         ratingDelivery: 5,
         ratingQuality: 5,
@@ -334,6 +339,11 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
                 <Label>Descuento por Volumen (%)</Label>
                 <Input type="number" placeholder="0" className="h-10 rounded-xl border-neutral-200" value={form.volumeDiscount}
                   onChange={(e) => setForm((f) => ({ ...f, volumeDiscount: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>ITBIS (%)</Label>
+                <Input type="number" placeholder="18" className="h-10 rounded-xl border-neutral-200 text-blue-600 font-bold bg-blue-50/50" value={form.itbis}
+                  onChange={(e) => setForm((f) => ({ ...f, itbis: e.target.value }))} />
               </div>
             </div>
           </div>

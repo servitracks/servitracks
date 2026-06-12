@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 // Dominican peso formatting helper
 const formatRD = (amount: number) => {
@@ -207,6 +208,44 @@ export default function CajaPage() {
   const [selectedTicketCaja, setSelectedTicketCaja] = useState<Caja | null>(null);
   const [isCxcOpen, setIsCxcOpen] = useState(false);
   const [cxcSearch, setCxcSearch] = useState("");
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedInvoiceEdit, setSelectedInvoiceEdit] = useState(false);
+
+  const findInvoiceForMovement = (mov: MovimientoCaja) => {
+    // 1. Try to find any sequence of B or E followed by 10-12 digits (NCF/e-CF)
+    const ncfMatch = mov.concepto.match(/([BE]\d{10,12})/i);
+    if (ncfMatch) {
+      const code = ncfMatch[1].toLowerCase();
+      const found = invoices.find(inv => inv.ncf && inv.ncf.toLowerCase() === code);
+      if (found) return found;
+    }
+
+    // 2. Try to find the word "Factura" followed by some code
+    const facturaMatch = mov.concepto.match(/Factura\s+([A-Za-z0-9\-]+)/i);
+    if (facturaMatch) {
+      const code = facturaMatch[1].toLowerCase();
+      const found = invoices.find(inv => 
+        (inv.ncf && inv.ncf.toLowerCase() === code) ||
+        inv.id.toLowerCase().endsWith(code) ||
+        inv.id.toLowerCase() === code
+      );
+      if (found) return found;
+    }
+
+    // 3. Try to find hash prefix e.g. #abcdef
+    const idMatch = mov.concepto.match(/#([a-z0-9]+)/i);
+    if (idMatch) {
+      const suffix = idMatch[1].toLowerCase();
+      const found = invoices.find(inv => inv.id.toLowerCase().endsWith(suffix));
+      if (found) return found;
+    }
+
+    // 4. Try fallback matching by exact amount
+    const matches = invoices.filter(inv => Math.abs(inv.total - mov.monto) < 0.01);
+    if (matches.length === 1) return matches[0];
+
+    return null;
+  };
   
   // -- PAGO TECNICO LIQUIDACION --
   const [isPagoTecnicoOpen, setIsPagoTecnicoOpen] = useState(false);
@@ -814,8 +853,23 @@ export default function CajaPage() {
                   processedActiveMovements.map((mov) => {
                     const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
                     const isEgreso = ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA'].includes(mov.tipo);
+                    const matchingInvoice = findInvoiceForMovement(mov);
+                    const isClickable = !!matchingInvoice;
+
                     return (
-                      <tr key={mov.id} className="hover:bg-neutral-50/50 transition-colors">
+                      <tr 
+                        key={mov.id} 
+                        onClick={() => {
+                          if (matchingInvoice) {
+                            setSelectedInvoice(matchingInvoice);
+                            setSelectedInvoiceEdit(true);
+                          }
+                        }}
+                        className={cn(
+                          "transition-colors",
+                          isClickable ? "hover:bg-blue-50/40 cursor-pointer" : "hover:bg-neutral-50/50"
+                        )}
+                      >
                         <td className="p-4 text-neutral-500 font-medium">
                           {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                         </td>
@@ -830,7 +884,16 @@ export default function CajaPage() {
                             </span>
                           </Badge>
                         </td>
-                        <td className="p-4 font-semibold text-neutral-800 max-w-sm truncate">{mov.concepto}</td>
+                        <td className="p-4 font-semibold text-neutral-800 max-w-sm truncate">
+                          <div className="flex items-center gap-2">
+                            <span>{mov.concepto}</span>
+                            {isClickable && (
+                              <Badge variant="outline" className="text-[9px] font-bold border-blue-200 bg-blue-50 text-blue-700 rounded-md py-0 px-1 hover:bg-blue-100 transition-colors">
+                                Editar Factura
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4 text-center text-neutral-500 font-medium">
                           {mov.metodo === 'EFECTIVO' ? '—' : mov.metodo}
                         </td>
@@ -1907,6 +1970,15 @@ export default function CajaPage() {
         </DialogContent>
       </Dialog>
 
+      <InvoiceDetailDialog 
+        open={!!selectedInvoice} 
+        onClose={() => {
+          setSelectedInvoice(null);
+          setSelectedInvoiceEdit(false);
+        }} 
+        invoice={selectedInvoice} 
+        defaultEdit={selectedInvoiceEdit}
+      />
     </div>
   );
 }

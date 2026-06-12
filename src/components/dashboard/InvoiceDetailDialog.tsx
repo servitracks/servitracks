@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useStore, Invoice } from "@/store/useStore";
+import { useState, useEffect, useMemo } from "react";
+import { useStore, Invoice, InvoiceItem } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -9,29 +9,36 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Printer, Save, FileText } from "lucide-react";
+import { Printer, Save, FileText, X, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Ticket } from "@/components/pos/Ticket";
 import { useParams } from "@/lib/next-compat";
+import { AdminPinModal } from "@/components/ui/AdminPinModal";
 
 interface InvoiceDetailDialogProps {
   open: boolean;
   onClose: () => void;
   invoice: Invoice | null;
+  defaultEdit?: boolean;
 }
 
-export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDialogProps) {
+export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = false }: InvoiceDetailDialogProps) {
   const { tenant } = useParams();
-  const { customers, updateInvoice, tenants } = useStore();
+  const { customers, updateInvoice, tenants, users, currentUserId } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
+  const currentUser = users.find((u) => u.id === currentUserId) || null;
+  const isOwner = currentUser?.role === "owner";
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [showPinModal, setShowPinModal] = useState(false);
   const [editForm, setEditForm] = useState({
     ncf: "",
     paymentMethod: "cash" as Invoice["paymentMethod"],
     status: "paid" as Invoice["status"],
     notes: "",
   });
+  const [editItems, setEditItems] = useState<InvoiceItem[]>([]);
 
   useEffect(() => {
     if (invoice) {
@@ -41,21 +48,95 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
         status: invoice.status || "paid",
         notes: invoice.notes || "",
       });
+      setEditItems(invoice.items ? [...invoice.items] : []);
+      
+      if (defaultEdit) {
+        if (isOwner) {
+          setIsEditing(true);
+        } else {
+          setIsEditing(false);
+          setShowPinModal(true);
+        }
+      } else {
+        setIsEditing(false);
+      }
     }
-  }, [invoice]);
+  }, [invoice, defaultEdit, isOwner]);
+
+  const calculatedTotals = useMemo(() => {
+    const subtotal = editItems.reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
+    const tax = subtotal * 0.18;
+    const total = subtotal + tax;
+    return { subtotal, tax, total };
+  }, [editItems]);
+
+  const updateItemField = (index: number, field: keyof InvoiceItem, value: any) => {
+    const newItems = [...editItems];
+    const target = newItems[index];
+    const updated = {
+      ...target,
+      [field]: value
+    } as InvoiceItem;
+
+    if (field === 'unitPrice' || field === 'quantity') {
+      updated.tax = (updated.unitPrice * updated.quantity) * 0.18;
+    }
+    
+    newItems[index] = updated;
+    setEditItems(newItems);
+  };
+
+  const handleRemoveItem = (index: number) => {
+    const newItems = editItems.filter((_, idx) => idx !== index);
+    setEditItems(newItems);
+  };
+
+  const handleAddItem = () => {
+    setEditItems([
+      ...editItems,
+      {
+        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        name: "Nuevo Item / Repuesto",
+        quantity: 1,
+        unitPrice: 0,
+        tax: 0,
+      }
+    ]);
+  };
 
   if (!invoice) return null;
 
   const customer = customers.find((c) => c.id === invoice.customerId);
 
+  const handleStartEdit = () => {
+    if (isOwner) {
+      setIsEditing(true);
+    } else {
+      setShowPinModal(true);
+    }
+  };
+
+  const handlePinSuccess = () => {
+    setIsEditing(true);
+  };
+
   const handleSave = () => {
+    executeSave();
+  };
+
+  const executeSave = () => {
     updateInvoice(invoice.id, {
       ncf: editForm.ncf,
       paymentMethod: editForm.paymentMethod,
       status: editForm.status,
       notes: editForm.notes,
+      items: editItems,
+      subtotal: calculatedTotals.subtotal,
+      tax: calculatedTotals.tax,
+      total: calculatedTotals.total,
     });
     toast.success("Factura actualizada correctamente");
+    setIsEditing(false);
     onClose();
   };
 
@@ -86,10 +167,10 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
            createdAt={invoice.createdAt}
            tenant={taller}
            customer={customer}
-           items={invoice.items}
-           subtotal={invoice.subtotal}
-           itbis={invoice.tax}
-           total={invoice.total}
+           items={editItems}
+           subtotal={calculatedTotals.subtotal}
+           itbis={calculatedTotals.tax}
+           total={calculatedTotals.total}
            payMethod={editForm.paymentMethod}
            notes={editForm.notes}
         />
@@ -151,18 +232,74 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
               <div className="border-t border-dashed border-neutral-200 my-3" />
 
               {/* Items List */}
-              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                {invoice.items.map((item) => (
-                  <div key={item.id} className="grid grid-cols-[28px_1fr_auto_minmax(55px,auto)] gap-1 text-[11px] items-center">
-                    <span className="text-neutral-500 font-medium">{item.quantity}x</span>
-                    <span className="text-neutral-700 truncate pr-2">{item.name}</span>
-                    <span className="text-neutral-400 text-right font-medium">RD$</span>
-                    <span className="font-bold text-neutral-800 text-right">
-                      {(item.unitPrice * item.quantity).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                ))}
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {isEditing ? (
+                  editItems.map((item, idx) => (
+                    <div key={item.id || idx} className="flex items-center gap-1.5 text-[11px]">
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-9 h-6 text-center bg-white border border-neutral-200 rounded-md text-[10px] font-medium"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const newQty = Math.max(1, parseInt(e.target.value) || 1);
+                          updateItemField(idx, "quantity", newQty);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        className="flex-1 h-6 px-1.5 bg-white border border-neutral-200 rounded-md text-[10px] font-semibold text-neutral-800"
+                        value={item.name}
+                        onChange={(e) => {
+                          updateItemField(idx, "name", e.target.value);
+                        }}
+                      />
+                      <span className="text-neutral-400">RD$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-16 h-6 text-right px-1 bg-white border border-neutral-200 rounded-md text-[10px] font-bold text-neutral-800"
+                        value={item.unitPrice}
+                        onChange={(e) => {
+                          const newPrice = Math.max(0, parseFloat(e.target.value) || 0);
+                          updateItemField(idx, "unitPrice", newPrice);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveItem(idx)}
+                        className="h-6 w-6 flex items-center justify-center rounded-md hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition-colors border-none bg-transparent"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  editItems.map((item) => (
+                    <div key={item.id} className="grid grid-cols-[28px_1fr_auto_minmax(55px,auto)] gap-1 text-[11px] items-center">
+                      <span className="text-neutral-500 font-medium">{item.quantity}x</span>
+                      <span className="text-neutral-700 truncate pr-2">{item.name}</span>
+                      <span className="text-neutral-400 text-right font-medium">RD$</span>
+                      <span className="font-bold text-neutral-800 text-right">
+                        {((item.unitPrice || 0) * (item.quantity || 1)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
+
+              {isEditing && (
+                <div className="flex justify-between items-center mt-1">
+                  <button
+                    type="button"
+                    onClick={handleAddItem}
+                    className="text-[10px] font-bold text-blue-600 hover:text-blue-800 flex items-center gap-0.5 bg-transparent border-none cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" /> Agregar ítem
+                  </button>
+                </div>
+              )}
 
               <div className="border-t border-dashed border-neutral-200 my-3" />
 
@@ -170,108 +307,149 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                 <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 text-neutral-500 items-center">
                   <span>Subtotal</span>
                   <span className="text-neutral-400 text-right">RD$</span>
-                  <span className="text-right font-medium">{invoice.subtotal.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="text-right font-medium">{calculatedTotals.subtotal.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 text-neutral-500 items-center">
                   <span>ITBIS (18%)</span>
                   <span className="text-neutral-400 text-right">RD$</span>
-                  <span className="text-right font-medium">{invoice.tax.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="text-right font-medium">{calculatedTotals.tax.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
               
               <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 font-black text-sm text-neutral-900 border-t border-dashed border-neutral-200 pt-3 mt-3 items-center">
                 <span className="tracking-tight uppercase">Total</span>
                 <span className="text-neutral-400 text-xs font-bold text-right">RD$</span>
-                <span className="text-right text-base">{invoice.total.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span className="text-right text-base">{calculatedTotals.total.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
 
             {/* Editable Fields */}
-            <div className="space-y-4 border-t border-neutral-100 pt-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Editar Información</h3>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="ncf" className="text-xs font-bold text-neutral-600">Número NCF</Label>
-                  <Input
-                    id="ncf"
-                    value={editForm.ncf}
-                    placeholder="B01-XXXXXXXX"
-                    className="h-10 rounded-xl border-neutral-200 focus:ring-1 focus:ring-black text-sm"
-                    onChange={(e) => setEditForm({ ...editForm, ncf: e.target.value })}
-                  />
+            {isEditing && (
+              <div className="space-y-4 border-t border-neutral-100 pt-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Editar Información</h3>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ncf" className="text-xs font-bold text-neutral-600">Número NCF</Label>
+                    <Input
+                      id="ncf"
+                      value={editForm.ncf}
+                      placeholder="B01-XXXXXXXX"
+                      className="h-10 rounded-xl border-neutral-200 focus:ring-1 focus:ring-black text-sm"
+                      onChange={(e) => setEditForm({ ...editForm, ncf: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-neutral-600">Método de Pago</Label>
+                    <Select
+                      value={editForm.paymentMethod}
+                      onValueChange={(val) => setEditForm({ ...editForm, paymentMethod: val as Invoice["paymentMethod"] })}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
+                        <SelectValue placeholder="Seleccionar" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
+                        <SelectItem value="cash">Efectivo</SelectItem>
+                        <SelectItem value="card">Tarjeta</SelectItem>
+                        <SelectItem value="transfer">Transferencia</SelectItem>
+                        <SelectItem value="credit">Crédito</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-neutral-600">Método de Pago</Label>
-                  <Select
-                    value={editForm.paymentMethod}
-                    onValueChange={(val) => setEditForm({ ...editForm, paymentMethod: val as Invoice["paymentMethod"] })}
-                  >
-                    <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
-                      <SelectValue placeholder="Seleccionar" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
-                      <SelectItem value="cash">Efectivo</SelectItem>
-                      <SelectItem value="card">Tarjeta</SelectItem>
-                      <SelectItem value="transfer">Transferencia</SelectItem>
-                      <SelectItem value="credit">Crédito</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-neutral-600">Estado de Factura</Label>
+                    <Select
+                      value={editForm.status}
+                      onValueChange={(val) => setEditForm({ ...editForm, status: val as Invoice["status"] })}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
+                        <SelectValue placeholder="Seleccionar" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
+                        <SelectItem value="paid">✅ Pagada</SelectItem>
+                        <SelectItem value="pending">⏳ Pendiente</SelectItem>
+                        <SelectItem value="cancelled">🚫 Cancelada</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5 col-span-2">
+                    <Label htmlFor="notes" className="text-xs font-bold text-neutral-600">Comentario / Notas</Label>
+                    <Input
+                      id="notes"
+                      value={editForm.notes}
+                      placeholder="Escribe alguna observación..."
+                      className="h-10 rounded-xl border-neutral-200 focus:ring-1 focus:ring-black text-sm"
+                      onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                    />
+                  </div>
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-bold text-neutral-600">Estado de Factura</Label>
-                  <Select
-                    value={editForm.status}
-                    onValueChange={(val) => setEditForm({ ...editForm, status: val as Invoice["status"] })}
-                  >
-                    <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
-                      <SelectValue placeholder="Seleccionar" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
-                      <SelectItem value="paid">✅ Pagada</SelectItem>
-                      <SelectItem value="pending">⏳ Pendiente</SelectItem>
-                      <SelectItem value="cancelled">🚫 Cancelada</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5 col-span-2">
-                  <Label htmlFor="notes" className="text-xs font-bold text-neutral-600">Comentario / Notas</Label>
-                  <Input
-                    id="notes"
-                    value={editForm.notes}
-                    placeholder="Escribe alguna observación..."
-                    className="h-10 rounded-xl border-neutral-200 focus:ring-1 focus:ring-black text-sm"
-                    onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2 border-t border-neutral-100 pt-4 mt-2 shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handlePrint}
-              className="rounded-xl flex-1 h-11 font-bold text-neutral-600 border-neutral-200 hover:bg-neutral-50 gap-2 text-sm"
-            >
-              <Printer className="h-4 w-4" /> Imprimir
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSave}
-              className="rounded-xl flex-1 h-11 font-bold bg-black text-white hover:bg-neutral-800 gap-2 shadow-sm text-sm"
-            >
-              <Save className="h-4 w-4" /> Guardar
-            </Button>
+            {isEditing ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditing(false);
+                    // Reset fields
+                    setEditForm({
+                      ncf: invoice.ncf || "",
+                      paymentMethod: invoice.paymentMethod || "cash",
+                      status: invoice.status || "paid",
+                      notes: invoice.notes || "",
+                    });
+                    setEditItems(invoice.items ? [...invoice.items] : []);
+                  }}
+                  className="rounded-xl flex-1 h-11 font-bold text-neutral-600 border-neutral-200 hover:bg-neutral-50 text-sm"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSave}
+                  className="rounded-xl flex-1 h-11 font-bold bg-black text-white hover:bg-neutral-800 gap-2 shadow-sm text-sm"
+                >
+                  <Save className="h-4 w-4" /> Guardar
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handlePrint}
+                  className="rounded-xl flex-1 h-11 font-bold text-neutral-600 border-neutral-200 hover:bg-neutral-50 gap-2 text-sm"
+                >
+                  <Printer className="h-4 w-4" /> Imprimir
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleStartEdit}
+                  className="rounded-xl flex-1 h-11 font-bold bg-black text-white hover:bg-neutral-800 gap-2 shadow-sm text-sm"
+                >
+                  Editar Factura
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AdminPinModal 
+        open={showPinModal} 
+        onOpenChange={setShowPinModal} 
+        onSuccess={handlePinSuccess} 
+        description="Se requiere autorización del administrador para editar o modificar facturas ya registradas."
+      />
     </>
   );
 }

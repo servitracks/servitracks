@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { TopBar } from "@/components/dashboard/TopBar";
 import { HydrationGuard } from "@/components/dashboard/HydrationGuard";
@@ -9,7 +9,7 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { useHydration } from "@/store/useHydration";
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ export default function DashboardLayout() {
   const params = useParams();
   const navigate = useNavigate();
   const hydrated = useHydration();
-  const { tenants, updateTenant, currentUserId } = useStore();
+  const { tenants, updateTenant, currentUserId, users } = useStore();
   const location = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
@@ -57,6 +57,109 @@ export default function DashboardLayout() {
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  const currentUser = useMemo(() => {
+    if (!currentUserId) return null;
+    if (currentUserId === 'admin') {
+      return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+    }
+    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === currentTenant?.id) || null;
+  }, [users, currentUserId, currentTenant?.id]);
+
+  // Recuperación: Si el usuario está autenticado pero no en el store local, lo buscamos en Supabase
+  useEffect(() => {
+    if (currentUserId && currentUserId !== 'admin' && !currentUser) {
+      async function fetchMissingUser() {
+        const { data, error } = await supabaseAdmin
+          .from("tenant_users")
+          .select("*")
+          .eq("user_id", currentUserId)
+          .limit(1)
+          .single();
+        
+        if (data && !error) {
+          useStore.getState().addUser({
+            id: currentUserId!,
+            tenantId: data.tenant_id,
+            name: data.name,
+            email: data.email,
+            role: data.role,
+            status: data.status,
+            createdAt: data.created_at || new Date().toISOString()
+          });
+        }
+      }
+      fetchMissingUser();
+    }
+  }, [currentUserId, currentUser]);
+
+  // Control de Acceso basado en Roles (RBAC) y redirección automática en tiempo real
+  useEffect(() => {
+    if (!hydrated || !currentUser || !tenantSlug) return;
+
+    const pathname = location.pathname.toLowerCase();
+    const slugLower = tenantSlug.toLowerCase();
+    
+    let subpath = pathname;
+    if (pathname.startsWith(`/${slugLower}`)) {
+      subpath = pathname.substring(`/${slugLower}`.length);
+    }
+    if (subpath.endsWith("/")) {
+      subpath = subpath.slice(0, -1);
+    }
+
+    const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+    const userRole = simulatedRole || currentUser.role || 'receptionist';
+
+    console.log("[RBAC] Pathname:", location.pathname, "Subpath:", subpath, "Role:", userRole);
+
+    // Mapa de permisos por subruta
+    const pathPermissions: Record<string, string[]> = {
+      "": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "/orders": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
+      "/cotizaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "/pos": ['owner', 'cashier', 'superadmin'],
+      "/caja": ['owner', 'cashier', 'superadmin'],
+      "/conversaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "/reminders": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "/customers": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "/inventory": ['owner', 'warehouse', 'superadmin'],
+      "/services": ['owner', 'superadmin'],
+      "/proveedores": ['owner', 'warehouse', 'superadmin'],
+      "/mis-comisiones": ['mechanic', 'owner', 'superadmin'],
+      "/nomina": ['owner', 'superadmin'],
+      "/reports": ['owner', 'superadmin'],
+      "/maintenance": ['owner', 'cashier', 'superadmin'],
+      "/settings": ['owner', 'superadmin'],
+    };
+
+    // Buscar si la ruta actual coincide con una de las rutas protegidas
+    const matchingKey = Object.keys(pathPermissions).find(key => {
+      if (key === "") return subpath === "" || subpath === "/";
+      return subpath === key || subpath.startsWith(key + "/");
+    });
+
+    if (matchingKey) {
+      const allowedRoles = pathPermissions[matchingKey];
+      
+      if (!allowedRoles.includes(userRole)) {
+        console.warn("[RBAC] Access denied to path:", subpath, "for role:", userRole);
+        // Encontrar la primera página permitida para este rol
+        const allowedItems = [
+          { href: "", roles: ['owner', 'cashier', 'receptionist', 'superadmin'] },
+          { href: "/orders", roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
+          { href: "/mis-comisiones", roles: ['mechanic', 'owner', 'superadmin'] },
+          { href: "/inventory", roles: ['owner', 'warehouse', 'superadmin'] },
+        ];
+
+        const firstAllowed = allowedItems.find(item => item.roles.includes(userRole));
+        const redirectPath = firstAllowed ? `/${tenantSlug}${firstAllowed.href}` : `/${tenantSlug}/orders`;
+
+        toast.error("No tienes permisos para acceder a esta sección. Redirigiendo...");
+        navigate(redirectPath);
+      }
+    }
+  }, [hydrated, currentUser, location.pathname, tenantSlug, navigate]);
 
   // --- ESCUCHA GLOBAL EN TIEMPO REAL PARA WHATSAPP ---
   useEffect(() => {

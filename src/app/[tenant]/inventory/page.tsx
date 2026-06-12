@@ -73,6 +73,7 @@ type ProductForm = {
   stock: string; minStock: string; tax: string; location: string;
   serviceIds: string[];
   vehicleMake: string; vehicleModel: string; vehicleYear: string;
+  paymentMode: string;
 };
 
 const emptyForm: ProductForm = {
@@ -81,6 +82,7 @@ const emptyForm: ProductForm = {
   stock: "0", minStock: "5", tax: "18", location: "",
   serviceIds: [],
   vehicleMake: "", vehicleModel: "", vehicleYear: "",
+  paymentMode: "pending",
 };
 
 interface ProductFieldsProps {
@@ -290,26 +292,42 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
         />
       </div>
       <div className="space-y-1.5">
-        <Label>Proveedor</Label>
+        <Label>Proveedor *</Label>
         <Select 
           value={form.supplier || undefined} 
-          onValueChange={(v) => setForm((prev) => ({ ...prev, supplier: (v || "") === "none" ? "" : (v || "") }))}
-          items={[
-            { value: "none", label: "Sin proveedor asignado" },
-            ...suppliers.map(s => ({ value: s.commercialName, label: s.commercialName }))
-          ]}
+          onValueChange={(v) => setForm((prev) => ({ ...prev, supplier: v || "" }))}
+          items={suppliers.map(s => ({ value: s.commercialName, label: s.commercialName }))}
         >
           <SelectTrigger className="h-10 rounded-xl border-neutral-200">
             <SelectValue placeholder="Seleccionar proveedor" />
           </SelectTrigger>
           <SelectContent className="rounded-xl">
-            <SelectItem value="none">Sin proveedor asignado</SelectItem>
             {suppliers.map(s => (
               <SelectItem key={s.id} value={s.commercialName}>{s.commercialName}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
+
+      {!isEditOpen && (
+        <div className="space-y-1.5">
+          <Label>Modo de Pago (Stock Inicial) *</Label>
+          <Select 
+            value={form.paymentMode} 
+            onValueChange={(v) => setForm((prev) => ({ ...prev, paymentMode: v || "pending" }))}
+          >
+            <SelectTrigger className="h-10 rounded-xl border-neutral-200">
+              <SelectValue placeholder="Seleccionar modo de pago" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="pending">A Crédito (Pendiente)</SelectItem>
+              <SelectItem value="paid">Efectivo</SelectItem>
+              <SelectItem value="transfer">Transferencia</SelectItem>
+              <SelectItem value="check">Cheque</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="space-y-1.5">
         <Label>Ubicación en Almacén</Label>
         <Input 
@@ -353,9 +371,11 @@ export default function InventoryPage() {
   const currentUser = currentUserId === 'admin' 
     ? { role: 'owner' } 
     : users.find((u) => u.id === currentUserId);
-  const isOwner = currentUser?.role === 'owner';
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+  const activeRole = simulatedRole || currentUser?.role || 'receptionist';
+  const isOwner = activeRole === 'owner';
 
-  const { addProduct, updateProduct, deleteProduct, addMovement } = useStore();
+  const { addProduct, updateProduct, deleteProduct, addMovement, addAccountPayable } = useStore();
   const allProducts = useStore((s) => s.products);
   const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
 
@@ -398,11 +418,10 @@ export default function InventoryPage() {
   const totalValue = products.reduce((acc, p) => acc + p.costPrice * p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
   const outOfStockCount = products.filter((p) => p.stock === 0).length;
-
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.category) {
-      toast.error("El nombre y categoría son obligatorios");
+    if (!form.name || !form.category || !form.supplier) {
+      toast.error("El nombre, categoría y proveedor son obligatorios");
       return;
     }
     // Auto-generación de SKU y Código de barras si no se proveen
@@ -419,8 +438,7 @@ export default function InventoryPage() {
       sku: finalSku,
       barcode: finalBarcode,
       category: form.category,
-      brand: form.brand,
-      supplier: form.supplier,
+      brand: form.brand || undefined,
       costPrice: Number(form.costPrice) || 0,
       salePrice: Number(form.salePrice) || 0,
       laborPrice: Number(form.laborPrice) || 0,
@@ -428,22 +446,50 @@ export default function InventoryPage() {
       minStock: Number(form.minStock) || 0,
       tax: Number(form.tax) || 18,
       location: form.location,
+      supplier: form.supplier,
       serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
       vehicleMake: form.vehicleMake,
       vehicleModel: form.vehicleModel,
       vehicleYear: form.vehicleYear,
     };
     addProduct(newProduct);
-    addMovement({
-      id: `m${Date.now()}`,
-      tenantId: tenantId,
-      productId: newProduct.id,
-      productName: newProduct.name,
-      type: "in",
-      quantity: Number(form.stock),
-      reason: "Stock inicial",
-      date: new Date().toISOString(),
-    });
+
+    if (Number(form.stock) > 0) {
+      addMovement({
+        id: `m${Date.now()}`,
+        tenantId: tenantId,
+        productId: newProduct.id,
+        productName: newProduct.name,
+        type: "in",
+        quantity: Number(form.stock),
+        reason: "Stock inicial",
+        date: new Date().toISOString(),
+      });
+
+      // Crear Cuenta por Pagar para el stock inicial
+      const selectedSupplier = suppliers.find(s => s.commercialName === form.supplier);
+      const supplierId = selectedSupplier?.id || `sup_${Date.now()}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + (selectedSupplier?.creditDays || 30));
+
+      const totalCost = Number(form.costPrice) * Number(form.stock);
+      const totalTax = Math.round(totalCost * (Number(form.tax) / 100));
+      const totalAmount = totalCost + totalTax;
+
+      addAccountPayable({
+        id: `ap_${Date.now()}`,
+        tenantId,
+        supplierId,
+        invoiceNumber: `STOCK-INIC-${newProduct.sku}`,
+        amount: totalAmount,
+        paidAmount: form.paymentMode !== 'pending' ? totalAmount : 0,
+        dueDate: dueDate.toISOString(),
+        status: form.paymentMode !== 'pending' ? "pagada" : "pendiente",
+        createdAt: new Date().toISOString(),
+        notes: `Stock inicial del producto "${newProduct.name}" (${form.paymentMode === 'transfer' ? 'Transferencia' : form.paymentMode === 'check' ? 'Cheque' : form.paymentMode === 'paid' ? 'Efectivo' : 'Crédito'})`,
+      });
+    }
+
     toast.success("Producto creado correctamente");
     setIsCreateOpen(false);
     setForm(emptyForm);
@@ -463,6 +509,7 @@ export default function InventoryPage() {
       vehicleMake: product.vehicleMake || "",
       vehicleModel: product.vehicleModel || "",
       vehicleYear: product.vehicleYear || "",
+      paymentMode: "pending",
     }));
     setIsEditOpen(true);
   };
@@ -470,6 +517,10 @@ export default function InventoryPage() {
   const handleEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct) return;
+    if (!form.name || !form.category || !form.supplier) {
+      toast.error("El nombre, categoría y proveedor son obligatorios");
+      return;
+    }
     updateProduct(selectedProduct.id, {
       name: form.name, sku: form.sku, barcode: form.barcode,
       category: form.category, brand: form.brand, supplier: form.supplier,

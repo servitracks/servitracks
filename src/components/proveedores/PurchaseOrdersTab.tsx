@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, MoreVertical, Send, PackageCheck, XCircle, Trash2 } from "lucide-react";
+import { Plus, MoreVertical, Send, PackageCheck, XCircle, Trash2, Edit } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import PurchaseOrderDialog from "./PurchaseOrderDialog";
@@ -37,6 +37,7 @@ export default function PurchaseOrdersTab({ tenantId }: { tenantId: string }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDirectPurchaseOpen, setIsDirectPurchaseOpen] = useState(false);
   const [receiptPO, setReceiptPO] = useState<PurchaseOrder | null>(null);
+  const [editPO, setEditPO] = useState<PurchaseOrder | null>(null);
 
   const filtered = purchaseOrders
     .filter((po) => statusFilter === "Todos" || po.status === statusFilter)
@@ -95,11 +96,12 @@ export default function PurchaseOrdersTab({ tenantId }: { tenantId: string }) {
                   <DropdownMenu>
                     <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none"><MoreVertical className="h-4 w-4 text-neutral-400" /></DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-52">
+                      <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setEditPO(po)}><Edit className="h-4 w-4" /> Editar Orden</DropdownMenuItem>
                       {po.status === "borrador" && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => changeStatus(po, "pendiente")}><Send className="h-4 w-4" /> Marcar Pendiente</DropdownMenuItem>}
                       {po.status === "pendiente" && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => changeStatus(po, "enviada")}><Send className="h-4 w-4" /> Marcar Enviada</DropdownMenuItem>}
                       {(po.status === "enviada" || po.status === "recibida_parcial") && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-emerald-600" onClick={() => setReceiptPO(po)}><PackageCheck className="h-4 w-4" /> Recibir Mercancía</DropdownMenuItem>}
                       {isOwner && po.status !== "cancelada" && po.status !== "recibida_completa" && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-rose-600" onClick={() => changeStatus(po, "cancelada")}><XCircle className="h-4 w-4" /> Cancelar</DropdownMenuItem>}
-                      {isOwner && po.status === "borrador" && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-rose-600" onClick={() => { deletePurchaseOrder(po.id); toast.success("Orden eliminada"); }}><Trash2 className="h-4 w-4" /> Eliminar</DropdownMenuItem>}
+                      {isOwner && <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-rose-600 focus:text-rose-600" onClick={() => { deletePurchaseOrder(po.id); toast.success("Orden eliminada"); }}><Trash2 className="h-4 w-4" /> Eliminar</DropdownMenuItem>}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
@@ -109,7 +111,9 @@ export default function PurchaseOrdersTab({ tenantId }: { tenantId: string }) {
         </Table>
       </div>
 
-      <PurchaseOrderDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} tenantId={tenantId} />
+      {(isCreateOpen || !!editPO) && (
+        <PurchaseOrderDialog open={true} onOpenChange={(open) => { if (!open) { setIsCreateOpen(false); setEditPO(null); } }} tenantId={tenantId} editOrder={editPO || undefined} />
+      )}
       <DirectPurchaseDialog open={isDirectPurchaseOpen} onOpenChange={setIsDirectPurchaseOpen} tenantId={tenantId} />
       {receiptPO && <GoodsReceiptDialog open={!!receiptPO} onOpenChange={(o) => { if (!o) setReceiptPO(null); }} purchaseOrder={receiptPO} tenantId={tenantId} />}
     </div>

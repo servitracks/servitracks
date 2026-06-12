@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, lazy, Suspense } from "react";
-import { useStore } from "@/store/useStore";
+import { useStore, Invoice } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
 import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Download,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 // Lazy-load recharts (heavy dependency)
 const ReportCharts = lazy(() => import("./ReportCharts"));
@@ -21,6 +22,7 @@ export default function ReportsPage() {
   const tenants = useStore((s) => s.tenants);
   const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
   const tenantId = currentTenant?.id ?? "";
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   const allInvoices = useStore((s) => s.invoices);
   const invoices = tenantId ? allInvoices.filter((i) => i.tenantId === tenantId) : [];
@@ -207,7 +209,11 @@ export default function ReportsPage() {
                 {[...filteredInvoices].reverse().map((inv) => {
                   const customer = customers.find((c) => c.id === inv.customerId);
                   return (
-                    <tr key={inv.id} className="hover:bg-neutral-50/50 transition-colors">
+                    <tr 
+                      key={inv.id} 
+                      onClick={() => setSelectedInvoice(inv)}
+                      className="hover:bg-neutral-50/50 transition-colors cursor-pointer"
+                    >
                       <td className="px-5 py-3.5 font-mono text-xs text-neutral-500">{inv.ncf || inv.id.slice(-8).toUpperCase()}</td>
                       <td className="px-5 py-3.5 font-semibold text-neutral-900">{customer?.name || "—"}</td>
                       <td className="px-5 py-3.5 font-black">RD$ {inv.total.toLocaleString("es-DO")}</td>
@@ -230,6 +236,12 @@ export default function ReportsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <InvoiceDetailDialog 
+        open={!!selectedInvoice} 
+        onClose={() => setSelectedInvoice(null)} 
+        invoice={selectedInvoice} 
+      />
     </div>
   );
 }

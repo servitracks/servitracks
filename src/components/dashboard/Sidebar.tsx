@@ -64,18 +64,6 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
 
-  const currentUser = useMemo(() => {
-    return users.find((u) => u.id === currentUserId) || users[0];
-  }, [users, currentUserId]);
-
-  const allowedTenants = useMemo(() => {
-    if (!currentUser) return tenants;
-    if (currentUser.email === "admin@servitracks.com") return tenants;
-    const sameEmailUsers = users.filter((u) => u.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim());
-    const allowedIds = new Set(sameEmailUsers.map((u) => u.tenantId));
-    return tenants.filter((t) => allowedIds.has(t.id));
-  }, [currentUser, users, tenants]);
-
   const tenantSlug =
     params.tenant && params.tenant !== "undefined"
       ? (params.tenant as string)
@@ -83,6 +71,18 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
 
   const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
   const tenantId = currentTenant?.id ?? "";
+
+  const currentUser = useMemo(() => {
+    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === tenantId) || null;
+  }, [users, currentUserId, tenantId]);
+
+  const allowedTenants = useMemo(() => {
+    if (!currentUser) return currentTenant ? [currentTenant] : [];
+    if (currentUser.email === "admin@servitracks.com") return tenants;
+    const sameEmailUsers = users.filter((u) => u.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim());
+    const allowedIds = new Set(sameEmailUsers.map((u) => u.tenantId));
+    return tenants.filter((t) => allowedIds.has(t.id));
+  }, [currentUser, users, tenants, currentTenant]);
   const lowStockCount = products.filter((p) => p.tenantId === tenantId && p.stock <= p.minStock).length;
   const pendingOrdersCount = orders.filter((o) => o.tenantId === tenantId && o.status === "pending").length;
   const tenantName = currentTenant ? currentTenant.name : tenantSlug.replace(/-/g, " ");
@@ -93,9 +93,11 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
     router.push(newPath);
   };
 
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+  const activeRole = simulatedRole || currentUser?.role || 'owner';
+
   const filteredNavigation = navigation.filter((item) => {
-    if (!currentUser) return false;
-    return item.roles.includes(currentUser.role || 'owner'); // default to owner if no role
+    return item.roles.includes(activeRole);
   });
 
   return (
@@ -235,7 +237,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
         </nav>
 
         {/* Bottom settings (only for owners) */}
-        {(!currentUser || currentUser.role === 'owner') && (
+        {(!currentUser || activeRole === 'owner') && (
           <div className="border-t border-neutral-100 p-3">
             <Link
               href={`/${tenantSlug}/settings`}

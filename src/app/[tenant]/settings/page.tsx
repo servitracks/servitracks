@@ -51,21 +51,21 @@ export default function SettingsPage() {
     addUser, updateUser, deleteUser, updatePrintSettings, updateBarcodeSettings
   } = useStore();
 
+  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
+  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
+
   const currentUserId = useStore((s) => s.currentUserId);
   const currentUser = useMemo(() => {
-    return users.find((u) => u.id === currentUserId) || users[0];
-  }, [users, currentUserId]);
+    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === taller.id) || null;
+  }, [users, currentUserId, taller.id]);
 
   const allowedTenants = useMemo(() => {
-    if (!currentUser) return tenants;
+    if (!currentUser) return currentTenant ? [currentTenant] : [];
     if (currentUser.email === "admin@servitracks.com") return tenants;
     const sameEmailUsers = users.filter((u) => u.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim());
     const allowedIds = new Set(sameEmailUsers.map((u) => u.tenantId));
     return tenants.filter((t) => allowedIds.has(t.id));
-  }, [currentUser, users, tenants]);
-
-  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
-  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
+  }, [currentUser, users, tenants, currentTenant]);
   const [tab, setTab] = useState("taller");
 
   // ── Taller tab state ──
@@ -345,6 +345,8 @@ export default function SettingsPage() {
   // ── Security tab state ──
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [showPw, setShowPw] = useState(false);
+  const [adminPinInput, setAdminPinInput] = useState(currentTenant?.adminPin || "");
+  const [showPin, setShowPin] = useState(false);
 
   const changePassword = () => {
     if (!pwForm.current) { toast.error("Escribe tu contraseña actual"); return; }
@@ -352,6 +354,16 @@ export default function SettingsPage() {
     if (pwForm.next !== pwForm.confirm) { toast.error("Las contraseñas no coinciden"); return; }
     toast.success("Contraseña actualizada correctamente");
     setPwForm({ current: "", next: "", confirm: "" });
+  };
+
+  const saveAdminPin = () => {
+    if (!currentTenant) return;
+    if (adminPinInput && adminPinInput.length !== 4) {
+      toast.error("El PIN debe tener exactamente 4 dígitos");
+      return;
+    }
+    updateTenant(currentTenant.id, { adminPin: adminPinInput || undefined });
+    toast.success("PIN de autorización administrativa actualizado");
   };
 
   // Statistics for sucursales
@@ -1078,36 +1090,83 @@ export default function SettingsPage() {
 
       {/* ── SEGURIDAD ── */}
       {tab === "security" && (
-        <Card className="border-neutral-100 shadow-sm max-w-md">
-          <CardHeader><CardTitle>Cambiar Contraseña</CardTitle><CardDescription>Actualiza tus credenciales de acceso.</CardDescription></CardHeader>
-          <CardContent className="space-y-4">
-            {[
-              { key: "current", label: "Contraseña Actual" },
-              { key: "next", label: "Nueva Contraseña" },
-              { key: "confirm", label: "Confirmar Nueva Contraseña" },
-            ].map(f => (
-              <div key={f.key} className="space-y-1.5">
-                <Label>{f.label}</Label>
-                <div className="relative">
-                  <Input type={showPw ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10"
-                    value={(pwForm as any)[f.key]}
-                    onChange={e => setPwForm({ ...pwForm, [f.key]: e.target.value })} />
-                  {f.key === "current" && (
-                    <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setShowPw(!showPw)}>
-                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        <div className="space-y-6 max-w-md">
+          {currentUser?.role === 'owner' && (
+            <Card className="border-neutral-100 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg font-black text-neutral-900 tracking-tight">
+                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                  PIN de Autorización Administrativa
+                </CardTitle>
+                <CardDescription className="text-xs text-neutral-500">
+                  Código de seguridad de 4 dígitos requerido para autorizar la edición o eliminación de facturas, compras y cuentas.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">PIN del Administrador (4 dígitos)</Label>
+                  <div className="relative">
+                    <Input 
+                      type={showPin ? "text" : "password"} 
+                      maxLength={4}
+                      className="h-11 rounded-xl border-neutral-200 pr-10 font-mono text-center text-xl tracking-[0.5em] font-black"
+                      placeholder="••••"
+                      value={adminPinInput}
+                      onChange={e => {
+                        const val = e.target.value.replace(/\D/g, "");
+                        setAdminPinInput(val);
+                      }} 
+                    />
+                    <button 
+                      type="button" 
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent hover:text-neutral-600" 
+                      onClick={() => setShowPin(!showPin)}
+                    >
+                      {showPin ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {pwForm.next && pwForm.confirm && pwForm.next !== pwForm.confirm && (
-              <p className="text-xs text-rose-500 font-medium">Las contraseñas no coinciden</p>
-            )}
-            <Button className="w-full rounded-xl bg-black text-white hover:bg-neutral-800 h-11 cursor-pointer" onClick={changePassword}>
-              <Shield className="h-4 w-4 mr-2" /> Actualizar Contraseña
-            </Button>
-          </CardContent>
-        </Card>
+                <Button 
+                  className="w-full rounded-xl bg-black text-white hover:bg-neutral-800 h-11 cursor-pointer font-bold" 
+                  onClick={saveAdminPin}
+                >
+                  <Check className="h-4 w-4 mr-2" /> Guardar PIN de Seguridad
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader><CardTitle>Cambiar Contraseña</CardTitle><CardDescription>Actualiza tus credenciales de acceso.</CardDescription></CardHeader>
+            <CardContent className="space-y-4">
+              {[
+                { key: "current", label: "Contraseña Actual" },
+                { key: "next", label: "Nueva Contraseña" },
+                { key: "confirm", label: "Confirmar Nueva Contraseña" },
+              ].map(f => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label>{f.label}</Label>
+                  <div className="relative">
+                    <Input type={showPw ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10"
+                      value={(pwForm as any)[f.key]}
+                      onChange={e => setPwForm({ ...pwForm, [f.key]: e.target.value })} />
+                    {f.key === "current" && (
+                      <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setShowPw(!showPw)}>
+                        {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {pwForm.next && pwForm.confirm && pwForm.next !== pwForm.confirm && (
+                <p className="text-xs text-rose-500 font-medium">Las contraseñas no coinciden</p>
+              )}
+              <Button className="w-full rounded-xl bg-black text-white hover:bg-neutral-800 h-11 cursor-pointer" onClick={changePassword}>
+                <Shield className="h-4 w-4 mr-2" /> Actualizar Contraseña
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {/* ── INVITE USER DIALOG ── */}

@@ -28,13 +28,15 @@ export default function ProveedoresPage() {
   const products = useStore((s) => s.products).filter((p) => p.tenantId === tenantId);
 
   const [compareSearch, setCompareSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("suppliers");
 
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
   const currentUser = useMemo(() => {
-    return users.find((u) => u.id === currentUserId) || users[0];
-  }, [users, currentUserId]);
-  const isWarehouse = currentUser?.role === "warehouse";
+    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === tenantId) || null;
+  }, [users, currentUserId, tenantId]);
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+  const isWarehouse = (simulatedRole || currentUser?.role) === "warehouse";
 
   // KPIs
   const activeCount = suppliers.filter((s) => s.status === "activo").length;
@@ -119,16 +121,16 @@ export default function ProveedoresPage() {
   const kpis = useMemo(() => {
     if (isWarehouse) {
       return [
-        { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50" },
-        { label: "Órdenes Activas", value: `${pendingReceiptOrdersCount} pendientes`, sub: "Por recibir en almacén", icon: ShoppingCart, color: "text-blue-600", bg: "bg-blue-50" },
+        { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50", tab: "suppliers" },
+        { label: "Órdenes Activas", value: `${pendingReceiptOrdersCount} pendientes`, sub: "Por recibir en almacén", icon: ShoppingCart, color: "text-blue-600", bg: "bg-blue-50", tab: "orders" },
       ];
     }
     return [
-      { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50" },
-      { label: "Compras del Mes", value: `RD$ ${monthPurchases.toLocaleString("es-DO")}`, icon: ShoppingCart, color: "text-emerald-600", bg: "bg-emerald-50" },
-      { label: "Facturas Pendientes", value: `RD$ ${pendingPayables.toLocaleString("es-DO")}`, sub: overduePayables > 0 ? `${overduePayables} vencidas` : undefined, icon: CreditCard, color: overduePayables > 0 ? "text-rose-600" : "text-blue-600", bg: overduePayables > 0 ? "bg-rose-50" : "bg-blue-50" },
-      { label: "Proveedor Top", value: topSupplier, icon: Star, color: "text-amber-600", bg: "bg-amber-50" },
-      { label: "Alertas", value: alerts.length > 0 ? `${alerts.length} activas` : "Sin alertas", icon: AlertTriangle, color: alerts.length > 0 ? "text-rose-600" : "text-emerald-600", bg: alerts.length > 0 ? "bg-rose-50" : "bg-emerald-50" },
+      { label: "Total Proveedores", value: `${activeCount} activos`, sub: suspendedCount > 0 ? `${suspendedCount} suspendidos` : undefined, icon: Truck, color: "text-neutral-700", bg: "bg-neutral-50", tab: "suppliers" },
+      { label: "Compras del Mes", value: `RD$ ${monthPurchases.toLocaleString("es-DO")}`, icon: ShoppingCart, color: "text-emerald-600", bg: "bg-emerald-50", tab: "orders" },
+      { label: "Facturas Pendientes", value: `RD$ ${pendingPayables.toLocaleString("es-DO")}`, sub: overduePayables > 0 ? `${overduePayables} vencidas` : undefined, icon: CreditCard, color: overduePayables > 0 ? "text-rose-600" : "text-blue-600", bg: overduePayables > 0 ? "bg-rose-50" : "bg-blue-50", tab: "payables" },
+      { label: "Proveedor Top", value: topSupplier, icon: Star, color: "text-amber-600", bg: "bg-amber-50", tab: "ranking" },
+      { label: "Alertas", value: alerts.length > 0 ? `${alerts.length} activas` : "Sin alertas", icon: AlertTriangle, color: alerts.length > 0 ? "text-rose-600" : "text-emerald-600", bg: alerts.length > 0 ? "bg-rose-50" : "bg-emerald-50", tab: "payables" },
     ];
   }, [isWarehouse, activeCount, suspendedCount, pendingReceiptOrdersCount, monthPurchases, pendingPayables, overduePayables, topSupplier, alerts]);
 
@@ -161,7 +163,11 @@ export default function ProveedoresPage() {
       {/* Executive Dashboard */}
       <div className={cn("grid gap-4", isWarehouse ? "md:grid-cols-2" : "md:grid-cols-5")}>
         {kpis.map((kpi) => (
-          <Card key={kpi.label} className="border-neutral-100 shadow-sm">
+          <Card 
+            key={kpi.label} 
+            className="border-neutral-100 shadow-sm cursor-pointer hover:border-neutral-300 hover:shadow-md active:scale-[0.98] transition-all duration-200"
+            onClick={() => setActiveTab(kpi.tab)}
+          >
             <CardContent className="flex items-center gap-4 p-5">
               <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
                 <kpi.icon className={cn("h-5 w-5", kpi.color)} />
@@ -193,7 +199,7 @@ export default function ProveedoresPage() {
       )}
 
       {/* Main Tabs */}
-      <Tabs defaultValue="suppliers">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-neutral-100 rounded-xl p-1">
           <TabsTrigger value="suppliers" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><Truck className="h-3.5 w-3.5" /> Proveedores</TabsTrigger>
           <TabsTrigger value="orders" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm gap-1.5"><Package className="h-3.5 w-3.5" /> Órdenes de Compra</TabsTrigger>

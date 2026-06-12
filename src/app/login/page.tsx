@@ -16,7 +16,7 @@ import { ADMIN_EMAILS } from "@/lib/storage";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { setCurrentUserId, setAuthenticated, setTenants, setCurrentTenant } = useStore();
+  const { setCurrentUserId, setAuthenticated, setTenants, setCurrentTenant, users, addUser } = useStore();
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -140,6 +140,19 @@ export default function LoginPage() {
       setAuthenticated(true);
       setTenants([tenant]);
       setCurrentTenant(tenant);
+
+      // Asegurar que el usuario esté en el listado local de usuarios del store
+      if (!users.some((u) => u.id === userId)) {
+        addUser({
+          id: userId,
+          tenantId: tenant.id,
+          name: tenantUser.name,
+          email: userEmail,
+          role: tenantUser.role,
+          status: tenantUser.status || "active",
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // Guardar sesión
       const sessionData = {

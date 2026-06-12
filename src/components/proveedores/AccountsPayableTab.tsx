@@ -27,7 +27,7 @@ export default function AccountsPayableTab({ tenantId }: { tenantId: string }) {
   const [expandedSupplier, setExpandedSupplier] = useState<string | null>(null);
 
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   const weekEnd = new Date(today.getTime() + 7 * 86400000);
   const monthEnd = new Date(today.getTime() + 30 * 86400000);
 

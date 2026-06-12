@@ -27,12 +27,13 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
     addAccountPayable, 
     addGoodsReceipt, 
     updateProduct, 
-    addMovement 
+    addMovement,
+    addProduct
   } = useStore();
 
   const [supplierId, setSupplierId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid'>('pending');
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'transfer' | 'check'>('pending');
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
   const [notes, setNotes] = useState("");
 
@@ -72,23 +73,55 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
     }));
   };
 
+  const selectedSupplier = suppliers.find(s => s.id === supplierId);
+  const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const tax = Math.round(subtotal * 0.18);
+  const tax = Math.round(subtotal * (supplierItbis / 100));
   const total = subtotal + tax;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierId) { toast.error("Selecciona un proveedor"); return; }
     if (!invoiceNumber) { toast.error("Ingresa el NCF o Número de Factura"); return; }
-    if (items.length === 0 || items.every((i) => !i.productId)) { toast.error("Agrega al menos un producto"); return; }
+    if (items.length === 0 || items.every((i) => !i.productId && !i.productName.trim())) { toast.error("Agrega al menos un producto"); return; }
 
-    const validItems = items.filter((i) => i.productId).map(i => ({
-      ...i,
-      receivedQuantity: i.quantity // Al ser compra directa, se recibe todo de una vez
-    }));
-    
     const now = new Date().toISOString();
     const supplier = suppliers.find(s => s.id === supplierId);
+    
+    // Auto-crear productos nuevos si no existen
+    const processedItems = items.filter((i) => i.productId || i.productName.trim()).map((item, idx) => {
+      let finalProductId = item.productId;
+      let finalProductName = item.productName;
+
+      if (!finalProductId && finalProductName.trim()) {
+        const sequentialId = products.length + 1 + idx;
+        const generatedCode = `STK${String(sequentialId).padStart(7, '0')}`;
+        finalProductId = `p_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`;
+        
+        addProduct({
+          id: finalProductId,
+          tenantId,
+          name: finalProductName,
+          sku: `SKU-${generatedCode}`,
+          barcode: generatedCode,
+          category: "Otros",
+          costPrice: item.unitPrice,
+          salePrice: Math.round(item.unitPrice * 1.3),
+          stock: 0, // se incrementará abajo
+          minStock: 5,
+          tax: supplier?.itbis !== undefined ? supplier.itbis : 18,
+          supplier: supplier?.commercialName || "",
+        });
+      }
+
+      return {
+        ...item,
+        productId: finalProductId,
+        productName: finalProductName,
+        receivedQuantity: item.quantity
+      };
+    });
+
     const newPoId = `po_${Date.now()}`;
 
     // 1. Crear Orden de Compra ya Recibida
@@ -100,11 +133,11 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
       invoiceNumber,
       paymentStatus,
       status: "recibida_completa",
-      items: validItems,
+      items: processedItems,
       subtotal,
       tax,
       total,
-      notes: notes.trim() || "Compra directa / Ingreso a inventario",
+      notes: notes.trim() || `Compra directa / Ingreso a inventario (${paymentStatus === 'transfer' ? 'Transferencia' : paymentStatus === 'check' ? 'Cheque' : paymentStatus === 'paid' ? 'Efectivo' : 'A crédito'})`,
       createdBy: "current-user",
       createdAt: now,
       updatedAt: now,
@@ -117,7 +150,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
       tenantId,
       purchaseOrderId: newPoId,
       supplierId,
-      items: validItems.map(vi => ({
+      items: processedItems.map(vi => ({
         productId: vi.productId,
         productName: vi.productName,
         expectedQuantity: vi.quantity,
@@ -132,11 +165,11 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
     addGoodsReceipt(receipt);
 
     // 3. Actualizar Inventario (Stock y Movimientos)
-    validItems.forEach((item) => {
+    processedItems.forEach((item) => {
       const currentStock = useStore.getState().products.find((p) => p.id === item.productId)?.stock || 0;
       updateProduct(item.productId, {
         stock: currentStock + item.quantity,
-        costPrice: item.unitPrice, // Actualizamos el costo al precio de esta nueva compra
+        costPrice: item.unitPrice,
       });
       addMovement({
         id: `m_${Date.now()}_${item.productId}`,
@@ -161,10 +194,11 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
       purchaseOrderId: newPoId,
       invoiceNumber: invoiceNumber,
       amount: total,
-      paidAmount: paymentStatus === 'paid' ? total : 0,
+      paidAmount: paymentStatus !== 'pending' ? total : 0,
       dueDate: dueDate.toISOString(),
-      status: paymentStatus === 'paid' ? "pagada" : "pendiente",
+      status: paymentStatus !== 'pending' ? "pagada" : "pendiente",
       createdAt: now,
+      notes: paymentStatus === 'transfer' ? 'Pago con Transferencia' : paymentStatus === 'check' ? 'Pago con Cheque' : paymentStatus === 'paid' ? 'Pago en Efectivo' : 'Compra a crédito',
     });
 
     toast.success(
@@ -219,13 +253,15 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
             </div>
             <div className="space-y-1.5">
               <Label>Estado de Pago</Label>
-              <Select value={paymentStatus} onValueChange={(v: 'pending' | 'paid' | null) => setPaymentStatus(v || 'pending')}>
+              <Select value={paymentStatus} onValueChange={(v: 'pending' | 'paid' | 'transfer' | 'check' | null) => setPaymentStatus(v || 'pending')}>
                 <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="pending">A Crédito (Pendiente)</SelectItem>
-                  <SelectItem value="paid">Pagado (Al Contado)</SelectItem>
+                  <SelectItem value="paid">Pagado (Al Contado - Efectivo)</SelectItem>
+                  <SelectItem value="transfer">Pagado (Transferencia)</SelectItem>
+                  <SelectItem value="check">Pagado (Cheque)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -260,27 +296,38 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
                   <div key={item.id} className="grid grid-cols-12 gap-2 items-end p-3 rounded-xl bg-neutral-50/80 border border-neutral-100">
                     <div className="col-span-5 space-y-1">
                       <Label className="text-[10px]">Producto</Label>
-                      <Select 
-                        value={item.productId || undefined} 
-                        onValueChange={(v) => updateItem(i, { productId: v || "" })}
-                      >
-                        <SelectTrigger className="h-8 rounded-lg border-neutral-200 bg-white text-xs">
-                          <SelectValue placeholder="Seleccionar" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl max-h-48">
-                          {products.map((p) => <SelectItem key={p.id} value={p.id} className="text-xs">{p.name} - Stock: {p.stock}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <input
+                        list={`products-list-${item.id}`}
+                        className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-3 bg-white focus:outline-none focus:ring-1 focus:ring-black"
+                        placeholder="Buscar o escribir producto..."
+                        value={item.productName || ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const match = products.find(p => p.name === val);
+                          if (match) {
+                            updateItem(i, { productId: match.id, productName: match.name, unitPrice: match.costPrice });
+                          } else {
+                            updateItem(i, { productId: "", productName: val });
+                          }
+                        }}
+                      />
+                      <datalist id={`products-list-${item.id}`}>
+                        {products.map((p) => (
+                          <option key={p.id} value={p.name}>
+                            {p.sku ? `${p.sku} - ` : ""}Stock: {p.stock} - Costo: RD$ {p.costPrice}
+                          </option>
+                        ))}
+                      </datalist>
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Cantidad Comprada</Label>
                       <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                        value={item.quantity} onChange={(e) => updateItem(i, { quantity: Number(e.target.value) || 1 })} />
+                        value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Costo Unit. (RD$)</Label>
                       <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                        value={item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: Number(e.target.value) || 0 })} />
+                        value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
                     </div>
                     <div className="col-span-2 space-y-1">
                       <Label className="text-[10px]">Subtotal</Label>
@@ -308,7 +355,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
                 <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="opacity-70">ITBIS (18%)</span>
+                <span className="opacity-70">ITBIS ({supplierItbis}%)</span>
                 <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
               </div>
               <div className="flex justify-between text-base font-black border-t border-emerald-200 pt-2 mt-2">

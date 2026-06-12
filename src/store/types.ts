@@ -12,6 +12,7 @@ export interface Tenant {
   wasenderPhone?: string;
   monto_caja_chica?: number;
   monto_actual_caja_chica?: number;
+  adminPin?: string;
   config?: {
     umbral_diferencia_caja?: number;
     formato_ticket?: '57mm' | '80mm';
@@ -434,6 +435,7 @@ export interface Supplier {
   creditDays?: number;
   generalDiscount?: number;
   volumeDiscount?: number;
+  itbis?: number;
   currency: Currency;
   // Evaluation (1-5 stars)
   ratingDelivery: number;
@@ -476,7 +478,7 @@ export interface PurchaseOrder {
   supplierId: string;
   number: string;            // OC-2026-001
   invoiceNumber?: string;    // Factura/NCF del proveedor
-  paymentStatus: 'paid' | 'pending' | 'partial';
+  paymentStatus: 'paid' | 'pending' | 'partial' | 'transfer' | 'check';
   status: PurchaseOrderStatus;
   items: PurchaseOrderItem[];
   subtotal: number;
