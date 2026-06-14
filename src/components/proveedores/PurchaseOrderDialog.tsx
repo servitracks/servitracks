@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package } from "lucide-react";
+import { Plus, Trash2, Package, TrendingUp, TrendingDown, ImagePlus, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
@@ -16,13 +16,14 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   tenantId: string;
   editOrder?: PurchaseOrder | null;
+  isOwner?: boolean;
 }
 
-export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, editOrder }: Props) {
+export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, editOrder, isOwner = true }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId && s.status === "activo");
   const products = useStore((s) => s.products).filter((p) => p.tenantId === tenantId);
   const purchaseOrders = useStore((s) => s.purchaseOrders).filter((po) => po.tenantId === tenantId);
-  const { addPurchaseOrder, updatePurchaseOrder } = useStore();
+  const { addPurchaseOrder, updatePurchaseOrder, updateProduct } = useStore();
   const isEdit = !!editOrder;
 
   const [supplierId, setSupplierId] = useState(editOrder?.supplierId || "");
@@ -45,6 +46,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
       productName: "",
       quantity: 1,
       unitPrice: 0,
+      salePrice: 0,
       receivedQuantity: 0,
     }]);
   };
@@ -62,6 +64,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
         if (product) {
           newItem.productName = product.name;
           newItem.unitPrice = product.costPrice;
+          newItem.salePrice = product.salePrice;
         }
       }
       return newItem;
@@ -73,6 +76,20 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const tax = Math.round(subtotal * (supplierItbis / 100));
   const total = subtotal + tax;
+
+  // Proyección de venta
+  const totalVentaEstimado = items.reduce((sum, item) => sum + item.quantity * item.salePrice, 0);
+  const gananciaBruta = totalVentaEstimado - subtotal;
+  const margenPromedio = subtotal > 0 ? Math.round((gananciaBruta / subtotal) * 100) : 0;
+
+  const getMarginBadge = (cost: number, sale: number) => {
+    if (cost <= 0 || sale <= 0) return null;
+    const margin = Math.round(((sale - cost) / cost) * 100);
+    if (margin >= 30) return { color: "text-emerald-700 bg-emerald-50 border-emerald-200", label: `${margin}%`, icon: "↑" };
+    if (margin >= 15) return { color: "text-amber-700 bg-amber-50 border-amber-200", label: `${margin}%`, icon: "→" };
+    if (margin > 0) return { color: "text-rose-700 bg-rose-50 border-rose-200", label: `${margin}%`, icon: "↓" };
+    return { color: "text-red-700 bg-red-50 border-red-200", label: `${margin}%`, icon: "⚠" };
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,12 +131,23 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
       addPurchaseOrder(newPO);
       toast.success(`Orden ${newPO.number} creada`);
     }
+
+    // Actualizar precios en inventario automáticamente
+    validItems.forEach((item) => {
+      const updates: { costPrice?: number; salePrice?: number } = {};
+      if (item.unitPrice > 0) updates.costPrice = item.unitPrice;
+      if (item.salePrice > 0) updates.salePrice = item.salePrice;
+      if (Object.keys(updates).length > 0) {
+        updateProduct(item.productId, updates);
+      }
+    });
+
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl rounded-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-4xl rounded-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold">
             {isEdit ? `Editar ${editOrder?.number}` : "Nueva Orden de Compra"}
@@ -148,6 +176,14 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
             </div>
           </div>
 
+          {/* Info Banner — solo visible para owner */}
+          {isOwner && (
+            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-xl flex gap-2 border border-blue-100">
+              <span className="font-bold flex-shrink-0">💡</span>
+              <span>Los precios de costo y venta que establezcas aquí se actualizarán automáticamente en tu inventario al guardar.</span>
+            </div>
+          )}
+
           {/* Items */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -167,64 +203,130 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
               </div>
             ) : (
               <div className="space-y-2">
-                {items.map((item, i) => (
-                  <div key={item.id} className="grid grid-cols-12 gap-2 items-end p-3 rounded-xl bg-neutral-50/80 border border-neutral-100">
-                    <div className="col-span-5 space-y-1">
-                      <Label className="text-[10px]">Producto</Label>
-                      <Select 
-                        value={item.productId || undefined} 
-                        onValueChange={(v) => updateItem(i, { productId: v || "" })}
-                        items={products.map(p => ({ value: p.id, label: p.name }))}
-                      >
-                        <SelectTrigger className="h-8 rounded-lg border-neutral-200 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                        <SelectContent className="rounded-xl max-h-48">
-                          {products.map((p) => <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                {/* Column headers — layout adapts based on role */}
+                <div className={`grid gap-2 px-3 pb-1 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Producto</span>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Cant.</span>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
+                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase">Venta Unit.</span>}
+                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Margen</span>}
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-right">Subtotal</span>
+                  <span></span>
+                </div>
+
+                {items.map((item, i) => {
+                  const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
+                  return (
+                    <div key={item.id} className={`grid gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
+                      {/* Producto */}
+                      <div>
+                        <Select 
+                          value={item.productId || undefined} 
+                          onValueChange={(v) => updateItem(i, { productId: v || "" })}
+                          items={products.map(p => ({ value: p.id, label: p.name }))}
+                        >
+                          <SelectTrigger className="h-8 rounded-lg border-neutral-200 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                          <SelectContent className="rounded-xl max-h-48">
+                            {products.map((p) => <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {/* Cantidad */}
+                      <div>
+                        <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs text-center"
+                          value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                      </div>
+                      {/* Costo Unit. */}
+                      <div>
+                        <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs"
+                          placeholder="RD$"
+                          value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                      </div>
+                      {/* Venta Unit. — solo owner */}
+                      {isOwner && (
+                        <div>
+                          <Input type="number" className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
+                            placeholder="RD$"
+                            value={item.salePrice === 0 ? "" : item.salePrice} onChange={(e) => updateItem(i, { salePrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        </div>
+                      )}
+                      {/* Margen — solo owner */}
+                      {isOwner && (
+                        <div className="flex justify-center">
+                          {badge ? (
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border ${badge.color}`}>
+                              {badge.label}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-neutral-300">—</span>
+                          )}
+                        </div>
+                      )}
+                      {/* Subtotal */}
+                      <div className="text-right">
+                        <p className="text-xs font-bold text-neutral-800">
+                          RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
+                        </p>
+                      </div>
+                      {/* Delete */}
+                      <div className="flex justify-end">
+                        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                          onClick={() => removeItem(i)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Cantidad</Label>
-                      <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs"
-                        value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Precio Unit.</Label>
-                      <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs"
-                        value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Subtotal</Label>
-                      <p className="h-8 flex items-center text-xs font-bold">
-                        RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
-                      </p>
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-                        onClick={() => removeItem(i)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
           {/* Totals */}
           {items.length > 0 && (
-            <div className="bg-neutral-50 rounded-xl p-4 border border-neutral-100 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-500">Subtotal</span>
-                <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
+            <div className={`grid gap-3 ${isOwner ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {/* Resumen de Compra */}
+              <div className="bg-neutral-50 rounded-xl p-4 border border-neutral-100 space-y-2">
+                <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2">Resumen de Compra</p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-neutral-500">Subtotal</span>
+                  <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
+                  <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
+                </div>
+                <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">
+                  <span>Total a Pagar</span>
+                  <span>RD$ {total.toLocaleString("es-DO")}</span>
+                </div>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
-                <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
-              </div>
-              <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">
-                <span>Total</span>
-                <span>RD$ {total.toLocaleString("es-DO")}</span>
-              </div>
+
+              {/* Proyección de Ganancia — solo owner */}
+              {isOwner && (
+                <div className={`rounded-xl p-4 border space-y-2 ${margenPromedio >= 15 ? 'bg-emerald-50/60 border-emerald-100' : 'bg-amber-50/60 border-amber-100'}`}>
+                  <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2 flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3" /> Proyección de Venta
+                  </p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Valor Venta Total</span>
+                    <span className="font-bold">RD$ {totalVentaEstimado.toLocaleString("es-DO")}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Ganancia Bruta</span>
+                    <span className={`font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      RD$ {gananciaBruta.toLocaleString("es-DO")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-base font-black border-t border-neutral-200/50 pt-2 mt-2">
+                    <span>Margen</span>
+                    <span className={`flex items-center gap-1 ${margenPromedio >= 30 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'}`}>
+                      {margenPromedio >= 15 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                      {margenPromedio}%
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

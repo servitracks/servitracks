@@ -112,9 +112,9 @@ export default function PurchaseOrdersTab({ tenantId }: { tenantId: string }) {
       </div>
 
       {(isCreateOpen || !!editPO) && (
-        <PurchaseOrderDialog open={true} onOpenChange={(open) => { if (!open) { setIsCreateOpen(false); setEditPO(null); } }} tenantId={tenantId} editOrder={editPO || undefined} />
+        <PurchaseOrderDialog open={true} onOpenChange={(open) => { if (!open) { setIsCreateOpen(false); setEditPO(null); } }} tenantId={tenantId} editOrder={editPO || undefined} isOwner={isOwner} />
       )}
-      <DirectPurchaseDialog open={isDirectPurchaseOpen} onOpenChange={setIsDirectPurchaseOpen} tenantId={tenantId} />
+      <DirectPurchaseDialog open={isDirectPurchaseOpen} onOpenChange={setIsDirectPurchaseOpen} tenantId={tenantId} isOwner={isOwner} />
       {receiptPO && <GoodsReceiptDialog open={!!receiptPO} onOpenChange={(o) => { if (!o) setReceiptPO(null); }} purchaseOrder={receiptPO} tenantId={tenantId} />}
     </div>
   );

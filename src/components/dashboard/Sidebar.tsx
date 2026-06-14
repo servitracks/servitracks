@@ -190,7 +190,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
                 ? lowStockCount
                 : item.href === "/orders" && pendingOrdersCount > 0
                 ? pendingOrdersCount
-                : item.href === "/conversaciones" && unreadChatsCount > 0
+                : item.href === "/conversaciones" && unreadChatsCount > 0 && !isActive
                 ? unreadChatsCount
                 : null;
 

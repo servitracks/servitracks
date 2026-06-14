@@ -139,6 +139,14 @@ export interface Product {
   vehicleMake?: string;
   vehicleModel?: string;
   vehicleYear?: string;
+  /** Indica si este producto es un combo/paquete de varios productos */
+  isCombo?: boolean;
+  /** Artículos incluidos en el combo (si isCombo es true) */
+  comboItems?: {
+    productId: string;
+    quantity: number;
+    unitPriceAtCreation?: number;
+  }[];
 }
 
 export interface ProductVariant {
@@ -469,6 +477,7 @@ export interface PurchaseOrderItem {
   productName: string;
   quantity: number;
   unitPrice: number;
+  salePrice: number;
   receivedQuantity: number;
 }
 

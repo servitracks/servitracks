@@ -511,56 +511,68 @@ export default function POSPage() {
           )}
 
           {/* Top bar */}
-          <div id="tour-pos-search" className="flex items-center gap-3 bg-white border-b border-neutral-200 px-4 py-3">
-            <div className="flex items-center gap-2 flex-1">
-              <div className="font-black text-lg tracking-tight">ServiTracks <span className="font-light text-neutral-400">POS</span></div>
+          <div id="tour-pos-search" className="flex items-center gap-3 bg-white border-b border-neutral-200 px-4 py-3 overflow-hidden">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="font-black text-lg tracking-tight hidden sm:block">ServiTracks <span className="font-light text-neutral-400">POS</span></div>
               <Badge className="bg-black text-white text-[10px] rounded-full px-2">ACTIVO</Badge>
             </div>
-            <div className="relative flex-1 max-w-md">
+            <div className="relative flex-1 min-w-[150px] max-w-md">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-              <Input ref={searchRef} placeholder="Buscar producto o código (F1)..."
-                className="pl-9 h-9 rounded-lg bg-neutral-50 border-neutral-200 text-sm"
+              <Input ref={searchRef} placeholder="Buscar producto (F1)..."
+                className="pl-9 h-9 rounded-lg bg-neutral-50 border-neutral-200 text-sm w-full"
                 value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={handleBarcodeScan} />
             </div>
             
-            <Button 
-              onClick={() => setIsLinkOrderOpen(true)}
-              variant="outline"
-              className="h-9 gap-2 border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition-all font-bold"
-            >
-              <FileText className="h-4 w-4 text-neutral-500" />
-              Vincular Orden
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button 
+                onClick={() => setIsLinkOrderOpen(true)}
+                variant="outline"
+                title="Vincular Orden"
+                className={cn(
+                  "h-9 gap-2 border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition-all font-bold shrink-0",
+                  isFullscreen ? "px-2.5 lg:px-4" : "px-2.5 2xl:px-4"
+                )}
+              >
+                <FileText className="h-4 w-4 text-neutral-500" />
+                <span className={isFullscreen ? "hidden lg:inline" : "hidden 2xl:inline"}>Vincular Orden</span>
+              </Button>
 
-            <Button 
-              onClick={() => setIsLaborModalOpen(true)}
-              variant="outline"
-              className="h-9 gap-2 border-black text-black hover:bg-black hover:text-white transition-all font-bold"
-            >
-              <Wrench className="h-4 w-4" />
-              Mano de obra
-            </Button>
+              <Button 
+                onClick={() => setIsLaborModalOpen(true)}
+                variant="outline"
+                title="Mano de obra"
+                className={cn(
+                  "h-9 gap-2 border-black text-black hover:bg-black hover:text-white transition-all font-bold shrink-0",
+                  isFullscreen ? "px-2.5 lg:px-4" : "px-2.5 2xl:px-4"
+                )}
+              >
+                <Wrench className="h-4 w-4" />
+                <span className={isFullscreen ? "hidden lg:inline" : "hidden 2xl:inline"}>Mano de obra</span>
+              </Button>
 
-            <Button
-              onClick={() => setIsWarrantyModalOpen(true)}
-              variant="outline"
-              className={cn(
-                "h-9 gap-2 transition-all font-bold",
-                localWarrantyText
-                  ? "border-emerald-500 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
-                  : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
-              )}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              Garantía
-              {localWarrantyText && (
-                <span className="ml-0.5 h-2 w-2 rounded-full bg-emerald-500 inline-block" />
-              )}
-            </Button>
-            <button onClick={() => setIsFullscreen(!isFullscreen)}
-              className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors">
-              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
+              <Button
+                onClick={() => setIsWarrantyModalOpen(true)}
+                variant="outline"
+                title="Garantía"
+                className={cn(
+                  "h-9 gap-2 transition-all font-bold shrink-0",
+                  isFullscreen ? "px-2.5 lg:px-4" : "px-2.5 2xl:px-4",
+                  localWarrantyText
+                    ? "border-emerald-500 text-emerald-700 bg-emerald-50 hover:bg-emerald-100"
+                    : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                )}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                <span className={isFullscreen ? "hidden lg:inline" : "hidden 2xl:inline"}>Garantía</span>
+                {localWarrantyText && (
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                )}
+              </Button>
+              <button onClick={() => setIsFullscreen(!isFullscreen)}
+                className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-500 transition-colors shrink-0">
+                {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           {/* Category tabs */}

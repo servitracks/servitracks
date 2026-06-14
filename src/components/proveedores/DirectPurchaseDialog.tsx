@@ -8,16 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, Package, CheckCircle2, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tenantId: string;
+  isOwner?: boolean;
 }
 
-export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: Props) {
+export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isOwner = true }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId && s.status === "activo");
   const products = useStore((s) => s.products).filter((p) => p.tenantId === tenantId);
   const purchaseOrders = useStore((s) => s.purchaseOrders).filter((po) => po.tenantId === tenantId);
@@ -50,6 +51,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
       productName: "",
       quantity: 1,
       unitPrice: 0,
+      salePrice: 0,
       receivedQuantity: 0,
     }]);
   };
@@ -67,6 +69,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
         if (product) {
           newItem.productName = product.name;
           newItem.unitPrice = product.costPrice;
+          newItem.salePrice = product.salePrice;
         }
       }
       return newItem;
@@ -78,6 +81,20 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const tax = Math.round(subtotal * (supplierItbis / 100));
   const total = subtotal + tax;
+
+  // Proyección de venta
+  const totalVentaEstimado = items.reduce((sum, item) => sum + item.quantity * item.salePrice, 0);
+  const gananciaBruta = totalVentaEstimado - subtotal;
+  const margenPromedio = subtotal > 0 ? Math.round((gananciaBruta / subtotal) * 100) : 0;
+
+  const getMarginBadge = (cost: number, sale: number) => {
+    if (cost <= 0 || sale <= 0) return null;
+    const margin = Math.round(((sale - cost) / cost) * 100);
+    if (margin >= 30) return { color: "text-emerald-700 bg-emerald-50 border-emerald-200", label: `${margin}%` };
+    if (margin >= 15) return { color: "text-amber-700 bg-amber-50 border-amber-200", label: `${margin}%` };
+    if (margin > 0) return { color: "text-rose-700 bg-rose-50 border-rose-200", label: `${margin}%` };
+    return { color: "text-red-700 bg-red-50 border-red-200", label: `${margin}%` };
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,7 +123,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
           barcode: generatedCode,
           category: "Otros",
           costPrice: item.unitPrice,
-          salePrice: Math.round(item.unitPrice * 1.3),
+          salePrice: item.salePrice > 0 ? item.salePrice : Math.round(item.unitPrice * 1.3),
           stock: 0, // se incrementará abajo
           minStock: 5,
           tax: supplier?.itbis !== undefined ? supplier.itbis : 18,
@@ -167,10 +184,12 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
     // 3. Actualizar Inventario (Stock y Movimientos)
     processedItems.forEach((item) => {
       const currentStock = useStore.getState().products.find((p) => p.id === item.productId)?.stock || 0;
-      updateProduct(item.productId, {
+      const priceUpdates: { stock: number; costPrice: number; salePrice?: number } = {
         stock: currentStock + item.quantity,
         costPrice: item.unitPrice,
-      });
+      };
+      if (item.salePrice > 0) priceUpdates.salePrice = item.salePrice;
+      updateProduct(item.productId, priceUpdates);
       addMovement({
         id: `m_${Date.now()}_${item.productId}`,
         tenantId,
@@ -268,10 +287,17 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
           </div>
 
           {/* Info Banner */}
-          <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg flex gap-2 border border-blue-100">
-            <span className="font-bold flex-shrink-0">Automático:</span>
-            <span>Esta compra ingresará directamente los productos al inventario, actualizará el costo unitario y generará la cuenta por pagar en tu contabilidad.</span>
-          </div>
+          {isOwner ? (
+            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg flex gap-2 border border-blue-100">
+              <span className="font-bold flex-shrink-0">Automático:</span>
+              <span>Esta compra ingresará directamente los productos al inventario, actualizará los precios y generará la cuenta por pagar en tu contabilidad.</span>
+            </div>
+          ) : (
+            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg flex gap-2 border border-blue-100">
+              <span className="font-bold flex-shrink-0">Automático:</span>
+              <span>Esta compra ingresará directamente los productos al inventario.</span>
+            </div>
+          )}
 
           {/* Items */}
           <div>
@@ -292,76 +318,131 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId }: P
               </div>
             ) : (
               <div className="space-y-2">
-                {items.map((item, i) => (
-                  <div key={item.id} className="grid grid-cols-12 gap-2 items-end p-3 rounded-xl bg-neutral-50/80 border border-neutral-100">
-                    <div className="col-span-5 space-y-1">
-                      <Label className="text-[10px]">Producto</Label>
-                      <input
-                        list={`products-list-${item.id}`}
-                        className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-3 bg-white focus:outline-none focus:ring-1 focus:ring-black"
-                        placeholder="Buscar o escribir producto..."
-                        value={item.productName || ""}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          const match = products.find(p => p.name === val);
-                          if (match) {
-                            updateItem(i, { productId: match.id, productName: match.name, unitPrice: match.costPrice });
-                          } else {
-                            updateItem(i, { productId: "", productName: val });
-                          }
-                        }}
-                      />
-                      <datalist id={`products-list-${item.id}`}>
-                        {products.map((p) => (
-                          <option key={p.id} value={p.name}>
-                            {p.sku ? `${p.sku} - ` : ""}Stock: {p.stock} - Costo: RD$ {p.costPrice}
-                          </option>
-                        ))}
-                      </datalist>
+                {/* Column headers */}
+                <div className={`grid gap-2 px-3 pb-1 ${isOwner ? 'grid-cols-[1fr_70px_95px_95px_50px_85px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Producto</span>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Cant.</span>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase">{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
+                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase">Venta Unit.</span>}
+                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Margen</span>}
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-right">Subtotal</span>
+                  <span></span>
+                </div>
+                {items.map((item, i) => {
+                  const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
+                  return (
+                    <div key={item.id} className={`grid gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100 ${isOwner ? 'grid-cols-[1fr_70px_95px_95px_50px_85px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
+                      <div>
+                        <input
+                          list={`products-list-${item.id}`}
+                          className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-3 bg-white focus:outline-none focus:ring-1 focus:ring-black"
+                          placeholder="Buscar o escribir producto..."
+                          value={item.productName || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const match = products.find(p => p.name === val);
+                            if (match) {
+                              updateItem(i, { productId: match.id, productName: match.name, unitPrice: match.costPrice });
+                            } else {
+                              updateItem(i, { productId: "", productName: val });
+                            }
+                          }}
+                        />
+                        <datalist id={`products-list-${item.id}`}>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.name}>
+                              {p.sku ? `${p.sku} - ` : ""}Stock: {p.stock} - Costo: RD$ {p.costPrice}
+                            </option>
+                          ))}
+                        </datalist>
+                      </div>
+                      <div>
+                        <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs bg-white text-center"
+                          value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                      </div>
+                      <div>
+                        <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs bg-white" placeholder="RD$"
+                          value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                      </div>
+                      {isOwner && (
+                        <div>
+                          <Input type="number" className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium" placeholder="RD$"
+                            value={item.salePrice === 0 ? "" : item.salePrice} onChange={(e) => updateItem(i, { salePrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        </div>
+                      )}
+                      {isOwner && (
+                        <div className="flex justify-center">
+                          {badge ? (
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border ${badge.color}`}>
+                              {badge.label}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-neutral-300">—</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="text-right">
+                        <p className="text-xs font-bold text-neutral-800">
+                          RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
+                        </p>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                          onClick={() => removeItem(i)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Cantidad Comprada</Label>
-                      <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                        value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Costo Unit. (RD$)</Label>
-                      <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                        value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                    </div>
-                    <div className="col-span-2 space-y-1">
-                      <Label className="text-[10px]">Subtotal</Label>
-                      <p className="h-8 flex items-center text-xs font-bold">
-                        RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
-                      </p>
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-                        onClick={() => removeItem(i)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
 
           {/* Totals */}
           {items.length > 0 && (
-            <div className="bg-emerald-50 text-emerald-900 rounded-xl p-4 border border-emerald-100 space-y-2 ml-auto w-1/3 min-w-[250px]">
-              <div className="flex justify-between text-sm">
-                <span className="opacity-70">Subtotal</span>
-                <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
+            <div className={`grid gap-3 ${isOwner ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {/* Resumen de Compra */}
+              <div className="bg-neutral-50 rounded-xl p-4 border border-neutral-100 space-y-2">
+                <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2">Resumen de Compra</p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-neutral-500">Subtotal</span>
+                  <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
+                  <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
+                </div>
+                <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">
+                  <span>Total Factura</span>
+                  <span>RD$ {total.toLocaleString("es-DO")}</span>
+                </div>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="opacity-70">ITBIS ({supplierItbis}%)</span>
-                <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
-              </div>
-              <div className="flex justify-between text-base font-black border-t border-emerald-200 pt-2 mt-2">
-                <span>Total Factura</span>
-                <span>RD$ {total.toLocaleString("es-DO")}</span>
-              </div>
+              {/* Proyección de Ganancia — solo owner */}
+              {isOwner && (
+                <div className={`rounded-xl p-4 border space-y-2 ${margenPromedio >= 15 ? 'bg-emerald-50/60 border-emerald-100' : 'bg-amber-50/60 border-amber-100'}`}>
+                  <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2 flex items-center gap-1">
+                    <TrendingUp className="h-3 w-3" /> Proyección de Venta
+                  </p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Valor Venta Total</span>
+                    <span className="font-bold">RD$ {totalVentaEstimado.toLocaleString("es-DO")}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-neutral-500">Ganancia Bruta</span>
+                    <span className={`font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      RD$ {gananciaBruta.toLocaleString("es-DO")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-base font-black border-t border-neutral-200/50 pt-2 mt-2">
+                    <span>Margen</span>
+                    <span className={`flex items-center gap-1 ${margenPromedio >= 30 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'}`}>
+                      {margenPromedio >= 15 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                      {margenPromedio}%
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

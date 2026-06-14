@@ -20,6 +20,7 @@ import {
   Printer,
   ArrowUp,
   ArrowDown,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,7 @@ import ImportWizardModal from "@/components/inventory/ImportWizardModal";
 import { ImportRow } from "@/components/inventory/StepPreviewEditor";
 import QuoteRequestDialog from "@/components/inventory/QuoteRequestDialog";
 import PrintLabelDialog from "@/components/inventory/PrintLabelDialog";
+import ComboCreateDialog from "@/components/inventory/ComboCreateDialog";
 
 const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
 
@@ -394,6 +396,7 @@ export default function InventoryPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isCreateComboOpen, setIsCreateComboOpen] = useState(false);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
   const [isPrintLabelOpen, setIsPrintLabelOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -412,7 +415,20 @@ export default function InventoryPage() {
       (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
       (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
     const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
-    return matchSearch && matchCat;
+    return matchSearch && matchCat && !p.isCombo;
+  });
+
+  const filteredCombos = products.filter((p) => {
+    const matchSearch =
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.sku.toLowerCase().includes(search.toLowerCase()) ||
+      (p.barcode || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.brand || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleMake || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
+      (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
+    const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
+    return matchSearch && matchCat && p.isCombo;
   });
 
   const totalValue = products.reduce((acc, p) => acc + p.costPrice * p.stock, 0);
@@ -652,10 +668,19 @@ export default function InventoryPage() {
             onClick={() => setIsImportOpen(true)}>
             <Upload className="h-4 w-4" /> Importar
           </Button>
-          <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2"
-            onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}>
-            <Plus className="h-4 w-4" /> Nuevo Producto
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 outline-none transition-colors">
+              <Plus className="h-4 w-4" /> Nuevo
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-48">
+              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}>
+                <Package className="h-4 w-4" /> Producto Individual
+              </DropdownMenuItem>
+              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setIsCreateComboOpen(true)}>
+                <Layers className="h-4 w-4" /> Combo / Paquete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -686,6 +711,7 @@ export default function InventoryPage() {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <TabsList className="bg-neutral-100 rounded-xl p-1">
             <TabsTrigger value="products" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Productos</TabsTrigger>
+            <TabsTrigger value="combos" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Combos / Paquetes</TabsTrigger>
             <TabsTrigger value="movements" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Movimientos</TabsTrigger>
           </TabsList>
           {/* Search + filter */}
@@ -813,6 +839,90 @@ export default function InventoryPage() {
                                   <Trash2 className="h-4 w-4" /> Eliminar
                                 </DropdownMenuItem>
                               </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* Combos Tab Content */}
+        <TabsContent value="combos" className="mt-4">
+          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader className="bg-neutral-50/50">
+                <TableRow>
+                  <TableHead className="w-[300px]">Combo / Paquete</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead>Costo Real</TableHead>
+                  <TableHead>Precio Venta</TableHead>
+                  <TableHead>Stock Posible</TableHead>
+                  {isOwner && <TableHead>Margen</TableHead>}
+                  <TableHead className="w-[50px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredCombos.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-32 text-center text-neutral-400">
+                      No se encontraron combos o paquetes. Crea uno usando el botón "Nuevo".
+                    </TableCell>
+                  </TableRow>
+                ) : filteredCombos.map((combo) => {
+                  const margin = combo.costPrice > 0
+                    ? Math.round(((combo.salePrice - combo.costPrice) / combo.salePrice) * 100)
+                    : 0;
+                  return (
+                    <TableRow key={combo.id} className="group hover:bg-neutral-50/50">
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 text-emerald-600 transition-colors">
+                            <Layers className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-neutral-900 text-sm">{combo.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-xs text-neutral-400 font-mono">{combo.sku}</p>
+                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                {combo.comboItems?.length || 0} artículos
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">
+                          {combo.category}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">RD$ {combo.costPrice.toLocaleString("es-DO")}</TableCell>
+                      <TableCell className="font-semibold text-sm">RD$ {combo.salePrice.toLocaleString("es-DO")}</TableCell>
+                      <TableCell>
+                        <span className={cn("font-bold text-sm", combo.stock <= 0 ? "text-rose-600" : "text-emerald-600")}>
+                          {combo.stock} <span className="text-xs font-normal opacity-70">disponibles</span>
+                        </span>
+                      </TableCell>
+                      {isOwner && (
+                        <TableCell>
+                          <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
+                        </TableCell>
+                      )}
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors">
+                            <MoreVertical className="h-4 w-4 text-neutral-400" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
+                            <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
+                            {isOwner && (
+                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-rose-600 focus:text-rose-600" onClick={() => handleDelete(combo.id, combo.name)}>
+                                <Trash2 className="h-4 w-4" /> Eliminar Combo
+                              </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -957,6 +1067,12 @@ export default function InventoryPage() {
         open={isPrintLabelOpen}
         onOpenChange={(o) => { if (!o) setIsPrintLabelOpen(false); }}
         product={selectedProduct}
+      />
+
+      <ComboCreateDialog
+        open={isCreateComboOpen}
+        onOpenChange={setIsCreateComboOpen}
+        tenantId={tenantId}
       />
     </div>
   );
