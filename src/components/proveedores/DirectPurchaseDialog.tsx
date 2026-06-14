@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { PurchaseOrder, PurchaseOrderItem, Supplier, AccountPayable, GoodsReceipt } from "@/store/types";
 import { useStore } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package, CheckCircle2, TrendingUp, TrendingDown } from "lucide-react";
+import * as XLSX from "xlsx";
+import { Plus, Trash2, Package, CheckCircle2, TrendingUp, TrendingDown, Camera, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { extractInvoiceWithAI } from "@/lib/purchase-ai";
 
 interface Props {
   open: boolean;
@@ -37,6 +39,8 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'transfer' | 'check'>('pending');
   const [items, setItems] = useState<PurchaseOrderItem[]>([]);
   const [notes, setNotes] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const generateNumber = () => {
     const year = new Date().getFullYear();
@@ -238,6 +242,151 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
     onOpenChange(false);
   };
 
+  const handleScanClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const processAI = async (file: File) => {
+    try {
+      let base64 = "";
+      let mimeType = file.type;
+      
+      // Si es imagen, la comprimimos en el navegador para que suba 10x más rápido
+      if (file.type.startsWith("image/")) {
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              let { width, height } = img;
+              const MAX = 1200; // Reducimos a un máximo de 1200px
+              if (width > height && width > MAX) { height *= MAX / width; width = MAX; }
+              else if (height > MAX) { width *= MAX / height; height = MAX; }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d");
+              ctx?.drawImage(img, 0, 0, width, height);
+              resolve(canvas.toDataURL("image/jpeg", 0.6).split(",")[1]); // Calidad al 60%
+            };
+            img.onerror = reject;
+            img.src = e.target?.result as string;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        mimeType = "image/jpeg";
+      } else {
+        // PDF o XML, lo leemos normal
+        base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+
+      const extracted = await extractInvoiceWithAI(base64, mimeType, file.name);
+        
+        if (extracted.ncf) setInvoiceNumber(extracted.ncf);
+        
+        if (extracted.supplierName) {
+          const matchedSupplier = suppliers.find(s => 
+            s.commercialName.toLowerCase().includes(extracted.supplierName.toLowerCase()) || 
+            extracted.supplierName.toLowerCase().includes(s.commercialName.toLowerCase())
+          );
+          if (matchedSupplier) setSupplierId(matchedSupplier.id);
+        }
+
+        const newItems = extracted.items.map((item, idx) => {
+          const matchedProduct = products.find(p => p.name.toLowerCase() === item.productName.toLowerCase());
+          return {
+            id: `poi_${Date.now()}_${idx}`,
+            productId: matchedProduct?.id || "",
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            salePrice: matchedProduct?.salePrice || Math.round(item.unitPrice * 1.3),
+            receivedQuantity: item.quantity,
+          };
+        });
+
+        setItems(newItems);
+        toast.success("Factura importada con éxito", { id: "scan-toast" });
+      } catch (error) {
+        console.error(error);
+        toast.error("Error al procesar el archivo con IA", { id: "scan-toast" });
+      } finally {
+        setIsScanning(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+  };
+
+  const processSpreadsheet = async (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
+        
+        const newItems = jsonData.map((row, idx) => {
+          const productName = String(row.name ?? row.Nombre ?? row.NOMBRE ?? row.producto ?? row.Producto ?? row.Descripción ?? row.Descripcion ?? "");
+          const quantity = Number(row.quantity ?? row.Cantidad ?? row.cantidad ?? row.CANTIDAD ?? row.qty ?? 1);
+          const unitPrice = Number(row.costPrice ?? row["Precio Costo"] ?? row.costo ?? row.Costo ?? row.Precio ?? row.precio ?? 0);
+          
+          const matchedProduct = products.find(p => p.name.toLowerCase() === productName.toLowerCase());
+          return {
+            id: `poi_${Date.now()}_${idx}`,
+            productId: matchedProduct?.id || "",
+            productName: productName,
+            quantity: quantity,
+            unitPrice: unitPrice,
+            salePrice: matchedProduct?.salePrice || Math.round(unitPrice * 1.3),
+            receivedQuantity: quantity,
+          };
+        }).filter(item => item.productName.trim() !== "");
+
+        if (newItems.length > 0) {
+          setItems(newItems);
+          toast.success(`Se importaron ${newItems.length} productos del Excel`, { id: "scan-toast" });
+        } else {
+          toast.error("No se encontraron productos válidos en el Excel", { id: "scan-toast" });
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Error al leer el archivo Excel", { id: "scan-toast" });
+      } finally {
+        setIsScanning(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.onerror = () => {
+      toast.error("Error al leer el archivo", { id: "scan-toast" });
+      setIsScanning(false);
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    toast.loading("Procesando factura...", { id: "scan-toast" });
+
+    const fileName = file.name.toLowerCase();
+    
+    if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls") || fileName.endsWith(".csv")) {
+      processSpreadsheet(file);
+    } else {
+      // PDF, JPG, PNG, XML, WEBP go to AI
+      processAI(file);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-4xl rounded-2xl max-h-[90vh] overflow-y-auto">
@@ -248,6 +397,15 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-5 py-2">
+          {/* File Input for AI Scanner */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept="image/*,application/pdf,.csv,.xlsx,.xls,.xml" 
+            className="hidden" 
+          />
+          
           {/* Header Info */}
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1.5">
@@ -299,13 +457,25 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
             </div>
           )}
 
-          {/* Items */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-black uppercase text-neutral-400 tracking-wider">Productos Comprados</p>
-              <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={addItem}>
-                <Plus className="h-3 w-3" /> Agregar Producto
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-8 text-xs gap-1 border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100" 
+                  onClick={handleScanClick}
+                  disabled={isScanning}
+                >
+                  {isScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+                  {isScanning ? "Procesando..." : "Importar Factura"}
+                </Button>
+                <Button type="button" variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={addItem}>
+                  <Plus className="h-3.5 w-3.5" /> Agregar Producto
+                </Button>
+              </div>
             </div>
 
             {items.length === 0 ? (

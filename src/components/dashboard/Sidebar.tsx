@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { Link, usePathname, useParams, useRouter } from "@/lib/next-compat";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/store/useStore";
@@ -63,6 +63,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
   const tenants = useStore((s) => s.tenants);
   const users = useStore((s) => s.users);
   const currentUserId = useStore((s) => s.currentUserId);
+  const navRef = useRef<HTMLDivElement>(null);
 
   const tenantSlug =
     params.tenant && params.tenant !== "undefined"
@@ -99,6 +100,16 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
   const filteredNavigation = navigation.filter((item) => {
     return item.roles.includes(activeRole);
   });
+
+  // Auto-scroll sidebar to active element
+  useEffect(() => {
+    if (navRef.current) {
+      const activeElement = navRef.current.querySelector('[data-active="true"]');
+      if (activeElement) {
+        activeElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [pathname]);
 
   return (
     <>
@@ -178,7 +189,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto space-y-0.5 px-3 py-4">
+        <nav ref={navRef} className="flex-1 overflow-y-auto space-y-0.5 px-3 py-4">
           {filteredNavigation.map((item) => {
             const href = `/${tenantSlug}${item.href}`;
             const isActive =
@@ -199,6 +210,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
               <Link
                 key={item.name}
                 href={href}
+                data-active={isActive}
                 id={item.href === "/orders" ? "tour-sidebar-orders" : undefined}
                 onClick={onClose}
                 className={cn(

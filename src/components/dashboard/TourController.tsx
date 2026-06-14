@@ -28,19 +28,21 @@ export function TourController() {
         progressText: "{{current}} de {{total}}",
       };
 
-      if (pathname === "/autocheck" || pathname.endsWith("/autocheck")) {
+      const tenantSlug = pathname.split('/')[1] || 'autocheck';
+      const basePath = `/${tenantSlug}`;
+
+      if (pathname === basePath || pathname === `${basePath}/`) {
         driverObj = driver({
           ...commonConfig,
           showProgress: true,
-          doneBtnText: "Ver Órdenes 🚀",
+          doneBtnText: "Ir a Órdenes 🚀",
           steps: [
             { popover: { title: "✨ Bienvenido a ServiTracks", description: "La plataforma de primer nivel para administrar tu taller mecánico. Vamos a dar un recorrido completo por todos los módulos.", side: "bottom", align: "center", showButtons: ['next'] } },
-            { element: "#tour-metrics", popover: { title: "📊 Centro de Mando Financiero", description: "Controla tus ingresos diarios, identifica stock bajo y monitorea todas las órdenes activas en el taller desde este dashboard en tiempo real.", showButtons: ['previous', 'next'] } },
-            { element: "#tour-sidebar-orders", popover: { title: "🛠️ Órdenes de Trabajo", description: "El corazón operativo de tu negocio. Haz clic aquí para entrar y ver cómo se gestionan las reparaciones.", showButtons: ['previous', 'next'] } }
+            { element: "#tour-metrics", popover: { title: "📊 Dashboard Principal", description: "Controla tus ingresos diarios, identifica stock bajo y monitorea todas las órdenes activas en el taller desde este panel en tiempo real.", showButtons: ['previous', 'next'] } }
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/orders");
+            router.push(`${basePath}/orders`);
           }
         });
       } 
@@ -48,44 +50,28 @@ export function TourController() {
         driverObj = driver({
           ...commonConfig,
           showProgress: true,
-          doneBtnText: "Ver Clientes 👥",
+          doneBtnText: "Ir a Cotizaciones 📝",
           steps: [
-            { element: "#tour-orders-header", popover: { title: "📋 Control Total de Reparaciones", description: "Desde aquí creas nuevas órdenes de servicio, registras los vehículos que ingresan y les asignas técnicos.", showButtons: ['next'] } },
-            { element: "#tour-orders-list", popover: { title: "⚡ Flujo de Trabajo Inteligente", description: "Visualiza de un vistazo en qué estado se encuentra cada vehículo (Diagnóstico, Reparación, Listo) y envíale actualizaciones por WhatsApp al cliente.", showButtons: ['previous', 'next'] } }
+            { element: "main", popover: { title: "🛠️ Órdenes de Trabajo", description: "Desde aquí creas nuevas órdenes de servicio, registras los vehículos que ingresan, les asignas técnicos y ves el estado de cada vehículo.", showButtons: ['next'] } }
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/customers");
+            router.push(`${basePath}/cotizaciones`);
           }
         });
       }
-      else if (pathname.endsWith("/customers")) {
+      else if (pathname.endsWith("/cotizaciones")) {
         driverObj = driver({
           ...commonConfig,
           showProgress: false,
           showButtons: ['next'],
-          doneBtnText: "Ver Inventario 📦",
+          doneBtnText: "Ir a Facturación POS 💳",
           steps: [
-            { element: "main", popover: { title: "👥 CRM de Clientes y Vehículos", description: "Mantén una base de datos de todos tus clientes y su flota de vehículos. Envía recordatorios automáticos por WhatsApp cuando les toque revisión." } },
+            { element: "main", popover: { title: "📝 Cotizaciones Profesionales", description: "Crea estimados rápidos para tus clientes antes de comenzar el trabajo y envíalos directamente por WhatsApp." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/inventory");
-          }
-        });
-      }
-      else if (pathname.endsWith("/inventory")) {
-        driverObj = driver({
-          ...commonConfig,
-          showProgress: false,
-          showButtons: ['next'],
-          doneBtnText: "Ir a Facturar 💳",
-          steps: [
-            { element: "main", popover: { title: "📦 Control de Inventario", description: "Gestiona tus repuestos, aceites y filtros. El sistema te alertará automáticamente cuando un producto esté por agotarse." } },
-          ],
-          onDestroyStarted: () => {
-            driverObj.destroy();
-            router.push("/autocheck/pos");
+            router.push(`${basePath}/pos`);
           }
         });
       }
@@ -95,12 +81,11 @@ export function TourController() {
           showProgress: true,
           doneBtnText: "Ir a Caja 💰",
           steps: [
-            { element: "#tour-pos-search", popover: { title: "💻 Facturación POS Ultrarrápida", description: "El sistema de caja está optimizado para velocidad. Busca servicios, técnicos o productos con el teclado o lector de código de barras.", showButtons: ['next'] } },
-            { element: "#tour-pos-payment", popover: { title: "🧾 Cumplimiento DGII", description: "Aplica descuentos, gestiona propinas y emite comprobantes fiscales (NCF) totalmente válidos de forma automática al cobrar.", showButtons: ['previous', 'next'] } }
+            { element: "main", popover: { title: "💻 Facturación POS Ultrarrápida", description: "Vende repuestos directos, aplica descuentos, gestiona propinas y emite comprobantes fiscales (NCF) válidos.", showButtons: ['next'] } }
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/caja");
+            router.push(`${basePath}/caja`);
           }
         });
       }
@@ -109,13 +94,28 @@ export function TourController() {
           ...commonConfig,
           showProgress: false,
           showButtons: ['next'],
-          doneBtnText: "Ver Recordatorios 🔔",
+          doneBtnText: "Ir a Conversaciones 💬",
           steps: [
-            { element: "main", popover: { title: "💰 Control y Cierre de Caja", description: "Asegúrate de que cada centavo cuadre. Controla los ingresos en efectivo, tarjeta, transferencias y previene pérdidas con el historial de movimientos." } },
+            { element: "main", popover: { title: "💰 Control de Caja", description: "Asegúrate de que cada centavo cuadre. Controla los ingresos en efectivo, tarjeta, transferencias y previene pérdidas." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/reminders");
+            router.push(`${basePath}/conversaciones`);
+          }
+        });
+      }
+      else if (pathname.endsWith("/conversaciones")) {
+        driverObj = driver({
+          ...commonConfig,
+          showProgress: false,
+          showButtons: ['next'],
+          doneBtnText: "Ir a Recordatorios 🔔",
+          steps: [
+            { element: "main", popover: { title: "💬 Conversaciones (WhatsApp)", description: "Chatea en tiempo real con tus clientes, envíales fotos de los repuestos dañados y obtén su aprobación sin salir de la plataforma." } },
+          ],
+          onDestroyStarted: () => {
+            driverObj.destroy();
+            router.push(`${basePath}/reminders`);
           }
         });
       }
@@ -124,13 +124,73 @@ export function TourController() {
           ...commonConfig,
           showProgress: false,
           showButtons: ['next'],
-          doneBtnText: "Ver Reportes 📈",
+          doneBtnText: "Ir a Clientes 👥",
           steps: [
-            { element: "main", popover: { title: "🔔 Notificaciones Automáticas", description: "El sistema automatiza el seguimiento. Envía recordatorios por WhatsApp para que tus clientes no olviden su próximo cambio de aceite." } },
+            { element: "main", popover: { title: "🔔 Notificaciones y Recordatorios", description: "El sistema automatiza el seguimiento. Configura avisos automáticos para que tus clientes regresen a su próximo mantenimiento." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/reports");
+            router.push(`${basePath}/customers`);
+          }
+        });
+      }
+      else if (pathname.endsWith("/customers")) {
+        driverObj = driver({
+          ...commonConfig,
+          showProgress: false,
+          showButtons: ['next'],
+          doneBtnText: "Ir a Inventario 📦",
+          steps: [
+            { element: "main", popover: { title: "👥 Clientes y Vehículos", description: "Mantén una base de datos centralizada de todo el historial de reparaciones y flota de vehículos de tus clientes." } },
+          ],
+          onDestroyStarted: () => {
+            driverObj.destroy();
+            router.push(`${basePath}/inventory`);
+          }
+        });
+      }
+      else if (pathname.endsWith("/inventory")) {
+        driverObj = driver({
+          ...commonConfig,
+          showProgress: false,
+          showButtons: ['next'],
+          doneBtnText: "Ir a Servicios 🔧",
+          steps: [
+            { element: "main", popover: { title: "📦 Control de Inventario", description: "Gestiona tus repuestos. El sistema te alertará automáticamente cuando un producto esté por agotarse y puedes importar usando IA." } },
+          ],
+          onDestroyStarted: () => {
+            driverObj.destroy();
+            router.push(`${basePath}/services`);
+          }
+        });
+      }
+      else if (pathname.endsWith("/services")) {
+        driverObj = driver({
+          ...commonConfig,
+          showProgress: false,
+          showButtons: ['next'],
+          doneBtnText: "Ir a Proveedores 🚚",
+          steps: [
+            { element: "main", popover: { title: "🔧 Catálogo de Servicios", description: "Estandariza los precios de tu mano de obra (Alineación, Cambio de Aceite, etc) para facturar más rápido." } },
+          ],
+          onDestroyStarted: () => {
+            driverObj.destroy();
+            router.push(`${basePath}/proveedores`);
+          }
+        });
+      }
+      else if (pathname.endsWith("/proveedores")) {
+        driverObj = driver({
+          ...commonConfig,
+          showProgress: false,
+          showButtons: ['next'],
+          doneBtnText: "Ir a Reportes 📈",
+          steps: [
+            { element: "main", popover: { title: "🚚 Gestión de Proveedores", description: "Crea órdenes de compra, escanea facturas con Inteligencia Artificial y compara precios entre suplidores." } },
+          ],
+          onDestroyStarted: () => {
+            driverObj.destroy();
+            router.push(`${basePath}/reports`);
           }
         });
       }
@@ -139,13 +199,13 @@ export function TourController() {
           ...commonConfig,
           showProgress: false,
           showButtons: ['next'],
-          doneBtnText: "Ver Mantenimiento 🛠️",
+          doneBtnText: "Ir a Mantenimiento ⚙️",
           steps: [
-            { element: "main", popover: { title: "📈 Reportes Inteligentes", description: "Toma decisiones basadas en datos. Descubre qué servicios te generan más dinero y mide la productividad real de tus mecánicos." } },
+            { element: "main", popover: { title: "📈 Reportes Inteligentes", description: "Toma decisiones basadas en datos. Descubre qué servicios te generan más dinero y la rentabilidad de tu taller." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/maintenance");
+            router.push(`${basePath}/maintenance`);
           }
         });
       }
@@ -154,13 +214,13 @@ export function TourController() {
           ...commonConfig,
           showProgress: false,
           showButtons: ['next'],
-          doneBtnText: "Ver Configuración ⚙️",
+          doneBtnText: "Ir a Configuración ⚙️",
           steps: [
-            { element: "main", popover: { title: "🛠️ Mantenimiento Preventivo", description: "Añade valor avisándole a tus clientes cuándo reemplazar piezas según su kilometraje. Aumenta tus ventas y mejora su seguridad vial." } },
+            { element: "main", popover: { title: "⚙️ Mantenimiento Preventivo", description: "Genera proyecciones y citas de mantenimiento predictivo basados en el kilometraje de los vehículos." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();
-            router.push("/autocheck/settings");
+            router.push(`${basePath}/settings`);
           }
         });
       }
@@ -171,7 +231,7 @@ export function TourController() {
           showButtons: ['next'],
           doneBtnText: "Finalizar Tour 🎉",
           steps: [
-            { element: "main", popover: { title: "⚙️ Configuración de Negocio", description: "Adapta la plataforma a tu medida. Configura tu logo, la serie de comprobantes fiscales, las plantillas de WhatsApp y los usuarios de tu equipo." } },
+            { element: "main", popover: { title: "⚙️ Configuración del Sistema", description: "Personaliza tu logo, ajusta el NCF, configura roles de equipo y plantillas de mensajes de WhatsApp." } },
           ],
           onDestroyStarted: () => {
             driverObj.destroy();

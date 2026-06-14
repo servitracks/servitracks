@@ -161,21 +161,23 @@ export default function ProveedoresPage() {
       </div>
 
       {/* Executive Dashboard */}
-      <div className={cn("grid gap-4", isWarehouse ? "md:grid-cols-2" : "md:grid-cols-5")}>
+      <div className={cn("grid gap-4", isWarehouse ? "grid-cols-2 md:grid-cols-2" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-5")}>
         {kpis.map((kpi) => (
           <Card 
             key={kpi.label} 
-            className="border-neutral-100 shadow-sm cursor-pointer hover:border-neutral-300 hover:shadow-md active:scale-[0.98] transition-all duration-200"
+            className="border-neutral-200/60 shadow-[0_1px_3px_rgba(0,0,0,0.02)] cursor-pointer hover:border-neutral-300 hover:shadow-md active:scale-[0.98] transition-all duration-200 bg-white"
             onClick={() => setActiveTab(kpi.tab)}
           >
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
-                <kpi.icon className={cn("h-5 w-5", kpi.color)} />
+            <CardContent className="p-4 flex flex-col justify-between h-full min-h-[100px]">
+              <div className="flex items-start justify-between mb-2 gap-2">
+                <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-tight leading-snug">{kpi.label}</p>
+                <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0", kpi.bg)}>
+                  <kpi.icon className={cn("h-4 w-4", kpi.color)} />
+                </div>
               </div>
               <div>
-                <p className="text-[10px] font-medium text-neutral-500 uppercase tracking-wider">{kpi.label}</p>
-                <p className="text-lg font-black text-neutral-900 leading-tight">{kpi.value}</p>
-                {kpi.sub && <p className="text-[10px] text-neutral-400">{kpi.sub}</p>}
+                <p className="text-[17px] font-black text-neutral-900 leading-none tracking-tight break-words">{kpi.value}</p>
+                {kpi.sub && <p className="text-[10px] font-medium text-neutral-400 mt-1.5 leading-tight">{kpi.sub}</p>}
               </div>
             </CardContent>
           </Card>
