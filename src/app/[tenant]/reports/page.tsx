@@ -5,7 +5,7 @@ import { useStore, Invoice } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
 import {
   BarChart3, TrendingUp, DollarSign, ShoppingCart, Download,
-  ArrowUpRight, ArrowDownRight,
+  ArrowUpRight, ArrowDownRight, Wallet, Percent, FileText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -116,12 +116,12 @@ export default function ReportsPage() {
   };
 
   const kpis = [
-    { label: "Ingresos Totales", value: `RD$ ${totalRevenue.toLocaleString("es-DO")}`, change: "+18.2%", trend: "up" as const, icon: DollarSign },
-    { label: "Egresos Totales", value: `RD$ ${totalEgresos.toLocaleString("es-DO")}`, change: "-5.3%", trend: "down" as const, icon: ArrowDownRight },
-    { label: "Rentabilidad Neta", value: `RD$ ${netProfit.toLocaleString("es-DO")}`, change: "+12.4%", trend: netProfit >= 0 ? "up" : "down" as const, icon: TrendingUp },
-    { label: "Ticket Promedio", value: `RD$ ${avgTicket.toLocaleString("es-DO")}`, change: `+RD$ ${(320).toLocaleString("es-DO")}`, trend: "up" as const, icon: TrendingUp },
-    { label: "Total Facturas", value: invoices.length, change: "+5 este mes", trend: "up" as const, icon: ShoppingCart },
-    { label: "Conversión OT→Factura", value: `${conversionRate}%`, change: "+3.1%", trend: "up" as const, icon: BarChart3 },
+    { label: "Ingresos Totales", value: `RD$ ${totalRevenue.toLocaleString("es-DO")}`, change: "+18.2%", trend: "up" as const, icon: DollarSign, iconColor: "text-emerald-600", iconBg: "bg-emerald-50" },
+    { label: "Egresos Totales", value: `RD$ ${totalEgresos.toLocaleString("es-DO")}`, change: "-5.3%", trend: "down" as const, icon: Wallet, iconColor: "text-rose-600", iconBg: "bg-rose-50" },
+    { label: "Rentabilidad Neta", value: `RD$ ${netProfit.toLocaleString("es-DO")}`, change: "+12.4%", trend: netProfit >= 0 ? "up" : "down" as const, icon: TrendingUp, iconColor: "text-blue-600", iconBg: "bg-blue-50" },
+    { label: "Ticket Promedio", value: `RD$ ${avgTicket.toLocaleString("es-DO")}`, change: "+5.1%", trend: "up" as const, icon: FileText, iconColor: "text-amber-600", iconBg: "bg-amber-50" },
+    { label: "Total Facturas", value: invoices.length, change: "+5 este mes", trend: "up" as const, icon: ShoppingCart, iconColor: "text-indigo-600", iconBg: "bg-indigo-50" },
+    { label: "Conversión OT→Factura", value: `${conversionRate}%`, change: "+3.1%", trend: "up" as const, icon: Percent, iconColor: "text-purple-600", iconBg: "bg-purple-50" },
   ];
 
   return (
@@ -149,24 +149,30 @@ export default function ReportsPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {kpis.map((kpi) => (
-          <Card key={kpi.label} className="border-neutral-100 shadow-sm hover:shadow-md transition-all">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-neutral-400">{kpi.label}</CardTitle>
-              <div className="h-8 w-8 rounded-lg bg-neutral-50 flex items-center justify-center">
-                <kpi.icon className="h-4 w-4 text-neutral-600" />
+          <Card key={kpi.label} className="border-neutral-200/60 shadow-sm hover:shadow-md transition-all group overflow-hidden relative">
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none transform translate-x-1/4 -translate-y-1/4 group-hover:scale-110 group-hover:opacity-10 transition-all duration-500">
+              <kpi.icon className="h-24 w-24" />
+            </div>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 z-10 relative">
+              <CardTitle className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">{kpi.label}</CardTitle>
+              <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105", kpi.iconBg)}>
+                <kpi.icon className={cn("h-5 w-5", kpi.iconColor)} />
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-black text-neutral-900">{kpi.value}</div>
-              <div className="mt-1.5 flex items-center gap-1">
-                {kpi.trend === "up"
-                  ? <ArrowUpRight className="h-3 w-3 text-emerald-500" />
-                  : <ArrowDownRight className="h-3 w-3 text-rose-500" />}
-                <span className={cn("text-xs font-semibold", kpi.trend === "up" ? "text-emerald-600" : "text-rose-600")}>
+            <CardContent className="z-10 relative">
+              <div className="text-3xl font-black tracking-tight text-neutral-900 mb-2">{kpi.value}</div>
+              <div className="flex items-center gap-1.5">
+                <div className={cn("flex items-center justify-center rounded-full p-0.5", kpi.trend === "up" ? "bg-emerald-100" : "bg-rose-100")}>
+                  {kpi.trend === "up"
+                    ? <ArrowUpRight className="h-3 w-3 text-emerald-600" />
+                    : <ArrowDownRight className="h-3 w-3 text-rose-600" />}
+                </div>
+                <span className={cn("text-xs font-bold", kpi.trend === "up" ? "text-emerald-700" : "text-rose-700")}>
                   {kpi.change}
                 </span>
+                <span className="text-xs font-medium text-neutral-400 ml-1">vs periodo anterior</span>
               </div>
             </CardContent>
           </Card>

@@ -9,6 +9,8 @@ import { useStore } from "@/store/useStore";
 export function CTASection({ city }: { city?: string | null }) {
   const router = useRouter();
   const setDemoActive = useStore((s) => s.setDemoActive);
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const currentTenant = useStore((s) => s.currentTenant);
 
   return (
     <section className="py-24 sm:py-32 bg-white">
@@ -57,7 +59,11 @@ export function CTASection({ city }: { city?: string | null }) {
                 className="w-full sm:w-auto rounded-full px-10 h-14 text-base font-medium text-neutral-400 hover:text-white hover:bg-white/10 border border-white/10"
                 onClick={() => {
                   setDemoActive(true);
-                  router.push("/autocheck");
+                  if (isAuthenticated && currentTenant?.slug) {
+                    router.push(`/${currentTenant.slug}`);
+                  } else {
+                    router.push("/autocheck");
+                  }
                 }}
               >
                 Ver demostración

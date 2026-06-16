@@ -23,6 +23,8 @@ const floatingStats = [
 export function Hero({ city }: { city?: string | null }) {
   const router = useRouter();
   const setDemoActive = useStore((s) => s.setDemoActive);
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const currentTenant = useStore((s) => s.currentTenant);
 
   return (
     <section className="relative overflow-hidden bg-white pt-24 pb-0">
@@ -96,7 +98,11 @@ export function Hero({ city }: { city?: string | null }) {
               className="w-full sm:w-auto rounded-full px-8 h-14 text-base font-medium border-neutral-200 hover:border-neutral-400 gap-2"
               onClick={() => {
                 setDemoActive(true);
-                router.push("/autocheck");
+                if (isAuthenticated && currentTenant?.slug) {
+                  router.push(`/${currentTenant.slug}`);
+                } else {
+                  router.push("/autocheck");
+                }
               }}
             >
               <div className="h-6 w-6 rounded-full bg-neutral-900 flex items-center justify-center">
