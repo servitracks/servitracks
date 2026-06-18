@@ -77,13 +77,13 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   useEffect(() => {
     if (currentUserId && currentUserId !== 'admin' && !currentUser) {
       async function fetchMissingUser() {
-        const { data, error } = await supabaseAdmin
+        const { data: rows, error } = await supabaseAdmin
           .from("tenant_users")
           .select("*")
           .eq("user_id", currentUserId)
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
         
+        const data = rows?.[0];
         if (data && !error) {
           useStore.getState().addUser({
             id: currentUserId!, // Use auth user_id as the store ID

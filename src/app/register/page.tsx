@@ -286,12 +286,12 @@ export default function RegisterPage() {
     setSlugAvailable(null);
     const timer = setTimeout(async () => {
       try {
-        const { data, error } = await supabase
+        const { data: rows, error } = await supabaseAdmin
           .from("tenants")
           .select("id")
           .eq("slug", form.slug)
-          .maybeSingle();
-        setSlugAvailable(!error && data === null);
+          .limit(1);
+        setSlugAvailable(!error && (!rows || rows.length === 0));
       } catch {
         setSlugAvailable(true); // optimistic on network error
       } finally {
