@@ -1,8 +1,11 @@
 /**
  * WaSender API helper.
- * Usa el proxy Vite /api/whatsapp (reescribe a wasenderapi.com/api/send-message)
- * con el header Authorization: Bearer correcto.
+ * En desarrollo usa el proxy Vite /api/whatsapp (reescribe a wasenderapi.com/api/send-message).
+ * En producción llama directamente a la API de WaSender.
  */
+
+const WASENDER_API_URL = "https://wasenderapi.com/api/send-message";
+const isDev = import.meta.env.DEV;
 
 export interface WaSenderResult {
   ok: boolean;
@@ -20,8 +23,11 @@ export async function waSendText(apiKey: string, to: string, text: string): Prom
   // WaSender no acepta el + en el número
   const phone = to.replace(/^\+/, "");
 
+  // En dev usamos el proxy Vite para evitar CORS; en producción llamamos directo
+  const url = isDev ? "/api/whatsapp" : WASENDER_API_URL;
+
   try {
-    const res = await fetch("/api/whatsapp", {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

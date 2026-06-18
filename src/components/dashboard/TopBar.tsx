@@ -82,7 +82,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
           .select("*")
           .eq("user_id", currentUserId)
           .limit(1)
-          .single();
+          .maybeSingle();
         
         if (data && !error) {
           useStore.getState().addUser({
