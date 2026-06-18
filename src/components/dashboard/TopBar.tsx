@@ -55,9 +55,22 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   const pendingMessagesCount = whatsappLogs.filter((l: any) => l.status === 'failed' || l.status === 'pending').length;
 
   // Current user (dynamic)
-  const currentUser = currentUserId === 'admin'
-    ? { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const }
-    : users.find((u) => u.id === currentUserId);
+  const currentUser = (() => {
+    if (currentUserId === 'admin') {
+      return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+    }
+    
+    if (typeof window !== 'undefined') {
+      try {
+        const sessionStr = localStorage.getItem("servitracks-session");
+        if (sessionStr && JSON.parse(sessionStr).role === 'superadmin') {
+          return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+        }
+      } catch (e) {}
+    }
+
+    return users.find((u) => u.id === currentUserId);
+  })();
 
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';

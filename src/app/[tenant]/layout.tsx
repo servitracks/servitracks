@@ -59,10 +59,21 @@ export default function DashboardLayout() {
   }, [location.pathname]);
 
   const currentUser = useMemo(() => {
-    if (!currentUserId) return null;
     if (currentUserId === 'admin') {
       return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
     }
+    
+    // Recovery for superadmin session
+    if (typeof window !== 'undefined') {
+      try {
+        const sessionStr = localStorage.getItem("servitracks-session");
+        if (sessionStr && JSON.parse(sessionStr).role === 'superadmin') {
+          return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+        }
+      } catch (e) {}
+    }
+
+    if (!currentUserId) return null;
     return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === currentTenant?.id) || null;
   }, [users, currentUserId, currentTenant?.id]);
 
@@ -243,6 +254,41 @@ export default function DashboardLayout() {
     return () => { 
       supabase.removeChannel(ch); 
       window.removeEventListener("wa_force_unread_update", fetchUnreadCount);
+    };
+  }, [currentTenant?.id]);
+
+  // ─── ESPÍA DE SINCRONIZACIÓN EN SEGUNDO PLANO (BACKGROUND SYNC) ──────────────
+  useEffect(() => {
+    if (!currentTenant?.id) return;
+    
+    let timeoutId: NodeJS.Timeout;
+    
+    const unsubscribe = useStore.subscribe((state, prevState) => {
+      if (
+        state.orders !== prevState.orders ||
+        state.invoices !== prevState.invoices ||
+        state.quotes !== prevState.quotes ||
+        state.products !== prevState.products ||
+        state.services !== prevState.services ||
+        state.customers !== prevState.customers ||
+        state.vehicles !== prevState.vehicles ||
+        state.maintenanceItems !== prevState.maintenanceItems
+      ) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          console.log("[Background Sync] Espía detectó cambios. Sincronizando silenciosamente a Supabase...");
+          import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
+            syncStoreToSupabase(currentTenant.id, state).catch(err => {
+              console.error("[Background Sync Error]:", err);
+            });
+          });
+        }, 5000);
+      }
+    });
+
+    return () => {
+      clearTimeout(timeoutId);
+      unsubscribe();
     };
   }, [currentTenant?.id]);
 

@@ -50,7 +50,7 @@ export default function LoginPage() {
         }
 
         const userId = authData?.user?.id || 'superadmin';
-        setCurrentUserId(userId);
+        setCurrentUserId('admin');
         setAuthenticated(true);
 
         const adminSession = {
