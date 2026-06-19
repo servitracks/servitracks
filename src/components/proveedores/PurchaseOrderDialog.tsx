@@ -241,6 +241,11 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                         <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs"
                           placeholder="RD$"
                           value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        {item.unitPrice > 0 && (
+                          <p className="text-[9px] text-neutral-500 font-bold text-center mt-0.5">
+                            c/ITBIS: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
+                          </p>
+                        )}
                       </div>
                       {/* Venta Unit. — solo owner */}
                       {isOwner && (
@@ -248,6 +253,11 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                           <Input type="number" className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
                             placeholder="RD$"
                             value={item.salePrice === 0 ? "" : item.salePrice} onChange={(e) => updateItem(i, { salePrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                          {item.salePrice > 0 && (
+                            <p className="text-[9px] text-emerald-600 font-bold text-center mt-0.5">
+                              c/ITBIS: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
+                            </p>
+                          )}
                         </div>
                       )}
                       {/* Margen — solo owner */}

@@ -250,6 +250,11 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
           value={form.salePrice} 
           onChange={(e) => setForm((prev) => ({ ...prev, salePrice: e.target.value }))} 
         />
+        {Number(form.salePrice) > 0 && (
+          <p className="text-[11px] text-neutral-500 font-medium">
+            Total al Facturar (con {form.tax || 18}% ITBIS): <span className="font-bold text-emerald-600">RD$ {(Number(form.salePrice) * (1 + (Number(form.tax) || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </p>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label>Comisión Técnico (%)</Label>
