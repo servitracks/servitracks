@@ -104,6 +104,7 @@ export default function POSPage() {
   const [payMethod, setPayMethod]     = useState<PayMethod>("cash");
   const [cashReceived, setCashReceived] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(true);
+  const [showMobileCart, setShowMobileCart] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any | null>(null);
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
   const [isLinkOrderOpen, setIsLinkOrderOpen] = useState(false);
@@ -449,6 +450,7 @@ export default function POSPage() {
     setPosMechanicId("");
     setPosCustomerSearch("");
     setCategory("Todos");
+    setShowMobileCart(false);
     searchRef.current?.focus();
   };
 
@@ -661,20 +663,41 @@ export default function POSPage() {
               </div>
             )}
           </div>
+
+          {/* Mobile Cart Toggle Bar */}
+          <div className="lg:hidden bg-white border-t border-neutral-200 p-3 shrink-0 z-50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.1)]">
+            <Button onClick={() => setShowMobileCart(true)} className="w-full h-12 bg-black text-white font-bold rounded-xl flex items-center justify-between px-4 hover:bg-neutral-800">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5" />
+                <span>Ver Carrito</span>
+                <Badge className="bg-neutral-800 text-white ml-1 border-none font-bold hover:bg-neutral-800">{cart.length}</Badge>
+              </div>
+              <span>RD$ {total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </Button>
+          </div>
         </div>
 
         {/* ── Right: Cart ── */}
-        <div id="tour-pos-payment" className="flex w-[340px] shrink-0 flex-col bg-white border-l border-neutral-200">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100">
+        <div id="tour-pos-payment" className={cn(
+          "flex w-full lg:w-[340px] shrink-0 flex-col bg-white lg:border-l border-neutral-200",
+          "fixed lg:relative inset-0 lg:inset-auto z-[200] lg:z-auto transition-transform duration-300",
+          showMobileCart ? "translate-y-0" : "translate-y-full lg:translate-y-0"
+        )}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 shrink-0">
             <div className="flex items-center gap-2">
               <ShoppingCart className="h-5 w-5" />
               <span className="font-bold text-lg">Venta</span>
             </div>
-            {cart.length > 0 && (
-              <button onClick={() => setCart([])} className="text-xs text-neutral-400 hover:text-rose-500 transition-colors">
-                Vaciar
+            <div className="flex items-center gap-4">
+              {cart.length > 0 && (
+                <button onClick={() => setCart([])} className="text-xs text-neutral-400 hover:text-rose-500 transition-colors">
+                  Vaciar
+                </button>
+              )}
+              <button className="lg:hidden p-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-full transition-colors" onClick={() => setShowMobileCart(false)}>
+                <X className="h-5 w-5" />
               </button>
-            )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {cart.length === 0 ? (
