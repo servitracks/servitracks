@@ -789,7 +789,10 @@ export default function InventoryPage() {
                           {product.category}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-semibold text-sm">RD$ {product.salePrice.toLocaleString("es-DO")}</TableCell>
+                      <TableCell className="font-semibold text-sm">
+                        RD$ {(product.salePrice * (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span className="block text-[10px] font-normal text-neutral-400 mt-0.5">Base: RD$ {product.salePrice.toLocaleString("es-DO")}</span>
+                      </TableCell>
                       <TableCell>
                         <div>
                           <span className={cn("font-bold text-sm", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
