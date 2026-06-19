@@ -252,7 +252,7 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
         />
         {Number(form.salePrice) > 0 && (
           <p className="text-[11px] text-neutral-500 font-medium">
-            Total al Facturar (con {form.tax || 18}% ITBIS): <span className="font-bold text-emerald-600">RD$ {(Number(form.salePrice) * (1 + (Number(form.tax) || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            Subtotal (sin ITBIS): <span className="font-bold text-emerald-600">RD$ {(Number(form.salePrice) / (1 + (Number(form.tax) || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </p>
         )}
       </div>
@@ -790,8 +790,8 @@ export default function InventoryPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-semibold text-sm">
-                        RD$ {(product.salePrice * (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        <span className="block text-[10px] font-normal text-neutral-400 mt-0.5">Base: RD$ {product.salePrice.toLocaleString("es-DO")}</span>
+                        RD$ {product.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span className="block text-[10px] font-normal text-neutral-400 mt-0.5">Base: RD$ {(product.salePrice / (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </TableCell>
                       <TableCell>
                         <div>

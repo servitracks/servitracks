@@ -210,7 +210,7 @@ export default function QuotationCreateDialog({
         id: `qi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         name: item.name,
         quantity: 1,
-        unitPrice: isProduct ? (item as Product).salePrice : (item as Service).price,
+        unitPrice: isProduct ? ((item as Product).salePrice / (1 + taxRate / 100)) : (item as Service).price,
         taxPercentage: taxRate,
         discountPercentage: 0,
         total: 0,
@@ -499,7 +499,7 @@ export default function QuotationCreateDialog({
                               <Package className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
                               {p.name} <span className="text-[10px] font-mono text-neutral-400">({p.sku})</span>
                             </span>
-                            <span className="font-bold text-neutral-900">RD$ {(p.salePrice * (1 + (p.tax ?? 18) / 100)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            <span className="font-bold text-neutral-900">RD$ {p.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                           </button>
                         ))}
                       </>

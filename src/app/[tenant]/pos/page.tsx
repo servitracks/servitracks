@@ -148,9 +148,9 @@ export default function POSPage() {
     return matchCat && matchSearch;
   });
 
-  const subtotal = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
-  const itbis    = cart.reduce((acc, i) => acc + (i.salePrice * ((i.tax ?? 18) / 100)) * i.quantity, 0);
-  const total    = subtotal + itbis;
+  const total    = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
+  const subtotal = cart.reduce((acc, i) => acc + (i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity, 0);
+  const itbis    = total - subtotal;
   const cashNum  = parseFloat(cashReceived.replace(/,/g, "")) || 0;
   const change   = Math.max(0, cashNum - total);
 
@@ -367,8 +367,8 @@ export default function POSPage() {
         productId: i.id, 
         name: i.name, 
         quantity: i.quantity, 
-        unitPrice: i.salePrice, 
-        tax: Math.round(i.salePrice * i.quantity * 0.18),
+        unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
+        tax: (i.salePrice * i.quantity) - ((i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity),
         laborPrice: i.laborPrice,
       })),
       subtotal, tax: itbis, total,
@@ -624,7 +624,7 @@ export default function POSPage() {
                         <div className="flex items-baseline gap-1">
                           <span className="text-[10px] font-bold text-neutral-400">RD$</span>
                           <span className="text-lg font-black text-neutral-900">
-                            {(product.salePrice * (1 + (product.tax ?? 18) / 100)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {product.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
                         <div className="flex items-center">
@@ -689,7 +689,7 @@ export default function POSPage() {
                   <div key={item.id} className="flex items-center gap-3 px-5 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
-                      <p className="text-xs text-neutral-400">RD$ {(item.salePrice * (1 + (item.tax ?? 18) / 100)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u (Inc. ITBIS)</p>
+                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u (Inc. ITBIS)</p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name === "Mano de obra" ? null : (
@@ -707,7 +707,7 @@ export default function POSPage() {
                       )}
                     </div>
                     <div className="text-right min-w-[60px]">
-                      <p className="text-sm font-black">RD$ {(item.salePrice * (1 + (item.tax ?? 18) / 100) * item.quantity).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      <p className="text-sm font-black">RD$ {(item.salePrice * item.quantity).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                     <button onClick={() => removeItem(item.id)}
                       className="text-neutral-300 hover:text-rose-500 transition-colors ml-1">
