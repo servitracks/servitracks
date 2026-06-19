@@ -27,6 +27,7 @@ export default function DashboardLayout() {
   const [showSoporteModal, setShowSoporteModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadChatsCount, setUnreadChatsCount] = useState(0);
+  const [initialSyncDone, setInitialSyncDone] = useState(false);
 
   const tenantSlug =
     params.tenant && params.tenant !== "undefined"
@@ -256,6 +257,83 @@ export default function DashboardLayout() {
       window.removeEventListener("wa_force_unread_update", fetchUnreadCount);
     };
   }, [currentTenant?.id]);
+
+  // ─── DESCARGA INICIAL DESDE SUPABASE ──────────────────────────────────────
+  useEffect(() => {
+    if (!currentTenant?.id || initialSyncDone) return;
+    
+    async function loadData() {
+      try {
+        const { downloadFullStateFromSupabase, syncStoreToSupabase } = await import("@/lib/supabaseSync");
+        const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
+        
+        const localState = useStore.getState();
+        
+        // Comprobar si la DB está vacía pero hay datos locales
+        const dbHasData = dbState.customers.length > 0 || dbState.vehicles.length > 0 || dbState.products.length > 0 || dbState.services.length > 0;
+        const localHasData = localState.customers.length > 0 || localState.vehicles.length > 0 || localState.products.length > 0 || localState.services.length > 0;
+        
+        if (dbHasData) {
+          console.log("[Initial Sync] Cargando datos desde Supabase a Zustand");
+          
+          // Rescate: Si la DB ya tenía clientes, dbHasData es true. 
+          // Si local tiene productos pero la DB no, hay que subirlos antes de reemplazarlos por el array vacío de la DB.
+          let needsPartialUpload = false;
+          const uploadPayload: any = {};
+          
+          if (dbState.products.length === 0 && localState.products.length > 0) {
+            uploadPayload.products = localState.products;
+            dbState.products = localState.products;
+            needsPartialUpload = true;
+          }
+          if (dbState.services.length === 0 && localState.services.length > 0) {
+            uploadPayload.services = localState.services;
+            dbState.services = localState.services;
+            needsPartialUpload = true;
+          }
+          if (dbState.orders.length === 0 && localState.orders.length > 0) {
+            uploadPayload.orders = localState.orders;
+            dbState.orders = localState.orders;
+            needsPartialUpload = true;
+          }
+          
+          if (needsPartialUpload) {
+             console.log("[Initial Sync] Subiendo datos locales que no estaban en DB...", uploadPayload);
+             await syncStoreToSupabase(currentTenant!.id, uploadPayload);
+          }
+
+          useStore.setState({
+            customers: dbState.customers,
+            vehicles: dbState.vehicles,
+            maintenanceItems: dbState.maintenanceItems,
+            services: dbState.services,
+            products: dbState.products,
+            orders: dbState.orders,
+            quotes: dbState.quotes,
+            invoices: dbState.invoices
+          });
+        } else if (localHasData) {
+          console.log("[Initial Sync] BD vacía. Empujando datos locales a Supabase");
+          await syncStoreToSupabase(currentTenant!.id, {
+            customers: localState.customers,
+            vehicles: localState.vehicles,
+            maintenanceItems: localState.maintenanceItems,
+            services: localState.services,
+            products: localState.products,
+            orders: localState.orders,
+            quotes: localState.quotes,
+            invoices: localState.invoices
+          });
+        }
+      } catch (err) {
+        console.error("[Initial Sync Error]:", err);
+      } finally {
+        setInitialSyncDone(true);
+      }
+    }
+    
+    loadData();
+  }, [currentTenant?.id, initialSyncDone]);
 
   // ─── ESPÍA DE SINCRONIZACIÓN EN SEGUNDO PLANO (BACKGROUND SYNC) ──────────────
   useEffect(() => {
