@@ -119,7 +119,11 @@ function MaintenanceContent() {
         } else if (storeVehicles.length > 0) {
           // DB empty but store has data — push store data up to Supabase
           console.log("[Maintenance] Syncing local store to Supabase...");
-          await syncStoreToSupabase(tid, storeCustomers, storeVehicles, storeMaintenanceItems);
+          await syncStoreToSupabase(tid, {
+            customers: storeCustomers,
+            vehicles: storeVehicles,
+            maintenanceItems: storeMaintenanceItems
+          });
           setLocalCustomers(storeCustomers);
           setLocalVehicles(storeVehicles);
           setLocalItems(storeMaintenanceItems);
