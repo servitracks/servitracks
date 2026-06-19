@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
-import { StorageSettingsTab } from "@/components/ui/StorageSettingsTab";
 import { EcfSettings } from "@/components/settings/EcfSettings";
 
 const TABS = [
@@ -25,7 +24,6 @@ const TABS = [
   { id: "print", label: "Impresión", icon: Printer },
   { id: "users", label: "Usuarios y Roles", icon: Users },
   { id: "security", label: "Seguridad", icon: Shield },
-  { id: "storage", label: "Almacenamiento", icon: HardDrive },
 ];
 
 const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
@@ -398,9 +396,6 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
-
-      {/* ── ALMACENAMIENTO LOCAL ── */}
-      {tab === "storage" && <StorageSettingsTab />}
 
       {/* ── TALLER ── */}
       {tab === "taller" && (

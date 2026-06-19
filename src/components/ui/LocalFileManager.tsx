@@ -12,7 +12,7 @@ interface LocalFileManagerProps {
   title?: string;
 }
 
-export function LocalFileManager({ entityType, entityId, title = "Documentos Locales" }: LocalFileManagerProps) {
+export function LocalFileManager({ entityType, entityId, title = "Archivos Adjuntos" }: LocalFileManagerProps) {
   const {
     isReady,
     initialize,
@@ -42,7 +42,6 @@ export function LocalFileManager({ entityType, entityId, title = "Documentos Loc
       await saveDocument(file, entityType, entityId);
     } catch (err) {
       console.error("Error al subir:", err);
-      alert("Hubo un error al guardar el archivo. Asegúrate de haber conectado la carpeta primero.");
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -64,25 +63,22 @@ export function LocalFileManager({ entityType, entityId, title = "Documentos Loc
           {title}
         </CardTitle>
         <CardDescription>
-          Archivos guardados físicamente en este dispositivo, vinculados a este registro.
+          Archivos y documentos guardados de forma segura en la nube, vinculados a este registro.
         </CardDescription>
       </CardHeader>
       
       <CardContent className="space-y-4">
         {!isReady ? (
-          <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg bg-gray-50/50">
-            <HardDrive className="h-10 w-10 text-gray-400 mb-2" />
-            <p className="text-sm text-gray-600 mb-4 text-center">
-              Para guardar o leer archivos grandes, necesitamos conectar una carpeta local en tu dispositivo.
+          <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg bg-neutral-50/50">
+            <Loader2 className="h-10 w-10 text-neutral-400 mb-2 animate-spin" />
+            <p className="text-sm text-neutral-600 mb-4 text-center">
+              Conectando con la nube...
             </p>
-            <Button onClick={handleConnect} disabled={isLoading}>
-              Conectar Carpeta Local
-            </Button>
           </div>
         ) : (
           <div className="flex items-center justify-between">
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-              Carpeta Conectada
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+              Nube Conectada
             </Badge>
             <div>
               <input
@@ -138,10 +134,10 @@ export function LocalFileManager({ entityType, entityId, title = "Documentos Loc
                         variant="ghost"
                         size="sm"
                         disabled={!isReady}
-                        onClick={() => downloadDocument(doc.filename)}
+                        onClick={() => downloadDocument(doc)}
                       >
                         <Download className="h-4 w-4 mr-1" />
-                        Descargar
+                        Ver / Descargar
                       </Button>
                     </TableCell>
                   </TableRow>
