@@ -3,7 +3,7 @@
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
 import { supabaseAdmin } from "@/lib/supabase";
-import type { Customer, Vehicle, MaintenanceItem } from "@/store/types";
+import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder } from "@/store/types";
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
