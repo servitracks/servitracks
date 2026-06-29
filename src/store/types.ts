@@ -107,6 +107,8 @@ export interface Service {
   lifespanKm?: number;
   /** Vida útil en días que otorga este servicio al vehículo */
   lifespanDays?: number;
+  /** Impuesto aplicable al servicio (%) */
+  tax?: number;
 }
 
 export interface Product {

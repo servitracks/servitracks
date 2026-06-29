@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
@@ -32,6 +33,7 @@ const emptyService: Partial<Service> = {
   laborPrice: 0,
   duration: "1h",
   description: "",
+  tax: 0,
 };
 
 const emptyTechnician: Partial<Technician> = {
@@ -231,8 +233,13 @@ export default function ServicesPage() {
                     {service.category}
                   </Badge>
                   <h3 className="font-bold text-neutral-900 leading-tight">{service.name}</h3>
-                  <div className="flex gap-2 mt-1">
+                  <div className="flex flex-wrap gap-2 mt-1 items-center">
                     <span className="text-xs font-black text-neutral-900">RD$ {service.price.toLocaleString()}</span>
+                    {service.tax === 18 && (
+                      <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
+                        +ITBIS
+                      </span>
+                    )}
                     {service.laborPrice ? (
                       <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
                         Comisión: {service.laborPrice}%
@@ -313,6 +320,18 @@ export default function ServicesPage() {
                 />
               </div>
             </div>
+            
+            <div className="flex items-center justify-between p-3 border border-neutral-100 rounded-xl bg-neutral-50/50">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-semibold">Aplica ITBIS (18%)</Label>
+                <p className="text-xs text-neutral-500">Agrega el impuesto al precio de este servicio</p>
+              </div>
+              <Switch 
+                checked={form.tax === 18} 
+                onCheckedChange={(checked) => setForm({ ...form, tax: checked ? 18 : 0 })} 
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label>Categoría</Label>
