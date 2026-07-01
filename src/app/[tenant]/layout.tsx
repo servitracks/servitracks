@@ -10,6 +10,7 @@ import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { useHydration } from "@/store/useHydration";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import React from "react";
 
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ export default function DashboardLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadChatsCount, setUnreadChatsCount] = useState(0);
   const [initialSyncDone, setInitialSyncDone] = useState(false);
+  const syncDisabledRef = React.useRef(false);
 
   const tenantSlug =
     params.tenant && params.tenant !== "undefined"
@@ -258,50 +260,22 @@ export default function DashboardLayout() {
     };
   }, [currentTenant?.id]);
 
-  // ─── DESCARGA INICIAL DESDE SUPABASE ──────────────────────────────────────
+  // ─── DESCARGA INICIAL DESDE SUPABASE Y SINCRONIZACIÓN EN SEGUNDO PLANO ──────────────────────────────────────
   useEffect(() => {
-    if (!currentTenant?.id || initialSyncDone) return;
+    if (!currentTenant?.id) return;
     
-    async function loadData() {
-      try {
-        const { downloadFullStateFromSupabase, syncStoreToSupabase } = await import("@/lib/supabaseSync");
-        const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
-        
-        const localState = useStore.getState();
-        
-        // Comprobar si la DB está vacía pero hay datos locales
-        const dbHasData = dbState.customers.length > 0 || dbState.vehicles.length > 0 || dbState.products.length > 0 || dbState.services.length > 0;
-        const localHasData = localState.customers.length > 0 || localState.vehicles.length > 0 || localState.products.length > 0 || localState.services.length > 0;
-        
-        if (dbHasData) {
-          console.log("[Initial Sync] Cargando datos desde Supabase a Zustand");
-          
-          // Rescate: Si la DB ya tenía clientes, dbHasData es true. 
-          // Si local tiene productos pero la DB no, hay que subirlos antes de reemplazarlos por el array vacío de la DB.
-          let needsPartialUpload = false;
-          const uploadPayload: any = {};
-          
-          if (dbState.products.length === 0 && localState.products.length > 0) {
-            uploadPayload.products = localState.products;
-            dbState.products = localState.products;
-            needsPartialUpload = true;
-          }
-          if (dbState.services.length === 0 && localState.services.length > 0) {
-            uploadPayload.services = localState.services;
-            dbState.services = localState.services;
-            needsPartialUpload = true;
-          }
-          if (dbState.orders.length === 0 && localState.orders.length > 0) {
-            uploadPayload.orders = localState.orders;
-            dbState.orders = localState.orders;
-            needsPartialUpload = true;
-          }
-          
-          if (needsPartialUpload) {
-             console.log("[Initial Sync] Subiendo datos locales que no estaban en DB...", uploadPayload);
-             await syncStoreToSupabase(currentTenant!.id, uploadPayload);
-          }
+    let timeoutId: NodeJS.Timeout;
 
+    // 1. Configurar escucha de Broadcast para actualizaciones de otros dispositivos
+    const syncChannel = supabase
+      .channel(`sync_tenant_${currentTenant.id}`)
+      .on("broadcast", { event: "state_updated" }, async (payload) => {
+        console.log("[Broadcast Sync] Cambios detectados en otro dispositivo. Actualizando local...");
+        try {
+          const { downloadFullStateFromSupabase } = await import("@/lib/supabaseSync");
+          const dbState = await downloadFullStateFromSupabase(currentTenant.id);
+          
+          syncDisabledRef.current = true; // Prevenir que el espía re-suba estos datos
           useStore.setState({
             customers: dbState.customers,
             vehicles: dbState.vehicles,
@@ -310,38 +284,142 @@ export default function DashboardLayout() {
             products: dbState.products,
             orders: dbState.orders,
             quotes: dbState.quotes,
-            invoices: dbState.invoices
+            invoices: dbState.invoices,
+            cajas: dbState.cajas,
+            cajaMovements: dbState.cajaMovements,
+            technicians: dbState.technicians,
+            movements: dbState.movements,
+            inspections: dbState.inspections,
+            maintenanceAlerts: dbState.maintenanceAlerts,
+            maintenanceHistory: dbState.maintenanceHistory,
+            suppliers: dbState.suppliers,
+            supplierProducts: dbState.supplierProducts,
+            purchaseOrders: dbState.purchaseOrders,
+            goodsReceipts: dbState.goodsReceipts,
+            accountsPayable: dbState.accountsPayable,
+            quoteRequests: dbState.quoteRequests
           });
-        } else if (localHasData) {
-          console.log("[Initial Sync] BD vacía. Empujando datos locales a Supabase");
-          await syncStoreToSupabase(currentTenant!.id, {
-            customers: localState.customers,
-            vehicles: localState.vehicles,
-            maintenanceItems: localState.maintenanceItems,
-            services: localState.services,
-            products: localState.products,
-            orders: localState.orders,
-            quotes: localState.quotes,
-            invoices: localState.invoices
-          });
+          
+          setTimeout(() => {
+            syncDisabledRef.current = false;
+          }, 1000);
+          
+        } catch (err) {
+          console.error("[Broadcast Sync Error]:", err);
         }
-      } catch (err) {
-        console.error("[Initial Sync Error]:", err);
-      } finally {
-        setInitialSyncDone(true);
+      })
+      .subscribe();
+
+    // 2. Descarga Inicial
+    if (!initialSyncDone) {
+      async function loadData() {
+        try {
+          const { downloadFullStateFromSupabase, syncStoreToSupabase } = await import("@/lib/supabaseSync");
+          const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
+          
+          const localState = useStore.getState();
+          const dbHasData = dbState.customers.length > 0 || dbState.vehicles.length > 0 || dbState.products.length > 0 || dbState.services.length > 0;
+          const localHasData = localState.customers.length > 0 || localState.vehicles.length > 0 || localState.products.length > 0 || localState.services.length > 0;
+          
+          if (dbHasData) {
+            console.log("[Initial Sync] Cargando datos desde Supabase a Zustand");
+            let needsPartialUpload = false;
+            const uploadPayload: any = {};
+            
+            if (dbState.products.length === 0 && localState.products.length > 0) {
+              uploadPayload.products = localState.products; dbState.products = localState.products; needsPartialUpload = true;
+            }
+            if (dbState.services.length === 0 && localState.services.length > 0) {
+              uploadPayload.services = localState.services; dbState.services = localState.services; needsPartialUpload = true;
+            }
+            if (dbState.orders.length === 0 && localState.orders.length > 0) {
+              uploadPayload.orders = localState.orders; dbState.orders = localState.orders; needsPartialUpload = true;
+            }
+            const newEntities = [
+              "cajas", "cajaMovements", "technicians", "movements", "inspections", 
+              "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
+              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests"
+            ] as const;
+            for (const key of newEntities) {
+              if (dbState[key].length === 0 && localState[key] && localState[key].length > 0) {
+                uploadPayload[key] = localState[key];
+                (dbState as any)[key] = localState[key];
+                needsPartialUpload = true;
+              }
+            }
+            
+            if (needsPartialUpload) {
+               console.log("[Initial Sync] Subiendo datos locales que no estaban en DB...", uploadPayload);
+               await syncStoreToSupabase(currentTenant!.id, uploadPayload);
+            }
+
+            syncDisabledRef.current = true;
+            useStore.setState({
+              customers: dbState.customers,
+              vehicles: dbState.vehicles,
+              maintenanceItems: dbState.maintenanceItems,
+              services: dbState.services,
+              products: dbState.products,
+              orders: dbState.orders,
+              quotes: dbState.quotes,
+              invoices: dbState.invoices,
+              cajas: dbState.cajas,
+              cajaMovements: dbState.cajaMovements,
+              technicians: dbState.technicians,
+              movements: dbState.movements,
+              inspections: dbState.inspections,
+              maintenanceAlerts: dbState.maintenanceAlerts,
+              maintenanceHistory: dbState.maintenanceHistory,
+              suppliers: dbState.suppliers,
+              supplierProducts: dbState.supplierProducts,
+              purchaseOrders: dbState.purchaseOrders,
+              goodsReceipts: dbState.goodsReceipts,
+              accountsPayable: dbState.accountsPayable,
+              quoteRequests: dbState.quoteRequests
+            });
+            setTimeout(() => {
+              syncDisabledRef.current = false;
+            }, 1000);
+
+          } else if (localHasData) {
+            console.log("[Initial Sync] BD vacía. Empujando datos locales a Supabase");
+            await syncStoreToSupabase(currentTenant!.id, {
+              customers: localState.customers,
+              vehicles: localState.vehicles,
+              maintenanceItems: localState.maintenanceItems,
+              services: localState.services,
+              products: localState.products,
+              orders: localState.orders,
+              quotes: localState.quotes,
+              invoices: localState.invoices,
+              cajas: localState.cajas,
+              cajaMovements: localState.cajaMovements,
+              technicians: localState.technicians,
+              movements: localState.movements,
+              inspections: localState.inspections,
+              maintenanceAlerts: localState.maintenanceAlerts,
+              maintenanceHistory: localState.maintenanceHistory,
+              suppliers: localState.suppliers,
+              supplierProducts: localState.supplierProducts,
+              purchaseOrders: localState.purchaseOrders,
+              goodsReceipts: localState.goodsReceipts,
+              accountsPayable: localState.accountsPayable,
+              quoteRequests: localState.quoteRequests
+            });
+          }
+        } catch (err) {
+          console.error("[Initial Sync Error]:", err);
+        } finally {
+          setInitialSyncDone(true);
+        }
       }
+      loadData();
     }
     
-    loadData();
-  }, [currentTenant?.id, initialSyncDone]);
-
-  // ─── ESPÍA DE SINCRONIZACIÓN EN SEGUNDO PLANO (BACKGROUND SYNC) ──────────────
-  useEffect(() => {
-    if (!currentTenant?.id) return;
-    
-    let timeoutId: NodeJS.Timeout;
-    
+    // 3. Espía de Cambios Locales
     const unsubscribe = useStore.subscribe((state, prevState) => {
+      if (syncDisabledRef.current) return; // Ignorar cambios provocados por descargas remotas
+      
       if (
         state.orders !== prevState.orders ||
         state.invoices !== prevState.invoices ||
@@ -350,13 +428,33 @@ export default function DashboardLayout() {
         state.services !== prevState.services ||
         state.customers !== prevState.customers ||
         state.vehicles !== prevState.vehicles ||
-        state.maintenanceItems !== prevState.maintenanceItems
+        state.maintenanceItems !== prevState.maintenanceItems ||
+        state.cajas !== prevState.cajas ||
+        state.cajaMovements !== prevState.cajaMovements ||
+        state.technicians !== prevState.technicians ||
+        state.movements !== prevState.movements ||
+        state.inspections !== prevState.inspections ||
+        state.maintenanceAlerts !== prevState.maintenanceAlerts ||
+        state.maintenanceHistory !== prevState.maintenanceHistory ||
+        state.suppliers !== prevState.suppliers ||
+        state.supplierProducts !== prevState.supplierProducts ||
+        state.purchaseOrders !== prevState.purchaseOrders ||
+        state.goodsReceipts !== prevState.goodsReceipts ||
+        state.accountsPayable !== prevState.accountsPayable ||
+        state.quoteRequests !== prevState.quoteRequests
       ) {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
-          console.log("[Background Sync] Espía detectó cambios. Sincronizando silenciosamente a Supabase...");
+          console.log("[Background Sync] Espía detectó cambios locales. Sincronizando a Supabase...");
           import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
-            syncStoreToSupabase(currentTenant.id, state).catch(err => {
+            syncStoreToSupabase(currentTenant.id, state).then(() => {
+              // Notificar a otros dispositivos
+              syncChannel.send({
+                type: "broadcast",
+                event: "state_updated",
+                payload: { ts: Date.now() }
+              });
+            }).catch(err => {
               console.error("[Background Sync Error]:", err);
             });
           });
@@ -367,8 +465,9 @@ export default function DashboardLayout() {
     return () => {
       clearTimeout(timeoutId);
       unsubscribe();
+      supabase.removeChannel(syncChannel);
     };
-  }, [currentTenant?.id]);
+  }, [currentTenant?.id, initialSyncDone]);
 
   if (!currentTenant) {
     return (
