@@ -141,6 +141,7 @@ export interface Product {
   vehicleMake?: string;
   vehicleModel?: string;
   vehicleYear?: string;
+  vehicleCompatibilities?: { make: string; model: string; year: string }[];
   /** Indica si este producto es un combo/paquete de varios productos */
   isCombo?: boolean;
   /** Artículos incluidos en el combo (si isCombo es true) */

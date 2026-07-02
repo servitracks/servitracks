@@ -19,6 +19,15 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
 
   if (!product) return null;
 
+  const compats = product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0
+    ? product.vehicleCompatibilities
+    : (product.vehicleMake || product.vehicleModel || product.vehicleYear)
+      ? [{ make: product.vehicleMake, model: product.vehicleModel, year: product.vehicleYear }]
+      : [];
+
+  const compatString = compats.slice(0, 2).map(c => [c.make, c.model, c.year].filter(Boolean).join(" ")).join(" / ") 
+    + (compats.length > 2 ? ` (+${compats.length - 2})` : '');
+
   const handlePrint = () => {
     if (!printRef.current) return;
     
@@ -86,8 +95,8 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
         </head>
         <body>
           <div class="name">${product.name}</div>
-          ${[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).length > 0 
-            ? `<div class="vehicle-info">${[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}</div>` 
+          ${compatString 
+            ? `<div class="vehicle-info">${compatString}</div>` 
             : ''}
           <div class="barcode-container">
             ${printRef.current.innerHTML}
@@ -124,9 +133,9 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
           {/* Vista Previa Visual (no es exactamente la de impresión) */}
           <div className="w-[50mm] h-[25mm] bg-white border border-neutral-300 shadow-sm flex flex-col items-center justify-center p-1 relative overflow-hidden">
             <div className="text-[7px] font-bold text-center leading-tight truncate w-full px-1">{product.name}</div>
-            {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).length > 0 && (
-              <div className="text-[7px] font-bold text-neutral-700 mt-0.5 truncate w-full text-center px-1">
-                {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
+            {compatString && (
+              <div className="text-[6.5px] font-bold text-neutral-700 mt-0.5 truncate w-full text-center px-1">
+                {compatString}
               </div>
             )}
             <div ref={printRef} className="mt-0.5 w-full flex justify-center overflow-hidden">

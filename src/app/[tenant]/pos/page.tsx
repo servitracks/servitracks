@@ -456,38 +456,6 @@ export default function POSPage() {
 
   return (
     <>
-      {/* Print-only receipt */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #receipt-print { display: block !important; }
-          @page { size: 80mm auto; margin: 4mm; }
-        }
-        #receipt-print { display: none; }
-      `}</style>
-
-      {/* 80mm Thermal Receipt (hidden, print-only) */}
-      <div id="receipt-print">
-        <Ticket 
-          invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
-          ncf={lastInvoice?.ncf}
-          qrUrl={lastInvoice?.qrUrl}
-          securityCode={lastInvoice?.securityCode}
-          signatureDate={lastInvoice?.signatureDate}
-          createdAt={lastInvoice?.createdAt || new Date().toISOString()}
-          tenant={taller}
-          customer={lastInvoice?.customerName ? { name: lastInvoice.customerName, id: "", rnc: lastInvoice.customerRnc, tenantId: "", phone: "", address: "", status: "active", createdAt: "" } : lastInvoice?.customerId ? customers.find(c => c.id === lastInvoice.customerId) : currentOrder?.customerId ? customers.find(c => c.id === currentOrder.customerId) : undefined}
-          items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
-          subtotal={lastInvoice?.subtotal || subtotal}
-          itbis={itbis}
-          total={total}
-          payMethod={payMethod}
-          cashReceived={cashNum}
-          mechanicName={posMechanicId ? tenantTechnicians.find(t => t.id === posMechanicId)?.name : undefined}
-          warrantyText={localWarrantyText}
-        />
-      </div>
-
       {/* ─── Main POS Layout ─── */}
       <div className={cn(
         "flex bg-neutral-100 transition-all duration-300",

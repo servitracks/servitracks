@@ -299,14 +299,13 @@ export default function ServicesPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>Precio al Cliente (RD$) *</Label>
+                <Label>Precio al Cliente (RD$)</Label>
                 <Input 
                   type="number"
                   placeholder="Ej: 1500" 
                   className="h-10 rounded-xl font-bold"
                   value={form.price || ""} 
                   onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} 
-                  required
                 />
               </div>
               <div className="space-y-1.5">

@@ -307,8 +307,10 @@ export const useStore = create<AppState>()(
         set((state) => ({
           technicians: state.technicians.map((t) => (t.id === id ? { ...t, ...updates } : t)),
         })),
-      deleteTechnician: (id) =>
-        set((state) => ({ technicians: state.technicians.filter((t) => t.id !== id) })),
+      deleteTechnician: (id) => {
+        set((state) => ({ technicians: state.technicians.filter((t) => t.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('technicians', id));
+      },
 
       updatePrintSettings: (updates) =>
         set((state) => ({ printSettings: { ...state.printSettings, ...updates } })),
@@ -321,16 +323,20 @@ export const useStore = create<AppState>()(
         set((state) => ({
           customers: state.customers.map((c) => (c.id === id ? { ...c, ...updates } : c)),
         })),
-      deleteCustomer: (id) =>
-        set((state) => ({ customers: state.customers.filter((c) => c.id !== id) })),
+      deleteCustomer: (id) => {
+        set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('customers', id));
+      },
 
       addVehicle: (vehicle) => set((state) => ({ vehicles: [...state.vehicles, vehicle] })),
       updateVehicle: (id, updates) =>
         set((state) => ({
           vehicles: state.vehicles.map((v) => (v.id === id ? { ...v, ...updates } : v)),
         })),
-      deleteVehicle: (id) =>
-        set((state) => ({ vehicles: state.vehicles.filter((v) => v.id !== id) })),
+      deleteVehicle: (id) => {
+        set((state) => ({ vehicles: state.vehicles.filter((v) => v.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('vehicles', id));
+      },
 
       addOrder: (order) => set((state) => ({ orders: [...state.orders, order] })),
       updateOrder: (id, updates) =>
@@ -339,30 +345,85 @@ export const useStore = create<AppState>()(
             o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
           ),
         })),
-      deleteOrder: (id) =>
-        set((state) => ({ orders: state.orders.filter((o) => o.id !== id) })),
+      deleteOrder: (id) => {
+        set((state) => ({ orders: state.orders.filter((o) => o.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('orders', id));
+      },
 
       addProduct: (product) => set((state) => ({ products: [...state.products, product] })),
       updateProduct: (id, updates) =>
         set((state) => ({
           products: state.products.map((p) => (p.id === id ? { ...p, ...updates } : p)),
         })),
-      deleteProduct: (id) =>
-        set((state) => ({ products: state.products.filter((p) => p.id !== id) })),
+      deleteProduct: (id) => {
+        set((state) => ({ products: state.products.filter((p) => p.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id));
+      },
 
       addService: (service) => set((state) => ({ services: [...state.services, service] })),
       updateService: (id, updates) =>
         set((state) => ({
           services: state.services.map((s) => (s.id === id ? { ...s, ...updates } : s)),
         })),
-      deleteService: (id) =>
-        set((state) => ({ services: state.services.filter((s) => s.id !== id) })),
+      deleteService: (id) => {
+        set((state) => ({ services: state.services.filter((s) => s.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('services', id));
+      },
 
       addMovement: (movement) =>
         set((state) => ({ movements: [...state.movements, movement] })),
 
       addInvoice: (invoice) => {
-        set((state) => ({ invoices: [...state.invoices, invoice] }));
+        set((state) => {
+          const updatedProducts = [...state.products];
+          const newMovements = [...state.movements];
+          
+          if (invoice.status !== 'cancelled') {
+            invoice.items.forEach(item => {
+              if ((item.type === 'product' || !item.type) && item.productId) {
+                const productIndex = updatedProducts.findIndex(p => p.id === item.productId);
+                if (productIndex !== -1) {
+                  const product = updatedProducts[productIndex];
+                  if (product.isCombo && product.comboItems) {
+                    product.comboItems.forEach(ci => {
+                      const ciIndex = updatedProducts.findIndex(p => p.id === ci.productId);
+                      if (ciIndex !== -1) {
+                        const subProd = updatedProducts[ciIndex];
+                        updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock - (ci.quantity * item.quantity) };
+                        newMovements.push({
+                          id: Math.random().toString(36).substr(2, 9),
+                          tenantId: invoice.tenantId,
+                          productId: ci.productId,
+                          type: "out",
+                          quantity: ci.quantity * item.quantity,
+                          reason: `Venta combo (Factura #${invoice.id.slice(-6).toUpperCase()})`,
+                          date: new Date().toISOString()
+                        });
+                      }
+                    });
+                  } else {
+                    updatedProducts[productIndex] = { ...product, stock: product.stock - item.quantity };
+                    newMovements.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      tenantId: invoice.tenantId,
+                      productId: item.productId,
+                      type: "out",
+                      quantity: item.quantity,
+                      reason: `Venta (Factura #${invoice.id.slice(-6).toUpperCase()})`,
+                      date: new Date().toISOString()
+                    });
+                  }
+                }
+              }
+            });
+          }
+
+          return { 
+            invoices: [...state.invoices, invoice],
+            products: updatedProducts,
+            movements: newMovements
+          };
+        });
         
         // Integración con Mantenimiento Automático (Omnicanal)
         if (invoice.vehicleId && invoice.status === 'paid') {
@@ -395,10 +456,59 @@ export const useStore = create<AppState>()(
           }
         }
       },
-      updateInvoice: (id, updates) =>
-        set((state) => ({
-          invoices: state.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)),
-        })),
+      updateInvoice: (id, updates) => {
+        set((state) => {
+          const oldInvoice = state.invoices.find(inv => inv.id === id);
+          const updatedProducts = [...state.products];
+          const newMovements = [...state.movements];
+
+          if (oldInvoice && updates.status === 'cancelled' && oldInvoice.status !== 'cancelled') {
+            oldInvoice.items.forEach(item => {
+              if ((item.type === 'product' || !item.type) && item.productId) {
+                const productIndex = updatedProducts.findIndex(p => p.id === item.productId);
+                if (productIndex !== -1) {
+                  const product = updatedProducts[productIndex];
+                  if (product.isCombo && product.comboItems) {
+                    product.comboItems.forEach(ci => {
+                      const ciIndex = updatedProducts.findIndex(p => p.id === ci.productId);
+                      if (ciIndex !== -1) {
+                        const subProd = updatedProducts[ciIndex];
+                        updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock + (ci.quantity * item.quantity) };
+                        newMovements.push({
+                          id: Math.random().toString(36).substr(2, 9),
+                          tenantId: oldInvoice.tenantId,
+                          productId: ci.productId,
+                          type: "in",
+                          quantity: ci.quantity * item.quantity,
+                          reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
+                          date: new Date().toISOString()
+                        });
+                      }
+                    });
+                  } else {
+                    updatedProducts[productIndex] = { ...product, stock: product.stock + item.quantity };
+                    newMovements.push({
+                      id: Math.random().toString(36).substr(2, 9),
+                      tenantId: oldInvoice.tenantId,
+                      productId: item.productId,
+                      type: "in",
+                      quantity: item.quantity,
+                      reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
+                      date: new Date().toISOString()
+                    });
+                  }
+                }
+              }
+            });
+          }
+
+          return {
+            invoices: state.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)),
+            products: updatedProducts,
+            movements: newMovements
+          };
+        });
+      },
 
       addCaja: (caja) => set((state) => ({ cajas: [...state.cajas, caja] })),
       updateCaja: (id, updates) =>

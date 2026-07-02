@@ -75,6 +75,7 @@ type ProductForm = {
   stock: string; minStock: string; tax: string; location: string;
   serviceIds: string[];
   vehicleMake: string; vehicleModel: string; vehicleYear: string;
+  vehicleCompatibilities: { make: string; model: string; year: string }[];
   paymentMode: string;
 };
 
@@ -84,6 +85,7 @@ const emptyForm: ProductForm = {
   stock: "0", minStock: "5", tax: "18", location: "",
   serviceIds: [],
   vehicleMake: "", vehicleModel: "", vehicleYear: "",
+  vehicleCompatibilities: [],
   paymentMode: "pending",
 };
 
@@ -346,21 +348,85 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
       </div>
 
       <div className="col-span-2 mt-4 pt-4 border-t border-neutral-100">
-        <h4 className="font-semibold text-neutral-900 mb-3 text-sm">Compatibilidad de Vehículo</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-1.5">
-            <Label>Marca de Vehículo</Label>
-            <Input placeholder="Ej: Toyota" className="h-10 rounded-xl border-neutral-200" value={form.vehicleMake} onChange={(e) => setForm(p => ({...p, vehicleMake: e.target.value}))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Modelo</Label>
-            <Input placeholder="Ej: Corolla" className="h-10 rounded-xl border-neutral-200" value={form.vehicleModel} onChange={(e) => setForm(p => ({...p, vehicleModel: e.target.value}))} />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Año</Label>
-            <Input placeholder="Ej: 2010-2015" className="h-10 rounded-xl border-neutral-200" value={form.vehicleYear} onChange={(e) => setForm(p => ({...p, vehicleYear: e.target.value}))} />
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="font-semibold text-neutral-900 text-sm">Compatibilidades de Vehículo</h4>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs flex items-center gap-1 px-2 border-neutral-200"
+            onClick={() => setForm(p => ({
+              ...p,
+              vehicleCompatibilities: [...(p.vehicleCompatibilities || []), { make: "", model: "", year: "" }]
+            }))}
+          >
+            <Plus className="h-3.5 w-3.5" /> Agregar
+          </Button>
         </div>
+        
+        {(!form.vehicleCompatibilities || form.vehicleCompatibilities.length === 0) && (
+          <div className="text-center p-4 border border-dashed border-neutral-200 rounded-xl bg-neutral-50/50">
+            <p className="text-xs text-neutral-500">Ninguna compatibilidad agregada.</p>
+          </div>
+        )}
+
+        {form.vehicleCompatibilities?.map((compat, index) => (
+          <div key={index} className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3 items-end bg-neutral-50 p-3 rounded-xl border border-neutral-100">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Marca</Label>
+              <Input 
+                placeholder="Ej: Toyota" 
+                className="h-9 text-sm rounded-lg border-neutral-200 bg-white" 
+                value={compat.make} 
+                onChange={(e) => {
+                  const newCompats = [...form.vehicleCompatibilities];
+                  newCompats[index].make = e.target.value;
+                  setForm(p => ({ ...p, vehicleCompatibilities: newCompats }));
+                }} 
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Modelo</Label>
+              <Input 
+                placeholder="Ej: Corolla" 
+                className="h-9 text-sm rounded-lg border-neutral-200 bg-white" 
+                value={compat.model} 
+                onChange={(e) => {
+                  const newCompats = [...form.vehicleCompatibilities];
+                  newCompats[index].model = e.target.value;
+                  setForm(p => ({ ...p, vehicleCompatibilities: newCompats }));
+                }} 
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Año</Label>
+              <Input 
+                placeholder="Ej: 2010-2015" 
+                className="h-9 text-sm rounded-lg border-neutral-200 bg-white" 
+                value={compat.year} 
+                onChange={(e) => {
+                  const newCompats = [...form.vehicleCompatibilities];
+                  newCompats[index].year = e.target.value;
+                  setForm(p => ({ ...p, vehicleCompatibilities: newCompats }));
+                }} 
+              />
+            </div>
+            <div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                onClick={() => {
+                  const newCompats = form.vehicleCompatibilities.filter((_, i) => i !== index);
+                  setForm(p => ({ ...p, vehicleCompatibilities: newCompats }));
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -469,9 +535,10 @@ export default function InventoryPage() {
       location: form.location,
       supplier: form.supplier,
       serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
-      vehicleMake: form.vehicleMake,
-      vehicleModel: form.vehicleModel,
-      vehicleYear: form.vehicleYear,
+      vehicleMake: form.vehicleCompatibilities?.[0]?.make || "",
+      vehicleModel: form.vehicleCompatibilities?.[0]?.model || "",
+      vehicleYear: form.vehicleCompatibilities?.[0]?.year || "",
+      vehicleCompatibilities: form.vehicleCompatibilities.length > 0 ? form.vehicleCompatibilities : undefined,
     };
     addProduct(newProduct);
 
@@ -530,6 +597,7 @@ export default function InventoryPage() {
       vehicleMake: product.vehicleMake || "",
       vehicleModel: product.vehicleModel || "",
       vehicleYear: product.vehicleYear || "",
+      vehicleCompatibilities: product.vehicleCompatibilities || (product.vehicleMake ? [{ make: product.vehicleMake, model: product.vehicleModel || "", year: product.vehicleYear || "" }] : []),
       paymentMode: "pending",
     }));
     setIsEditOpen(true);
@@ -549,9 +617,10 @@ export default function InventoryPage() {
       laborPrice: Number(form.laborPrice) || 0,
       minStock: Number(form.minStock) || 0, tax: Number(form.tax) || 18, location: form.location,
       serviceIds: form.serviceIds.length > 0 ? form.serviceIds : undefined,
-      vehicleMake: form.vehicleMake,
-      vehicleModel: form.vehicleModel,
-      vehicleYear: form.vehicleYear,
+      vehicleMake: form.vehicleCompatibilities?.[0]?.make || "",
+      vehicleModel: form.vehicleCompatibilities?.[0]?.model || "",
+      vehicleYear: form.vehicleCompatibilities?.[0]?.year || "",
+      vehicleCompatibilities: form.vehicleCompatibilities.length > 0 ? form.vehicleCompatibilities : undefined,
     });
     toast.success("Producto actualizado");
     setIsEditOpen(false);
@@ -775,11 +844,24 @@ export default function InventoryPage() {
                             <p className="font-semibold text-neutral-900 text-sm">{product.name}</p>
                             <div className="flex items-center gap-2 mt-0.5">
                               <p className="text-xs text-neutral-400 font-mono">{product.sku}</p>
-                              {(product.vehicleMake || product.vehicleModel || product.vehicleYear) && (
+                              {product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0 ? (
+                                <>
+                                  {product.vehicleCompatibilities.slice(0, 2).map((c, i) => (
+                                    <Badge key={i} variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                      {[c.make, c.model, c.year].filter(Boolean).join(" ")}
+                                    </Badge>
+                                  ))}
+                                  {product.vehicleCompatibilities.length > 2 && (
+                                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                      +{product.vehicleCompatibilities.length - 2} más
+                                    </Badge>
+                                  )}
+                                </>
+                              ) : (product.vehicleMake || product.vehicleModel || product.vehicleYear) ? (
                                 <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
                                   {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
                                 </Badge>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         </div>

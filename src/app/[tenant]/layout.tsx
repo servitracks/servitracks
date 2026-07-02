@@ -326,25 +326,27 @@ export default function DashboardLayout() {
             let needsPartialUpload = false;
             const uploadPayload: any = {};
             
-            if (dbState.products.length === 0 && localState.products.length > 0) {
-              uploadPayload.products = localState.products; dbState.products = localState.products; needsPartialUpload = true;
-            }
-            if (dbState.services.length === 0 && localState.services.length > 0) {
-              uploadPayload.services = localState.services; dbState.services = localState.services; needsPartialUpload = true;
-            }
-            if (dbState.orders.length === 0 && localState.orders.length > 0) {
-              uploadPayload.orders = localState.orders; dbState.orders = localState.orders; needsPartialUpload = true;
-            }
-            const newEntities = [
-              "cajas", "cajaMovements", "technicians", "movements", "inspections", 
+            const entitiesToMerge = [
+              "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
+              "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
               "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
               "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests"
             ] as const;
-            for (const key of newEntities) {
-              if (dbState[key].length === 0 && localState[key] && localState[key].length > 0) {
-                uploadPayload[key] = localState[key];
-                (dbState as any)[key] = localState[key];
-                needsPartialUpload = true;
+
+            for (const key of entitiesToMerge) {
+              const dbArr = (dbState as any)[key] || [];
+              const localArr = (localState as any)[key] || [];
+              
+              if (localArr.length > 0) {
+                const dbIds = new Set(dbArr.map((item: any) => item.id));
+                const missingLocals = localArr.filter((item: any) => !dbIds.has(item.id));
+                
+                if (missingLocals.length > 0) {
+                  const merged = [...dbArr, ...missingLocals];
+                  (dbState as any)[key] = merged;
+                  uploadPayload[key] = merged;
+                  needsPartialUpload = true;
+                }
               }
             }
             
@@ -445,7 +447,8 @@ export default function DashboardLayout() {
       ) {
         clearTimeout(timeoutId);
         timeoutId = setTimeout(() => {
-          console.log("[Background Sync] Espía detectó cambios locales. Sincronizando a Supabase...");
+          timeoutId = null as any;
+          console.log("[Background Sync] Espía detectó cambios locales. Sincronizando a Supabase (Instantáneo)...");
           import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
             syncStoreToSupabase(currentTenant.id, state).then(() => {
               // Notificar a otros dispositivos
@@ -458,13 +461,25 @@ export default function DashboardLayout() {
               console.error("[Background Sync Error]:", err);
             });
           });
-        }, 5000);
+        }, 500); // 500ms (casi instantáneo) en lugar de 5000ms
       }
     });
+
+    const handleBeforeUnload = () => {
+      if (timeoutId) {
+        // Si hay una sincronización pendiente y el usuario intenta cerrar la pestaña, forzarla.
+        const state = useStore.getState();
+        import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
+          syncStoreToSupabase(currentTenant.id, state);
+        });
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       clearTimeout(timeoutId);
       unsubscribe();
+      window.removeEventListener("beforeunload", handleBeforeUnload);
       supabase.removeChannel(syncChannel);
     };
   }, [currentTenant?.id, initialSyncDone]);

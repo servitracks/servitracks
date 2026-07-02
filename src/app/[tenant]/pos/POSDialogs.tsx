@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -209,11 +209,94 @@ interface PrintReceiptProps {
 export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total, payMethod, cashNum, change, taller, lastInvoice, mechanicId, warrantyText }: PrintReceiptProps) {
   const technicians = useStore((s) => s.technicians);
   const customers = useStore((s) => s.customers);
+  const printSettings = useStore((s) => s.printSettings);
   const techName = mechanicId ? (technicians.find(t => t.id === mechanicId)?.name ?? undefined) : undefined;
+
+  const componentRef = useRef<HTMLDivElement>(null);
+  
+  const handlePrint = () => {
+    const printElement = componentRef.current;
+    if (!printElement) return;
+
+    // Crear un iframe oculto
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = 'none';
+    
+    // Agregar el iframe al documento
+    document.body.appendChild(iframe);
+
+    // Obtener los estilos de Tailwind y de la aplicación actual
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map((tag) => tag.outerHTML)
+      .join("");
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    const formatSize = printSettings.paperSize === "A4" 
+      ? "A4" 
+      : printSettings.paperSize === "57mm" || printSettings.paperSize === "58mm" 
+        ? "58mm 297mm" 
+        : "80mm 297mm";
+
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Recibo_${lastInvoice?.id || "POS"}</title>
+          ${styles}
+          <style>
+            @media print {
+              @page { size: ${formatSize}; margin: 0; }
+            }
+            html, body { 
+              background: white !important; 
+              color: black !important;
+              display: block !important;
+              height: auto !important;
+              min-height: auto !important;
+              overflow: visible !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            body {
+              padding-top: 10px !important;
+            }
+            .thermal-ticket {
+              box-shadow: none !important;
+              margin: 0 auto !important; /* Centrar para la vista y la impresión */
+            }
+          </style>
+        </head>
+        <body>
+          ${printElement.innerHTML}
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+              }, 250);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    // Limpiar el iframe después de imprimir
+    iframe.contentWindow?.addEventListener("afterprint", () => {
+      document.body.removeChild(iframe);
+    });
+  };
+
+  const modalWidth = printSettings.paperSize === "A4" ? "sm:max-w-3xl" : "sm:max-w-xs";
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-xs rounded-2xl">
+      <DialogContent className={`${modalWidth} rounded-2xl`}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg font-black">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
@@ -221,33 +304,36 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
           </DialogTitle>
         </DialogHeader>
         <div className="bg-neutral-50 rounded-xl border border-neutral-200 overflow-hidden flex justify-center py-4 px-2 max-h-[60vh] overflow-y-auto">
-          <Ticket 
-            invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
-            ncf={lastInvoice?.ncf}
-            qrUrl={lastInvoice?.qrUrl}
-            securityCode={lastInvoice?.securityCode}
-            signatureDate={lastInvoice?.signatureDate}
-            createdAt={lastInvoice?.createdAt || new Date().toISOString()}
-            tenant={taller}
-            customer={
-              lastInvoice?.customerName 
-                ? { name: lastInvoice.customerName, rnc: lastInvoice.customerRnc } 
-                : lastInvoice?.customerId 
-                  ? customers.find(c => c.id === lastInvoice.customerId) 
-                  : undefined
-            }
-            items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
-            subtotal={lastInvoice?.subtotal || subtotal}
-            itbis={itbis}
-            total={total}
-            payMethod={payMethod}
-            cashReceived={cashNum}
-            mechanicName={techName}
-            warrantyText={warrantyText}
-          />
+          <div ref={componentRef} className="print-container">
+            <Ticket 
+              invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
+              ncf={lastInvoice?.ncf}
+              qrUrl={lastInvoice?.qrUrl}
+              securityCode={lastInvoice?.securityCode}
+              signatureDate={lastInvoice?.signatureDate}
+              createdAt={lastInvoice?.createdAt || new Date().toISOString()}
+              tenant={taller}
+              customer={
+                lastInvoice?.customerName 
+                  ? { name: lastInvoice.customerName, rnc: lastInvoice.customerRnc } 
+                  : lastInvoice?.customerId 
+                    ? customers.find(c => c.id === lastInvoice.customerId) 
+                    : undefined
+              }
+              items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
+              subtotal={lastInvoice?.subtotal || subtotal}
+              itbis={itbis}
+              total={total}
+              payMethod={payMethod}
+              cashReceived={cashNum}
+              mechanicName={techName}
+              warrantyText={warrantyText}
+              formato={printSettings.paperSize as any}
+            />
+          </div>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => window.print()}
+          <button onClick={() => handlePrint()}
             className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-neutral-200 text-sm font-bold hover:bg-neutral-50 transition-colors">
             <Printer className="h-4 w-4" /> Imprimir
           </button>

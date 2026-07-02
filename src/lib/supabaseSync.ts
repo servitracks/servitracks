@@ -416,9 +416,10 @@ function dbToProduct(row: any): Product {
     maintenanceCategory: row.maintenance_category || undefined,
     lifespanKm: row.lifespan_km || undefined,
     lifespanDays: row.lifespan_days || undefined,
-    vehicleMake: row.vehicle_make || undefined,
+    vehicleMake: (row.vehicle_make && row.vehicle_make.startsWith('[')) ? (JSON.parse(row.vehicle_make)[0]?.make || undefined) : (row.vehicle_make || undefined),
     vehicleModel: row.vehicle_model || undefined,
     vehicleYear: row.vehicle_year || undefined,
+    vehicleCompatibilities: (row.vehicle_make && row.vehicle_make.startsWith('[')) ? JSON.parse(row.vehicle_make) : undefined,
     isCombo: row.is_combo || undefined,
     comboItems: row.combo_items || undefined,
   };
@@ -448,7 +449,7 @@ function productToDb(p: Product) {
     maintenance_category: p.maintenanceCategory || null,
     lifespan_km: p.lifespanKm || null,
     lifespan_days: p.lifespanDays || null,
-    vehicle_make: p.vehicleMake || null,
+    vehicle_make: (p.vehicleCompatibilities && p.vehicleCompatibilities.length > 0) ? JSON.stringify(p.vehicleCompatibilities) : (p.vehicleMake || null),
     vehicle_model: p.vehicleModel || null,
     vehicle_year: p.vehicleYear || null,
     is_combo: p.isCombo || null,
@@ -599,6 +600,12 @@ function invoiceToDb(i: Invoice) {
 }
 
 // ─── Upsert to Supabase ───────────────────────────────────────────────────────
+
+export async function deleteRecordFromSupabase(table: string, id: string): Promise<void> {
+  const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
+  if (error) console.error(`[sync] delete ${table} error:`, error);
+}
+
 
 export async function upsertCustomers(customers: Customer[]): Promise<void> {
   if (customers.length === 0) return;

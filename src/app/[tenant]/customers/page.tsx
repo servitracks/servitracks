@@ -496,7 +496,7 @@ export default function CustomersPage() {
                         <DropdownMenuTrigger className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-neutral-100 transition-all outline-none cursor-pointer">
                           <MoreVertical className="h-4 w-4 text-neutral-400" />
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-32">
+                        <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-32 z-[100]">
                           <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
                             onClick={() => handleDeleteVehicle(v.id)}>
                             <Trash2 className="h-4 w-4" /> Eliminar
