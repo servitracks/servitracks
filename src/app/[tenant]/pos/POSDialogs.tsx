@@ -239,7 +239,7 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
     doc.open();
     const formatSize = printSettings.paperSize === "A4" 
       ? "A4" 
-      : printSettings.paperSize === "57mm" || printSettings.paperSize === "58mm" 
+      : printSettings.paperSize === "58mm" 
         ? "58mm 297mm" 
         : "80mm 297mm";
 

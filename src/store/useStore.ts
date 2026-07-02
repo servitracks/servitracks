@@ -380,7 +380,7 @@ export const useStore = create<AppState>()(
           
           if (invoice.status !== 'cancelled') {
             invoice.items.forEach(item => {
-              if ((item.type === 'product' || !item.type) && item.productId) {
+              if (item.productId) {
                 const productIndex = updatedProducts.findIndex(p => p.id === item.productId);
                 if (productIndex !== -1) {
                   const product = updatedProducts[productIndex];
@@ -394,6 +394,7 @@ export const useStore = create<AppState>()(
                           id: Math.random().toString(36).substr(2, 9),
                           tenantId: invoice.tenantId,
                           productId: ci.productId,
+                          productName: subProd.name,
                           type: "out",
                           quantity: ci.quantity * item.quantity,
                           reason: `Venta combo (Factura #${invoice.id.slice(-6).toUpperCase()})`,
@@ -407,6 +408,7 @@ export const useStore = create<AppState>()(
                       id: Math.random().toString(36).substr(2, 9),
                       tenantId: invoice.tenantId,
                       productId: item.productId,
+                      productName: product.name,
                       type: "out",
                       quantity: item.quantity,
                       reason: `Venta (Factura #${invoice.id.slice(-6).toUpperCase()})`,
@@ -464,7 +466,7 @@ export const useStore = create<AppState>()(
 
           if (oldInvoice && updates.status === 'cancelled' && oldInvoice.status !== 'cancelled') {
             oldInvoice.items.forEach(item => {
-              if ((item.type === 'product' || !item.type) && item.productId) {
+              if (item.productId) {
                 const productIndex = updatedProducts.findIndex(p => p.id === item.productId);
                 if (productIndex !== -1) {
                   const product = updatedProducts[productIndex];
@@ -478,6 +480,7 @@ export const useStore = create<AppState>()(
                           id: Math.random().toString(36).substr(2, 9),
                           tenantId: oldInvoice.tenantId,
                           productId: ci.productId,
+                          productName: subProd.name,
                           type: "in",
                           quantity: ci.quantity * item.quantity,
                           reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
@@ -491,6 +494,7 @@ export const useStore = create<AppState>()(
                       id: Math.random().toString(36).substr(2, 9),
                       tenantId: oldInvoice.tenantId,
                       productId: item.productId,
+                      productName: product.name,
                       type: "in",
                       quantity: item.quantity,
                       reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
