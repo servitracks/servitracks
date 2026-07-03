@@ -629,6 +629,7 @@ export interface Quote {
   discount?: number;
   total: number;
   notes?: string;
+  items: QuoteItem[];
   createdAt: string;
   updatedAt: string;
 }

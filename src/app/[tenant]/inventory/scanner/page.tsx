@@ -153,7 +153,7 @@ export default function InventoryScanner() {
           quantity: Math.abs(item.difference),
           reason: `Ajuste por Pase de Inventario: ${sessionName}. ${item.notes || ''}`.trim(),
           date: new Date().toISOString(),
-          userId: currentUserId || undefined,
+          userId: currentUserId ?? undefined,
         });
       }
     });
@@ -280,7 +280,7 @@ export default function InventoryScanner() {
                   <input
                     type="number"
                     value={actualQuantity}
-                    onChange={(e) => setActualQuantity(e.target.value)}
+                    onChange={(e) => setActualQuantity(e.target.value === '' ? '' : Number(e.target.value))}
                     className={`block w-full text-center text-4xl py-4 border-2 rounded-xl focus:ring-0 transition-colors ${
                       actualQuantity !== "" 
                         ? (Number(actualQuantity) === currentProduct.stock ? 'border-green-500 text-green-700 bg-green-50' : 'border-red-500 text-red-700 bg-red-50') 

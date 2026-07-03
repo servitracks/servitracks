@@ -378,7 +378,7 @@ export const useStore = create<AppState>()(
       },
 
       addMovement: (movement) =>
-        set((state) => ({ movements: [...state.movements, { ...movement, userId: movement.userId || state.currentUserId }] })),
+        set((state) => ({ movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] })),
 
       addInvoice: (invoice) => {
         set((state) => {
@@ -406,7 +406,7 @@ export const useStore = create<AppState>()(
                           quantity: ci.quantity * item.quantity,
                           reason: `Venta combo (Factura #${invoice.id.slice(-6).toUpperCase()})`,
                           date: new Date().toISOString(),
-                          userId: state.currentUserId,
+                          userId: state.currentUserId ?? undefined,
                         });
                       }
                     });
@@ -421,7 +421,7 @@ export const useStore = create<AppState>()(
                       quantity: item.quantity,
                       reason: `Venta (Factura #${invoice.id.slice(-6).toUpperCase()})`,
                       date: new Date().toISOString(),
-                      userId: state.currentUserId,
+                      userId: state.currentUserId ?? undefined,
                     });
                   }
                 }
