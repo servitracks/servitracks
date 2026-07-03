@@ -69,81 +69,11 @@ function MaintenanceContent() {
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
 
-  const [customers, setLocalCustomers] = useState(() => storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
-  const [vehicles, setLocalVehicles] = useState(() => storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
-  const [maintenanceItems, setLocalItems] = useState(() => storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
-  const [loading, setLoading] = useState(true);
-  const syncedRef = useRef(false);
-
-  // ── Load from Supabase, fallback to store ─────────────────────────────────
-  useEffect(() => {
-    if (syncedRef.current) return;
-    syncedRef.current = true;
-
-    const slug = tenant;
-    if (!slug) {
-      setLoading(false);
-      return;
-    }
-
-    async function loadData() {
-      try {
-        const { data: tenantRow, error: tenantError } = await supabaseAdmin
-          .from("tenants")
-          .select("id")
-          .eq("slug", slug)
-          .single();
-
-        if (tenantError || !tenantRow) {
-          // No Supabase tenant — use store data
-          setLocalCustomers(storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
-          setLocalVehicles(storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
-          setLocalItems(storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
-          setLoading(false);
-          return;
-        }
-        const tid = tenantRow.id;
-
-        // Load from Supabase
-        const [dbCustomers, dbVehicles, dbItems] = await Promise.all([
-          loadCustomersFromSupabase(tid),
-          loadVehiclesFromSupabase(tid),
-          loadMaintenanceItemsFromSupabase(tid),
-        ]);
-
-        if (dbCustomers.length > 0 || dbVehicles.length > 0) {
-          // Use DB data
-          setLocalCustomers(dbCustomers);
-          setLocalVehicles(dbVehicles);
-          setLocalItems(dbItems);
-        } else if (storeVehicles.length > 0) {
-          // DB empty but store has data — push store data up to Supabase
-          console.log("[Maintenance] Syncing local store to Supabase...");
-          await syncStoreToSupabase(tid, {
-            customers: storeCustomers,
-            vehicles: storeVehicles,
-            maintenanceItems: storeMaintenanceItems
-          });
-          setLocalCustomers(storeCustomers);
-          setLocalVehicles(storeVehicles);
-          setLocalItems(storeMaintenanceItems);
-        } else {
-          setLocalCustomers([]);
-          setLocalVehicles([]);
-          setLocalItems([]);
-        }
-        setLoading(false);
-      } catch (error: any) {
-        console.error("[Maintenance] load error:", error);
-        setLocalCustomers(storeCustomers.filter(c => !tenantId || c.tenantId === tenantId));
-        setLocalVehicles(storeVehicles.filter(v => !tenantId || v.tenantId === tenantId));
-        setLocalItems(storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId));
-        setLoading(false);
-      }
-    }
-
-    loadData();
-  }, [tenant, storeCustomers, storeVehicles, storeMaintenanceItems]);
+  const customers = useMemo(() => storeCustomers.filter(c => !tenantId || c.tenantId === tenantId), [storeCustomers, tenantId]);
+  const vehicles = useMemo(() => storeVehicles.filter(v => !tenantId || v.tenantId === tenantId), [storeVehicles, tenantId]);
+  const maintenanceItems = useMemo(() => storeMaintenanceItems.filter(m => !tenantId || m.tenantId === tenantId), [storeMaintenanceItems, tenantId]);
+  
+  const loading = false; // Kept for UI compatibility, actual loading is handled globally
 
   const [search, setSearch] = useState(initialSearch);
   const [filter, setFilter] = useState<'all' | 'critical' | 'preventive' | 'healthy'>('all');
@@ -170,11 +100,8 @@ function MaintenanceContent() {
       setHiddenVehicleIds(prev => new Set([...prev, vehicleToDelete]));
 
       // 2. Limpiar items de mantenimiento del store
-      const itemsToDelete = maintenanceItems.filter(item => item.vehicleId === vehicleToDelete);
+      const itemsToDelete = storeMaintenanceItems.filter(item => item.vehicleId === vehicleToDelete);
       itemsToDelete.forEach(item => deleteMaintenanceItem(item.id));
-
-      // 3. Limpiar items sintéticos del state local
-      setLocalItems(prev => prev.filter(item => item.vehicleId !== vehicleToDelete));
 
       toast.success("Mantenimiento eliminado correctamente.", { duration: 3000 });
       setVehicleToDelete(null);
@@ -182,12 +109,20 @@ function MaintenanceContent() {
   };
 
   useEffect(() => {
+    // Only calculate health if vehicles array actually changed in a meaningful way
     const kmMap: Record<string, number> = {};
+    let hasValidKms = false;
     vehicles.forEach(v => {
-      if (v.km) kmMap[v.id] = v.km;
+      if (v.km != null) {
+        kmMap[v.id] = v.km;
+        hasValidKms = true;
+      }
     });
-    calculateMaintenanceHealth(kmMap);
-  }, [vehicles, calculateMaintenanceHealth]);
+    if (hasValidKms) {
+      calculateMaintenanceHealth(kmMap);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicles]); // Intentionally removed calculateMaintenanceHealth to avoid loops
 
   const openDetail = (data: any) => {
     setSelectedData(data);

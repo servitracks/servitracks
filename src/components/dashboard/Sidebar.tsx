@@ -21,7 +21,8 @@ import {
   MessageCircle,
   Truck,
   Briefcase,
-  FileText
+  FileText,
+  ClipboardList
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -40,6 +41,7 @@ const navigation = [
   { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
+  { name: "Control de Movimientos", href: "/movimientos", icon: ClipboardList, roles: ['owner', 'warehouse'] },
   { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
   { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
   { name: "Mis Comisiones", href: "/mis-comisiones", icon: Wallet, roles: ['mechanic'] },
@@ -192,10 +194,16 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
         <nav ref={navRef} className="flex-1 overflow-y-auto space-y-0.5 px-3 py-4">
           {filteredNavigation.map((item) => {
             const href = `/${tenantSlug}${item.href}`;
-            const isActive =
-              item.href === ""
-                ? pathname === `/${tenantSlug}`
-                : pathname === href || pathname.startsWith(href + "/");
+            let isActive = false;
+            if (item.href === "") {
+              isActive = pathname === `/${tenantSlug}`;
+            } else if (item.href === "/movimientos") {
+              isActive = pathname === href || pathname.startsWith(href + "/") || pathname.startsWith(`/${tenantSlug}/inventory/scanner`);
+            } else if (item.href === "/inventory") {
+              isActive = (pathname === href || pathname.startsWith(href + "/")) && !pathname.startsWith(`/${tenantSlug}/inventory/scanner`);
+            } else {
+              isActive = pathname === href || pathname.startsWith(href + "/");
+            }
             const badge =
               item.href === "/inventory" && lowStockCount > 0
                 ? lowStockCount

@@ -62,6 +62,7 @@ export default function Conversations() {
   const [supabaseTenantId, setSupabaseTenantId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<WaConversation[]>([]);
   const [messages, setMessages] = useState<WaMessage[]>([]);
+  const [msgCache, setMsgCache] = useState<Record<string, WaMessage[]>>({});
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [messageText, setMessageText] = useState("");
@@ -199,15 +200,18 @@ export default function Conversations() {
     }
   }, [conversations]);
 
-  async function loadMessages(convId: string) {
-    setLoadingMsgs(true);
+  async function loadMessages(convId: string, skipLoadingState = false) {
+    if (!skipLoadingState) setLoadingMsgs(true);
     const { data, error } = await supabase
       .from("wa_messages")
       .select("*")
       .eq("conversation_id", convId)
       .order("created_at", { ascending: true });
-    if (!error && data) setMessages(data);
-    setLoadingMsgs(false);
+    if (!error && data) {
+      setMessages(data);
+      setMsgCache(prev => ({ ...prev, [convId]: data }));
+    }
+    if (!skipLoadingState) setLoadingMsgs(false);
   }
 
   // ── Load messages for selected conversation ─────────────────────────
@@ -227,7 +231,13 @@ export default function Conversations() {
     );
     
     // Reload messages immediately on selection
-    loadMessages(selectedConvId);
+    if (msgCache[selectedConvId]) {
+      setMessages(msgCache[selectedConvId]);
+      loadMessages(selectedConvId, true); // fetch quietly in background
+    } else {
+      setMessages([]);
+      loadMessages(selectedConvId, false);
+    }
   }, [selectedConvId]);
 
   // ── Scroll on new messages ──────────────────────────────────────────
@@ -248,7 +258,29 @@ export default function Conversations() {
       
     if (type === "text") setMessageText("");
     setReplyingTo(null);
-    setSending(true);
+    // setSending(true); // Don't block the UI while sending
+
+    // --- OPTIMISTIC UPDATE ---
+    const tempId = `temp-${Date.now()}`;
+    const tempMsg: WaMessage = {
+      id: tempId,
+      conversation_id: selectedConvId,
+      tenant_id: supabaseTenantId,
+      role: "assistant",
+      content: text,
+      message_type: type,
+      status: "sending",
+      created_at: new Date().toISOString(),
+    };
+    
+    setMessages((prev) => [...prev, tempMsg]);
+    setConversations((prev) => prev.map(c => 
+      c.id === selectedConvId 
+        ? { ...c, last_message: text, last_message_at: new Date().toISOString() } 
+        : c
+    ));
+    // Scroll instantly
+    setTimeout(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, 50);
 
     const { data: msg, error: msgErr } = await supabase.from("wa_messages").insert({
       conversation_id: selectedConvId,
@@ -260,12 +292,11 @@ export default function Conversations() {
     }).select().single();
 
     if (!msgErr && msg) {
-      setMessages((prev) => [...prev, msg]);
-      // Update conversation last message
-      await supabase.from("wa_conversations").update({
-        last_message: text,
-        last_message_at: new Date().toISOString(),
-      }).eq("id", selectedConvId);
+      setMessages((prev) => prev.map(m => m.id === tempId ? msg : m));
+    } else {
+      setMessages((prev) => prev.filter(m => m.id !== tempId));
+      toast.error("Error al guardar el mensaje en la base de datos.");
+      return;
     }
 
     // 2. Send via WaSender API
@@ -320,7 +351,26 @@ export default function Conversations() {
     } else {
       toast.info("Mensaje guardado en la base de datos (Requiere API Key de WhatsApp para salir).");
     }
-    setSending(false);
+    // setSending(false);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          if (fileInputRef.current) {
+            fileInputRef.current.files = dataTransfer.files;
+            const event = new Event("change", { bubbles: true });
+            fileInputRef.current.dispatchEvent(event);
+          }
+        }
+      }
+    }
   };
 
   // ── Delete Conversation ─────────────────────────────────────────────
@@ -438,8 +488,8 @@ export default function Conversations() {
   return (
     <div className="flex h-[calc(100vh-5rem)] -m-6">
       {/* Sidebar */}
-      <div className="w-80 border-r border-border flex flex-col bg-card shrink-0">
-        <div className="p-3 border-b border-border">
+      <div className="w-80 border-r border-neutral-200 flex flex-col bg-white shrink-0 shadow-[2px_0_10px_rgba(0,0,0,0.02)] z-10">
+        <div className="p-4 border-b border-neutral-100 bg-white">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -464,31 +514,31 @@ export default function Conversations() {
               <div
                 key={conv.id}
                 onClick={() => setSelectedConvId(conv.id)}
-                className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b border-border/50 transition-colors group relative ${conv.id === selectedConvId ? "bg-accent" : "hover:bg-muted/50"}`}
+                className={`flex items-start gap-3 px-4 py-3.5 cursor-pointer border-b border-neutral-100 transition-all duration-200 group relative ${conv.id === selectedConvId ? "bg-emerald-50/50" : "hover:bg-neutral-50"}`}
               >
-                <div className="h-9 w-9 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0 mt-0.5">
+                <div className="h-12 w-12 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center text-sm font-black text-emerald-800 shrink-0 shadow-sm">
                   {(conv.name || conv.phone).charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <p className="text-sm font-medium text-foreground truncate">{conv.name || conv.phone}</p>
-                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                      <span className="text-[10px] text-muted-foreground group-hover:hidden">
-                        {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: es })}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConvToDelete(conv.id);
-                        }}
-                        className="hidden group-hover:flex items-center justify-center h-5 w-5 rounded-full hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"
-                        title="Eliminar conversación"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                    <div className="flex justify-between items-center mb-0.5">
+                      <p className="text-[15px] font-semibold text-neutral-900 truncate">{conv.name || conv.phone}</p>
+                      <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                        <span className="text-[11px] font-medium text-neutral-400 group-hover:hidden">
+                          {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false, locale: es })}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConvToDelete(conv.id);
+                          }}
+                          className="hidden group-hover:flex items-center justify-center h-6 w-6 rounded-full hover:bg-rose-100 text-neutral-400 hover:text-rose-600 transition-colors"
+                          title="Eliminar conversación"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{formatLastMessage(conv.last_message)}</p>
+                    <p className="text-[13px] text-neutral-500 truncate leading-snug">{formatLastMessage(conv.last_message)}</p>
                   <div className="flex items-center justify-between mt-1 min-h-[16px]">
                     {conv.unread_count > 0 && conv.id !== selectedConvId ? (
                       <span className="ml-auto h-4 w-4 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold">
@@ -510,15 +560,15 @@ export default function Conversations() {
         {selectedConv ? (
           <>
             {/* Header */}
-            <div className="border-b border-border bg-card shrink-0">
-              <div className="h-14 px-5 flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700">
+            <div className="border-b border-neutral-200 bg-white shrink-0 shadow-sm z-10 relative">
+              <div className="h-16 px-6 flex items-center gap-4">
+                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-100 to-emerald-200 flex items-center justify-center text-sm font-black text-emerald-800 shadow-sm">
                   {(selectedConv.name || selectedConv.phone).charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold">{selectedConv.name || selectedConv.phone}</p>
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
+                  <p className="text-[16px] font-bold text-neutral-900 leading-tight">{selectedConv.name || selectedConv.phone}</p>
+                  <p className="text-[12px] font-medium text-neutral-500 flex items-center gap-1.5 mt-0.5">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block shadow-[0_0_5px_rgba(16,185,129,0.5)]" />
                     {selectedConv.phone}
                   </p>
                 </div>
@@ -571,17 +621,17 @@ export default function Conversations() {
                   }
 
                   return (
-                    <div key={msg.id} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-1 group`}>
-                      <div className={`max-w-[80%] relative rounded-lg px-3 py-1.5 text-[14px] shadow-sm ${isSent ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-none" : "bg-white text-[#111b21] rounded-tl-none"}`}>
+                    <div key={msg.id} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-2 group`}>
+                      <div className={`max-w-[75%] relative rounded-2xl px-4 py-2 text-[15px] shadow-sm ${isSent ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-md" : "bg-white text-[#111b21] rounded-tl-md border border-neutral-100"}`}>
                         {showTail && (
-                          <div className={`absolute top-0 w-2 h-2.5 ${isSent ? "-right-2 bg-[#d9fdd3]" : "-left-2 bg-white"}`}
+                          <div className={`absolute top-0 w-3 h-3 ${isSent ? "-right-2 bg-[#d9fdd3]" : "-left-2 bg-white"}`}
                             style={{ clipPath: isSent ? "polygon(0 0, 0% 100%, 100% 0)" : "polygon(100% 0, 0 0, 100% 100%)" }} />
                         )}
                         <button
                           onClick={() => setReplyingTo(msg)}
-                          className={`absolute top-2 ${isSent ? "-left-9" : "-right-9"} p-1.5 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-opacity shadow-md`}
+                          className={`absolute top-2 ${isSent ? "-left-10" : "-right-10"} p-2 rounded-full bg-white opacity-0 group-hover:opacity-100 transition-all duration-200 shadow-md hover:bg-neutral-50 hover:scale-105`}
                         >
-                          <Reply className="h-3.5 w-3.5 text-[#667781]" />
+                          <Reply className="h-4 w-4 text-neutral-500" />
                         </button>
                         
                         {/* RENDERIZADO MULTIMEDIA / TEXTO */}
@@ -626,7 +676,7 @@ export default function Conversations() {
                               <audio 
                                 src={getProxiedUrl(mediaUrl)} 
                                 controls 
-                                className="max-w-full"
+                                className="w-[260px] h-12 mt-1 rounded-full outline-none"
                               />
                             )}
 
@@ -656,13 +706,14 @@ export default function Conversations() {
                         )}
 
                         <div className="flex items-center justify-end gap-1 mt-0.5">
-                          <span className="text-[10px] text-[#667781]">
+                          <span className="text-[11px] font-medium text-[#667781]">
                             {new Date(msg.created_at).toLocaleTimeString("es-DO", { hour: "numeric", minute: "2-digit", hour12: true })}
                           </span>
                           {isSent && (
-                            msg.status === "read" ? <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" /> :
-                            msg.status === "delivered" ? <CheckCheck className="h-3.5 w-3.5 text-[#667781]" /> :
-                            <Check className="h-3.5 w-3.5 text-[#667781]" />
+                            msg.status === "sending" ? <Clock className="h-3 w-3 text-[#667781] opacity-50" /> :
+                            msg.status === "read" ? <CheckCheck className="h-4 w-4 text-[#53bdeb]" /> :
+                            msg.status === "delivered" ? <CheckCheck className="h-4 w-4 text-[#667781]" /> :
+                            <Check className="h-4 w-4 text-[#667781]" />
                           )}
                         </div>
                       </div>
@@ -776,14 +827,16 @@ export default function Conversations() {
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                    disabled={sending}
+                    onPaste={handlePaste}
+                    disabled={false}
+                    autoFocus
                   />
                 </div>
                 <div className="shrink-0">
                   <Button 
                     className="h-12 px-6 rounded-full bg-[#008055] hover:bg-[#006644] text-white font-bold flex items-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer" 
                     onClick={() => handleSend()} 
-                    disabled={sending || !messageText.trim()}
+                    disabled={!messageText.trim()}
                   >
                     {sending ? (
                       <Loader2 className="h-5 w-5 text-white animate-spin" />

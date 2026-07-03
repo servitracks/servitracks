@@ -172,6 +172,9 @@ export interface InventoryMovement {
   reason: string;
   date: string;
   userId?: string;
+  technicianId?: string;
+  customerId?: string;
+  invoiceId?: string;
 }
 
 export interface WorkOrder {
@@ -628,6 +631,29 @@ export interface Quote {
   notes?: string;
   createdAt: string;
   updatedAt: string;
-  items: QuoteItem[];
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MÓDULO DE CONTROL DE INVENTARIO
+// ════════════════════════════════════════════════════════════════════════════════
+
+export interface InventorySessionItem {
+  productId: string;
+  productName: string;
+  expectedQuantity: number;
+  actualQuantity: number;
+  difference: number;
+  notes?: string;
+}
+
+export interface InventorySession {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: 'en_progreso' | 'cerrado';
+  auditorId?: string;
+  discrepancies: InventorySessionItem[];
+  createdAt: string;
+  completedAt?: string;
 }
 

@@ -138,6 +138,7 @@ export default function DashboardLayout() {
       "/reminders": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/customers": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/inventory": ['owner', 'warehouse', 'superadmin'],
+      "/movimientos": ['owner', 'warehouse', 'superadmin'],
       "/services": ['owner', 'superadmin'],
       "/proveedores": ['owner', 'warehouse', 'superadmin'],
       "/mis-comisiones": ['mechanic', 'owner', 'superadmin'],

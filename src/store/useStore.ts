@@ -6,7 +6,7 @@ import type {
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
   Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest,
-  Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus
+  Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, InventorySession
 } from './types';
 
 // Re-export types for backward compatibility
@@ -42,6 +42,11 @@ interface AppState {
   barcodeSettings: BarcodeSettings;
   conversations: Conversation[];
   chatMessages: ChatMessage[];
+
+  // Inventory Sessions
+  inventorySessions: InventorySession[];
+  addInventorySession: (session: InventorySession) => void;
+  updateInventorySession: (id: string, updates: Partial<InventorySession>) => void;
 
   // Inspecciones Digitales (MPI)
   inspections: Inspection[];
@@ -273,6 +278,8 @@ export const useStore = create<AppState>()(
 
       chatMessages: [],
 
+      inventorySessions: [],
+
       inspections: [],
       quotes: [],
 
@@ -371,7 +378,7 @@ export const useStore = create<AppState>()(
       },
 
       addMovement: (movement) =>
-        set((state) => ({ movements: [...state.movements, movement] })),
+        set((state) => ({ movements: [...state.movements, { ...movement, userId: movement.userId || state.currentUserId }] })),
 
       addInvoice: (invoice) => {
         set((state) => {
@@ -398,7 +405,8 @@ export const useStore = create<AppState>()(
                           type: "out",
                           quantity: ci.quantity * item.quantity,
                           reason: `Venta combo (Factura #${invoice.id.slice(-6).toUpperCase()})`,
-                          date: new Date().toISOString()
+                          date: new Date().toISOString(),
+                          userId: state.currentUserId,
                         });
                       }
                     });
@@ -412,7 +420,8 @@ export const useStore = create<AppState>()(
                       type: "out",
                       quantity: item.quantity,
                       reason: `Venta (Factura #${invoice.id.slice(-6).toUpperCase()})`,
-                      date: new Date().toISOString()
+                      date: new Date().toISOString(),
+                      userId: state.currentUserId,
                     });
                   }
                 }
@@ -546,6 +555,13 @@ export const useStore = create<AppState>()(
       updateChatMessage: (id, updates) =>
         set((state) => ({
           chatMessages: state.chatMessages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+        })),
+
+      addInventorySession: (session) =>
+        set((state) => ({ inventorySessions: [session, ...state.inventorySessions] })),
+      updateInventorySession: (id, updates) =>
+        set((state) => ({
+          inventorySessions: state.inventorySessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
         })),
 
       addInspection: (inspection) =>

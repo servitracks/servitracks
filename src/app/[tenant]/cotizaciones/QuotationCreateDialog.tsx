@@ -137,9 +137,9 @@ export default function QuotationCreateDialog({
 
     return {
       subtotal,
-      tax: Math.round(tax),
-      discount: Math.round(discount),
-      total: Math.round(subtotal - discount + tax),
+      tax,
+      discount,
+      total: subtotal - discount + tax,
     };
   }, [items]);
 
@@ -250,7 +250,7 @@ export default function QuotationCreateDialog({
     const sub = item.quantity * item.unitPrice;
     const disc = sub * ((item.discountPercentage || 0) / 100);
     const tax = (sub - disc) * (item.taxPercentage / 100);
-    return Math.round(sub - disc + tax);
+    return sub - disc + tax;
   };
 
   const handleUpdateItem = (itemId: string, updates: Partial<QuoteItem>) => {
@@ -443,6 +443,12 @@ export default function QuotationCreateDialog({
                   placeholder="Ej: Precios válidos por 15 días. Sujetos a cambios sin previo aviso." 
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === " " && !notes) {
+                      e.preventDefault();
+                      setNotes("Precios válidos por 15 días. Sujetos a cambios sin previo aviso.");
+                    }
+                  }}
                   className="w-full min-h-[100px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
                 />
               </div>
@@ -465,6 +471,19 @@ export default function QuotationCreateDialog({
                       placeholder="Buscar repuesto por nombre, SKU o marca..."
                       value={itemSearch}
                       onChange={(e) => setItemSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && itemSearch.trim()) {
+                          e.preventDefault();
+                          const term = itemSearch.trim().toLowerCase();
+                          const exactMatch = products.find(p => p.sku.toLowerCase() === term);
+                          if (exactMatch) {
+                            handleAddItem(exactMatch, "product");
+                            setItemSearch("");
+                          } else {
+                            toast.error("Producto no encontrado por código");
+                          }
+                        }
+                      }}
                       className="w-full h-10 pl-9 pr-4 rounded-xl border border-neutral-200 bg-white text-sm focus:outline-none focus:border-neutral-400 transition-colors"
                     />
                   </div>
@@ -564,6 +583,7 @@ export default function QuotationCreateDialog({
                                 <input
                                   type="number"
                                   min="0"
+                                  step="any"
                                   value={item.unitPrice === 0 ? "" : item.unitPrice}
                                   onChange={(e) => handleUpdateItem(item.id, { unitPrice: e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)) })}
                                   className="w-full h-7 pl-7 pr-1 rounded border border-neutral-200 font-semibold focus:outline-none focus:border-neutral-400"
@@ -587,6 +607,7 @@ export default function QuotationCreateDialog({
                                   type="number"
                                   min="0"
                                   max="100"
+                                  step="any"
                                   value={item.discountPercentage === 0 ? "" : item.discountPercentage}
                                   onChange={(e) => handleUpdateItem(item.id, { discountPercentage: e.target.value === "" ? 0 : Math.min(100, Math.max(0, Number(e.target.value))) })}
                                   className="w-full h-7 pr-4 pl-1 rounded border border-neutral-200 text-right focus:outline-none focus:border-neutral-400"
@@ -595,7 +616,7 @@ export default function QuotationCreateDialog({
                               </div>
                             </td>
                             <td className="py-2.5 px-3 font-bold text-neutral-900 text-right">
-                              RD$ {item.total.toLocaleString()}
+                              RD$ {item.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               <button
@@ -622,21 +643,21 @@ export default function QuotationCreateDialog({
                   <div className="space-y-1.5 text-xs text-neutral-600 font-medium">
                     <div className="flex justify-between">
                       <span>Subtotal:</span>
-                      <span className="font-semibold text-neutral-900">RD$ {summary.subtotal.toLocaleString("es-DO")}</span>
+                      <span className="font-semibold text-neutral-900">RD$ {summary.subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                     </div>
                     {summary.discount > 0 && (
                       <div className="flex justify-between text-rose-600">
                         <span>Descuento aplicado:</span>
-                        <span className="font-semibold">- RD$ {summary.discount.toLocaleString("es-DO")}</span>
+                        <span className="font-semibold">- RD$ {summary.discount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                       </div>
                     )}
                     <div className="flex justify-between">
                       <span>ITBIS acumulado:</span>
-                      <span className="font-semibold text-neutral-900">RD$ {summary.tax.toLocaleString("es-DO")}</span>
+                      <span className="font-semibold text-neutral-900">RD$ {summary.tax.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                     </div>
                     <div className="flex justify-between text-base font-black text-neutral-900 pt-1.5 border-t border-neutral-200/60">
                       <span>Total estimado:</span>
-                      <span>RD$ {summary.total.toLocaleString("es-DO")}</span>
+                      <span>RD$ {summary.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
                     </div>
                   </div>
                 </div>
