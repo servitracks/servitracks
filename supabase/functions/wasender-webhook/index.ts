@@ -108,8 +108,8 @@ serve(async (req) => {
         try {
             const body = await req.json()
             const supabase = createClient(
-                Deno.env.get('SUPABASE_URL') ?? '',
-                Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+                'https://api.servitracks.com',
+                'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJzdXBhYmFzZSIsImlhdCI6MTc4MzM5MDUwMCwiZXhwIjo0OTM5MDY0MTAwLCJyb2xlIjoic2VydmljZV9yb2xlIn0.d3PUP2XsMjRySYopRLYoUoFQ1pHb7LyMp9X_Fv4AX-M'
             )
 
             // Detect WASender API Event
@@ -136,11 +136,28 @@ serve(async (req) => {
                     const wamid = key?.id;
                     const pushName = messageData.pushName || body.data?.pushName || from;
 
-                    // Resolve tenant ID from query parameter
-                    const tenantId = url.searchParams.get('tenant_id');
+                    // ── AUTO-RESOLVE TENANT by wasender_api_key ──────────────
+                    // Supports ?tenant_id=... (legacy) OR ?api_key=... (new, recommended)
+                    let tenantId = url.searchParams.get('tenant_id');
+
                     if (!tenantId) {
-                        console.error('No tenant_id provided in webhook URL');
-                        return new Response('No tenant_id provided', { status: 200 });
+                        const apiKeyParam = url.searchParams.get('api_key');
+                        if (!apiKeyParam) {
+                            console.error('No tenant_id or api_key provided in webhook URL');
+                            return new Response('Missing tenant identification', { status: 200 });
+                        }
+                        // Look up tenant by their WaSender API key
+                        const { data: tenantData, error: tenantErr } = await supabase
+                            .from('tenants')
+                            .select('id')
+                            .eq('wasender_api_key', apiKeyParam)
+                            .single();
+
+                        if (tenantErr || !tenantData) {
+                            console.error('No tenant found for api_key:', apiKeyParam, tenantErr);
+                            return new Response('Tenant not found', { status: 200 });
+                        }
+                        tenantId = tenantData.id;
                     }
 
                     // --- DEDUPLICATION: skip if wamid already exists ---

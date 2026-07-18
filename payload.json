@@ -1,0 +1,1 @@
+{"event":"messages.received","data":{"messages":[{"key":{"remoteJid":"1234567890@s.whatsapp.net","fromMe":false,"id":"A1B2C3D4"},"pushName":"Test User","message":{"conversation":"Hello this is a test"}}]}}

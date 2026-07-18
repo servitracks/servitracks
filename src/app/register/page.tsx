@@ -342,17 +342,19 @@ export default function RegisterPage() {
     setProvisioningStep(0);
 
     try {
-      // 1. Crear usuario en Supabase Auth (client normal)
+      // 1. Crear usuario en Supabase Auth con confirmación automática (sin necesidad de email SMTP)
       setProvisioningStep(0);
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: form.admin_email,
         password: form.admin_password,
-        options: { data: { name: form.admin_nombre } }
+        email_confirm: true, // ← confirma automáticamente sin requerir correo
+        user_metadata: { name: form.admin_nombre }
       });
 
       if (authError) {
         if (authError.message.toLowerCase().includes("already registered") ||
-            authError.message.toLowerCase().includes("already exists")) {
+            authError.message.toLowerCase().includes("already exists") ||
+            authError.message.toLowerCase().includes("already been registered")) {
           throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
         }
         throw new Error(`Error de autenticación: ${authError.message}`);

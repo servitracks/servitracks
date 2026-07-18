@@ -78,7 +78,7 @@ export default function Conversations() {
     if (url.includes("wasenderapi.com")) {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const apiKey = currentTenant?.wasenderApiKey || "";
-      return `${supabaseUrl}/functions/v1/wasender-proxy?action=media&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`;
+      return `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy?action=media&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`;
     }
     return url;
   };
@@ -102,11 +102,11 @@ export default function Conversations() {
     }
   }, [currentTenant?.id]);
 
-  // ── Load conversations + polling every 30s (fallback si webhook falla) ──
+  // ── Load conversations + polling every 5s para nuevos mensajes entrantes ──
   useEffect(() => {
     if (!supabaseTenantId) return;
     loadConversations();
-    const interval = setInterval(loadConversations, 30_000);
+    const interval = setInterval(loadConversations, 5_000);
     return () => clearInterval(interval);
   }, [supabaseTenantId]);
 
@@ -245,6 +245,26 @@ export default function Conversations() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
+  // ── Polling de mensajes cada 5s para la conversación activa ────────
+  useEffect(() => {
+    if (!selectedConvId) return;
+    const interval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from("wa_messages")
+        .select("*")
+        .eq("conversation_id", selectedConvId)
+        .order("created_at", { ascending: true });
+      if (!error && data) {
+        setMessages(prev => {
+          // Solo actualiza si hay mensajes nuevos para evitar re-renders innecesarios
+          if (data.length !== prev.length) return data;
+          return prev;
+        });
+      }
+    }, 5_000);
+    return () => clearInterval(interval);
+  }, [selectedConvId]);
+
   // ── Send message ────────────────────────────────────────────────────
   const handleSend = async (type = "text", mediaUrl?: string, filename?: string) => {
     if (type === "text" && !messageText.trim()) return;
@@ -302,7 +322,7 @@ export default function Conversations() {
     // 2. Send via WaSender API
     if (currentTenant?.wasenderApiKey) {
       try {
-        const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wasender-proxy`;
+        const edgeFunctionUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy`;
         
         // Exact format required by wasenderapi.com/api/send-message
         const payload = type === "text" 
@@ -786,7 +806,7 @@ export default function Conversations() {
                       reader.onload = async () => {
                         try {
                           const base64DataUrl = reader.result as string;
-                          const edgeFunctionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wasender-proxy?action=upload`;
+                          const edgeFunctionUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy?action=upload`;
                           
                           const res = await fetch(edgeFunctionUrl, {
                             method: "POST",
