@@ -1265,8 +1265,8 @@ export default function SettingsPage() {
                     {p.destacado && <Badge className="bg-neutral-900 text-white border-none">Popular</Badge>}
                   </div>
                   <div className="mt-2 font-display text-2xl font-extrabold text-neutral-900">{formatRD(p.precio_mensual)}<span className="text-sm font-normal text-neutral-400">/mes</span></div>
-                  {p.precio_anual > 0 && (
-                    <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual)}/año</div>
+                  {(p.precio_anual || 0) > 0 && (
+                    <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual || 0)}/año</div>
                   )}
                   <div className="mt-4 space-y-2 text-sm text-neutral-700 border-t border-neutral-100 pt-3 flex-grow">
                     <div>👥 Hasta {p.limite_empleados} Técnicos/Empleados</div>

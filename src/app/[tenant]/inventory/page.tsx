@@ -462,7 +462,7 @@ export default function InventoryPage() {
   const movements = tenantId ? allMovements.filter((m) => m.tenantId === tenantId) : [];
 
   const allSuppliers = useStore((s) => s.suppliers);
-  const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && s.status !== "inactivo") : [];
+  const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && (s.status as any) !== "inactivo") : [];
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
