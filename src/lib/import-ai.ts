@@ -10,9 +10,10 @@ Para cada producto extrae:
 - brand: marca del producto (string, usa "" si no hay)
 - category: categoría que mejor aplique entre: Lubricantes, Filtros, Frenos, Suspensión, Eléctrico, Neumáticos, Transmisión, Otros (string)
 - supplier: proveedor o distribuidor si aparece (string, usa "" si no hay)
-- costPrice: precio de costo o precio de compra (número, usa 0 si no hay)
-- salePrice: precio de venta o precio sugerido (número, usa 0 si no hay)
-- stock: cantidad disponible o en la factura (número, usa 0 si no hay)
+- costPrice: precio de costo o compra indicado en el documento (número, usa el precio unitario que aparezca, 0 si no hay)
+- salePrice: precio de venta al público (número, pon 0 por defecto ya que los documentos suelen ser de compra)
+- quantity: cantidad que se está comprando o facturando en este documento (número, usa 0 si no hay)
+- stock: usa siempre 0
 - minStock: stock mínimo sugerido (número, usa 5 por defecto)
 - tax: porcentaje de ITBIS/impuesto (número, usa 18 por defecto)
 - location: ubicación en almacén (string, usa "" si no hay)
@@ -26,7 +27,7 @@ REGLAS IMPORTANTES:
 - Si encuentras el mismo producto varias veces, inclúyelo una sola vez con la información más completa
 
 Ejemplo de formato esperado:
-[{"name":"Aceite Castrol 20W50","sku":"CAS-001","brand":"Castrol","category":"Lubricantes","supplier":"","costPrice":450,"salePrice":750,"stock":12,"minStock":5,"tax":18,"location":""}]`;
+[{"name":"Aceite Castrol 20W50","sku":"CAS-001","brand":"Castrol","category":"Lubricantes","supplier":"","costPrice":450,"salePrice":0,"quantity":12,"stock":0,"minStock":5,"tax":18,"location":""}]`;
 
 export interface ExtractedProduct {
   name: string;
@@ -36,6 +37,7 @@ export interface ExtractedProduct {
   supplier: string;
   costPrice: number;
   salePrice: number;
+  quantity: number;
   stock: number;
   minStock: number;
   tax: number;

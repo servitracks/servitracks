@@ -66,7 +66,7 @@ export default function POSPage() {
     tenantId: s.tenantId,
     name: s.name,
     sku: `SRV-${s.id.slice(-4).toUpperCase()}`,
-    category: s.category || "Servicios",
+    category: "Servicios",
     costPrice: 0,
     salePrice: s.price,
     laborPrice: s.laborPrice ? (s.price * s.laborPrice) / 100 : undefined,
@@ -115,10 +115,15 @@ export default function POSPage() {
   );
   const searchRef = useRef<HTMLInputElement>(null);
 
-  const CATEGORIES = ["Todos", ...Array.from(new Set(tenantProducts.map((p) => p.category).filter(Boolean)))];
+  const allPosItems: Product[] = [
+    ...tenantProducts,
+    ...tenantServices.filter(s => s.price > 0).map(serviceToProduct)
+  ];
+
+  const CATEGORIES = ["Todos", ...Array.from(new Set(allPosItems.map((p) => p.category).filter(Boolean)))];
 
   // Filter inventory: if an order with services is active, only show related products
-  const filteredProducts = tenantProducts.filter((p) => {
+  const filteredProducts = allPosItems.filter((p) => {
     const matchCat = category === "Todos" || p.category === category;
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku?.toLowerCase().includes(search.toLowerCase()) ||
@@ -302,27 +307,39 @@ export default function POSPage() {
     
     // Lógica para asignar e-NCF según tipo de cliente
     if (isEcfEnabled) {
-      const invoiceType = isCreditFiscal ? "E31" : "E32";
+      const invoiceType = isCreditFiscal ? "31" : "32";
       
       try {
         toast.info("Firmando y enviando factura electrónica a la DGII...", { id: "ecf-submit" });
-        // Mapeo básico para el SDK
-        const docPayload: any = {
-           invoiceType,
-           issueDate: new Date().toISOString(),
-           totals: { totalAmount: { value: total } },
-           items: cart.map(i => ({ name: i.name, quantity: i.quantity, unitPrice: { value: i.salePrice } })),
-           paymentForms: [{ method: "1", amount: { value: total } }]
-        };
+        
+        const { getEcfToken, submitInvoiceToDGII, buildElectronicDocument } = await import('@/lib/ecf');
 
-        if (isCreditFiscal && customerData.rnc) {
-          docPayload.buyer = {
-            rnc: customerData.rnc.replace(/\D/g, ""),
-            companyName: customerData.name || "Contribuyente"
-          };
-        }
+        // Construir payload con la estructura exacta que el SDK de Pronesoft espera
+        const docPayload = buildElectronicDocument({
+          invoiceType,
+          items: cart.map(i => ({
+            name: i.name,
+            quantity: i.quantity,
+            salePrice: i.salePrice,
+            tax: typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : 0.18,
+            category: i.category,
+          })),
+          subtotal,
+          itbis,
+          total,
+          payMethod,
+          issuer: {
+            rnc: taller.rnc,
+            businessName: taller.name,
+            address: taller.address,
+            phone: taller.phone,
+          },
+          buyer: isCreditFiscal && customerData.rnc ? {
+            rnc: customerData.rnc,
+            name: customerData.name,
+          } : undefined,
+        });
 
-        const { getEcfToken, submitInvoiceToDGII } = await import('@/lib/ecf');
         const token = await getEcfToken(ecfConfig!.clientId!, ecfConfig!.clientSecret!, ecfConfig!.environment!);
         
         // Llamada real al API de Pronesoft
@@ -334,17 +351,21 @@ export default function POSPage() {
            qrUrl = result.documentStampUrl;
            signatureDate = result.signatureDate ? new Date(result.signatureDate).toISOString() : new Date().toISOString();
            toast.success("Factura Electrónica enviada exitosamente", { id: "ecf-submit" });
+        } else if (result && result.contingencyMode) {
+           // El SDK de Pronesoft manejó contingencia automáticamente
+           finalNcf = result.encf || result.documentNumber || `E${invoiceType}${String(Date.now()).slice(-10)}`;
+           securityCode = result.securityCode;
+           qrUrl = result.documentStampUrl;
+           signatureDate = new Date().toISOString();
+           toast.warning("Factura enviada en modo contingencia — será procesada por la DGII cuando se restablezca.", { id: "ecf-submit" });
         } else {
            throw new Error("Respuesta inválida del servidor ECF");
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error DGII:", err);
-        // Si falla (por ej. falta mapping completo), generamos uno de contingencia/simulado para la UI
-        finalNcf = `${invoiceType}000000001${String(Date.now()).slice(-2)}`;
-        securityCode = `SBX${Math.floor(100000 + Math.random() * 900000)}`;
-        qrUrl = `https://fc.dgii.gov.do/testecf/consultatimbrefc?rncemisor=132749482&encf=${finalNcf}&montototal=${total}`;
-        signatureDate = new Date().toISOString();
-        toast.success("Factura electrónica de contingencia generada.", { id: "ecf-submit" });
+        // Factura SIN e-NCF — se guardará para reenvío posterior
+        finalNcf = isCreditFiscal ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
+        toast.error(`Error al enviar a la DGII: ${err.message || "Conexión fallida"}. Se generó comprobante local (NCF tradicional).`, { id: "ecf-submit", duration: 6000 });
       }
     } else {
       // Si no tiene e-CF, usa B01 o B02 normal
@@ -591,11 +612,17 @@ export default function POSPage() {
                         {product.name}
                       </h3>
                       <div className="mt-auto pt-2 flex flex-col gap-2">
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-[10px] font-bold text-neutral-400">RD$</span>
-                          <span className="text-lg font-black text-neutral-900">
-                            {product.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </span>
+                        <div className="flex items-baseline gap-1 h-6">
+                          {product.salePrice > 0 ? (
+                            <>
+                              <span className="text-[10px] font-bold text-neutral-400">RD$</span>
+                              <span className="text-lg font-black text-neutral-900">
+                                {product.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded uppercase tracking-wider mt-1">Precio Variable</span>
+                          )}
                         </div>
                         <div className="flex items-center">
                           <div className={cn(

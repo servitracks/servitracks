@@ -373,6 +373,7 @@ function dbToService(row: any): Service {
     maintenanceCategory: row.maintenance_category || undefined,
     lifespanKm: row.lifespan_km || undefined,
     lifespanDays: row.lifespan_days || undefined,
+    tax: row.tax || 0,
   };
 }
 
@@ -389,6 +390,7 @@ function serviceToDb(s: Service) {
     maintenance_category: s.maintenanceCategory || null,
     lifespan_km: s.lifespanKm || null,
     lifespan_days: s.lifespanDays || null,
+    tax: s.tax || 0,
   };
 }
 

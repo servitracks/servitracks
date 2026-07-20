@@ -5,7 +5,7 @@ import { useStore, Service, Technician } from "@/store/useStore";
 import { 
   Plus, Search, MoreVertical, Layers, Clock, 
   Trash2, Edit, Filter, ChevronRight, X, 
-  UserCog, UserCheck, UserX, Phone, CalendarDays 
+  UserCog, UserCheck, UserX, Phone, CalendarDays, AlertCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams } from "@/lib/next-compat";
+import { useNominaStore } from "@/store/useNominaStore";
 
 const CATEGORIES = [
   "Todos", "Motor", "Frenos", "Neumáticos", "Suspensión", 
@@ -47,6 +48,7 @@ const emptyTechnician: Partial<Technician> = {
 export default function ServicesPage() {
   const { tenant } = useParams();
   const { services, addService, updateService, deleteService, tenants, technicians, addTechnician, updateTechnician, deleteTechnician } = useStore();
+  const { empleados } = useNominaStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
   
@@ -234,7 +236,11 @@ export default function ServicesPage() {
                   </Badge>
                   <h3 className="font-bold text-neutral-900 leading-tight">{service.name}</h3>
                   <div className="flex flex-wrap gap-2 mt-1 items-center">
-                    <span className="text-xs font-black text-neutral-900">RD$ {service.price.toLocaleString()}</span>
+                    {service.price > 0 ? (
+                      <span className="text-xs font-black text-neutral-900">RD$ {service.price.toLocaleString()}</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">Precio Variable</span>
+                    )}
                     {service.tax === 18 && (
                       <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
                         +ITBIS
@@ -474,6 +480,14 @@ export default function ServicesPage() {
                           >
                             {tech.status === "active" ? "Activo" : "Inactivo"}
                           </Badge>
+                          {!empleados.some(e => e.tenantId === tech.tenantId && tech.name.toLowerCase().includes(e.nombres.toLowerCase())) && (
+                            <div 
+                              className="bg-rose-100 text-rose-600 rounded-full p-1 cursor-help" 
+                              title="No está registrado en Nómina y Personal. Faltan datos (Cédula, Salario, etc.)"
+                            >
+                              <AlertCircle className="w-3.5 h-3.5" />
+                            </div>
+                          )}
                         </div>
                         <p className="text-xs text-neutral-400 flex items-center gap-1 font-mono mt-0.5">
                           ID: #{tech.id.slice(-6).toUpperCase()}

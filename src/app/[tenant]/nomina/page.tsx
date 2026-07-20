@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Users, FileText, Calculator, Plus, Search, CheckCircle, Download, Check } from "lucide-react";
+import { Users, FileText, Calculator, Plus, Search, CheckCircle, Download, Check, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const formatRD = (amount: number) => {
@@ -23,7 +23,7 @@ const formatRD = (amount: number) => {
 
 export default function NominaPage() {
   const { tenant } = useParams();
-  const { tenants } = useStore();
+  const { tenants, technicians } = useStore();
   const { empleados, nominas, addEmpleado, updateEmpleado, addNomina, updateNomina } = useNominaStore();
   
   const currentTenant = tenants.find(t => t.slug === tenant) || null;
@@ -47,6 +47,15 @@ export default function NominaPage() {
       e.cedula.includes(searchEmp)
     );
   }, [tenantEmpleados, searchEmp]);
+
+  // Técnicos no registrados en nómina
+  const unregisteredTechnicians = useMemo(() => {
+    const tenantTechs = technicians.filter(t => t.tenantId === tenantId);
+    return tenantTechs.filter(tech => {
+      // Un técnico no está registrado si no hay ningún empleado cuyo nombre coincida
+      return !tenantEmpleados.some(e => tech.name.toLowerCase().includes(e.nombres.toLowerCase()));
+    }).filter(tech => tech.name.toLowerCase().includes(searchEmp.toLowerCase()));
+  }, [technicians, tenantEmpleados, tenantId, searchEmp]);
 
   // -- Generación State --
   const tenantNominas = useMemo(() => {
@@ -87,6 +96,23 @@ export default function NominaPage() {
 
   const openEditEmp = (emp: EmpleadoNomina) => {
     setEmpForm(emp);
+    setIsEmpDialogOpen(true);
+  };
+
+  const openRegisterTech = (tech: any) => {
+    // Intentar separar nombre y apellido si tiene espacio
+    const parts = tech.name.split(" ");
+    const nombres = parts[0];
+    const apellidos = parts.slice(1).join(" ") || "";
+    
+    setEmpForm({
+      nombres,
+      apellidos,
+      cargo: "Técnico",
+      tipoCobro: tech.tipoPago === "fijo" ? "mensual" : "quincenal",
+      salarioBase: tech.tipoPago === "fijo" ? tech.pagoNomina : 0,
+      estado: tech.status
+    });
     setIsEmpDialogOpen(true);
   };
 
@@ -188,7 +214,7 @@ export default function NominaPage() {
             <CardHeader className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <CardTitle className="font-heading text-lg font-bold text-neutral-900">Directorio de Empleados</CardTitle>
-                <Badge variant="outline" className="rounded-full bg-white">{filteredEmpleados.length}</Badge>
+                <Badge variant="outline" className="rounded-full bg-white">{filteredEmpleados.length + unregisteredTechnicians.length}</Badge>
               </div>
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="relative w-full sm:w-64">
@@ -222,30 +248,48 @@ export default function NominaPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {filteredEmpleados.length === 0 ? (
+                    {filteredEmpleados.length === 0 && unregisteredTechnicians.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="p-10 text-center text-neutral-400 font-medium">
-                          No se encontraron empleados registrados.
+                          No se encontraron empleados ni técnicos registrados.
                         </td>
                       </tr>
                     ) : (
-                      filteredEmpleados.map(emp => (
-                        <tr key={emp.id} className="hover:bg-neutral-50/50 cursor-pointer" onClick={() => openEditEmp(emp)}>
-                          <td className="p-4 font-mono text-xs">{emp.cedula}</td>
-                          <td className="p-4 font-semibold text-neutral-800">{emp.nombres} {emp.apellidos}</td>
-                          <td className="p-4 text-neutral-600">{emp.cargo}</td>
-                          <td className="p-4 text-neutral-600 capitalize">{emp.tipoCobro}</td>
-                          <td className="p-4 text-right font-bold text-neutral-900">{formatRD(emp.salarioBase)}</td>
-                          <td className="p-4 text-center">
-                            <Badge className={cn(
-                              "rounded-md border-none font-semibold",
-                              emp.estado === 'activo' ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
-                            )}>
-                              {emp.estado.toUpperCase()}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))
+                      <>
+                        {unregisteredTechnicians.map(tech => (
+                          <tr key={tech.id} className="hover:bg-rose-50/40 cursor-pointer bg-rose-50/20" onClick={() => openRegisterTech(tech)}>
+                            <td className="p-4 font-mono text-xs text-rose-500 font-bold flex items-center gap-1.5">
+                              <AlertCircle className="w-3.5 h-3.5" /> Faltan Datos
+                            </td>
+                            <td className="p-4 font-semibold text-neutral-800">{tech.name}</td>
+                            <td className="p-4 text-neutral-600">Técnico</td>
+                            <td className="p-4 text-neutral-400">—</td>
+                            <td className="p-4 text-right font-bold text-neutral-400">—</td>
+                            <td className="p-4 text-center">
+                              <Badge className="rounded-md border-none font-semibold bg-rose-100 text-rose-700">
+                                NO REGISTRADO
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredEmpleados.map(emp => (
+                          <tr key={emp.id} className="hover:bg-neutral-50/50 cursor-pointer" onClick={() => openEditEmp(emp)}>
+                            <td className="p-4 font-mono text-xs">{emp.cedula}</td>
+                            <td className="p-4 font-semibold text-neutral-800">{emp.nombres} {emp.apellidos}</td>
+                            <td className="p-4 text-neutral-600">{emp.cargo}</td>
+                            <td className="p-4 text-neutral-600 capitalize">{emp.tipoCobro}</td>
+                            <td className="p-4 text-right font-bold text-neutral-900">{formatRD(emp.salarioBase)}</td>
+                            <td className="p-4 text-center">
+                              <Badge className={cn(
+                                "rounded-md border-none font-semibold",
+                                emp.estado === 'activo' ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
+                              )}>
+                                {emp.estado.toUpperCase()}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </>
                     )}
                   </tbody>
                 </table>

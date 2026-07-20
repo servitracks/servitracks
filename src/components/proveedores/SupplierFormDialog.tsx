@@ -26,6 +26,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   tenantId: string;
   editSupplier?: Supplier | null;
+  onSuccess?: (supplierId: string) => void;
 }
 
 interface FormState {
@@ -59,7 +60,7 @@ const emptyForm: FormState = {
   contacts: [{ name: "", role: "", phone: "", whatsapp: "", email: "" }],
 };
 
-export default function SupplierFormDialog({ open, onOpenChange, tenantId, editSupplier }: Props) {
+export default function SupplierFormDialog({ open, onOpenChange, tenantId, editSupplier, onSuccess }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId);
   const { addSupplier, updateSupplier } = useStore();
   const isEdit = !!editSupplier;
@@ -142,6 +143,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         notes: form.notes.trim() || undefined,
       });
       toast.success("Proveedor actualizado");
+      if (onSuccess) onSuccess(editSupplier.id);
     } else {
       const newSupplier: Supplier = {
         id: `sup_${Date.now()}`,
@@ -174,6 +176,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
       };
       addSupplier(newSupplier);
       toast.success(`Proveedor ${newSupplier.code} creado`);
+      if (onSuccess) onSuccess(newSupplier.id);
     }
     onOpenChange(false);
   };

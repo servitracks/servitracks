@@ -21,6 +21,7 @@ export interface ImportRow {
   supplier: string;
   costPrice: number;
   salePrice: number;
+  quantity: number;
   stock: number;
   minStock: number;
   tax: number;
@@ -80,7 +81,7 @@ export default function StepPreviewEditor({
   const validCount = rows.filter((r) => r.name.trim()).length;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 flex flex-col h-full flex-1 min-h-0">
       {/* Summary bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -119,8 +120,8 @@ export default function StepPreviewEditor({
       />
 
       {/* Table */}
-      <div className="rounded-xl border border-neutral-100 overflow-hidden">
-        <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+      <div className="rounded-xl border border-neutral-100 overflow-hidden flex-1 flex flex-col min-h-0">
+        <div className="overflow-auto flex-1 bg-white">
           <table className="w-full text-sm min-w-[900px]">
             <thead className="bg-neutral-50 sticky top-0 z-10">
               <tr>
@@ -131,6 +132,7 @@ export default function StepPreviewEditor({
                   "Categoría",
                   "Precio Costo",
                   "Precio Venta",
+                  "Cantidad",
                   "Stock",
                   "",
                 ].map((h) => (
@@ -199,7 +201,7 @@ export default function StepPreviewEditor({
                             updateRow(row._id, "sku", e.target.value)
                           }
                           placeholder="SKU"
-                          className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 focus:border-neutral-400 bg-transparent font-mono"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white font-mono px-2"
                         />
                       </td>
 
@@ -211,7 +213,7 @@ export default function StepPreviewEditor({
                             updateRow(row._id, "brand", e.target.value)
                           }
                           placeholder="Marca"
-                          className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 focus:border-neutral-400 bg-transparent"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white px-2"
                         />
                       </td>
 
@@ -221,7 +223,7 @@ export default function StepPreviewEditor({
                           value={row.category || "Otros"}
                           onValueChange={(v) => updateRow(row._id, "category", v ?? "Otros")}
                         >
-                          <SelectTrigger className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 bg-transparent w-32">
+                          <SelectTrigger className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 bg-white w-32 px-2">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl">
@@ -247,7 +249,7 @@ export default function StepPreviewEditor({
                             )
                           }
                           placeholder="0"
-                          className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 focus:border-neutral-400 bg-transparent w-24"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white w-24 px-2"
                         />
                       </td>
 
@@ -264,7 +266,24 @@ export default function StepPreviewEditor({
                             )
                           }
                           placeholder="0"
-                          className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 focus:border-neutral-400 bg-transparent w-24"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white w-24 px-2"
+                        />
+                      </td>
+
+                      {/* Quantity */}
+                      <td className="px-2 py-1.5">
+                        <Input
+                          type="number"
+                          value={row.quantity || ""}
+                          onChange={(e) =>
+                            updateRow(
+                              row._id,
+                              "quantity",
+                              Number(e.target.value)
+                            )
+                          }
+                          placeholder="0"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white w-20 px-2"
                         />
                       </td>
 
@@ -281,7 +300,7 @@ export default function StepPreviewEditor({
                             )
                           }
                           placeholder="0"
-                          className="h-8 rounded-lg text-xs border border-transparent hover:border-neutral-200 focus:border-neutral-400 bg-transparent w-20"
+                          className="h-8 rounded-lg text-xs border border-neutral-200 hover:border-neutral-300 focus:border-neutral-400 bg-white w-20 px-2"
                         />
                       </td>
 
@@ -289,7 +308,7 @@ export default function StepPreviewEditor({
                       <td className="px-2 py-1.5">
                         <button
                           onClick={() => deleteRow(row._id)}
-                          className="h-7 w-7 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-rose-100 hover:text-rose-600 text-neutral-400 transition-all"
+                          className="h-7 w-7 rounded-lg flex items-center justify-center opacity-60 hover:opacity-100 hover:bg-rose-100 hover:text-rose-600 text-neutral-500 transition-all"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -305,7 +324,7 @@ export default function StepPreviewEditor({
 
       {/* Bottom hint */}
       <p className="text-xs text-neutral-400 text-center">
-        {rows.length} filas en total · Pasa el cursor sobre una fila para ver el botón de eliminar
+        {rows.length} filas en total
       </p>
     </div>
   );

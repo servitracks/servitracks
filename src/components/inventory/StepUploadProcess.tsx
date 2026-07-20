@@ -7,6 +7,9 @@ import { Upload, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle } from 
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import { extractProductsWithAI } from "@/lib/import-ai";
+import { Supplier } from "@/store/types";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 const CATEGORIES = [
   "Lubricantes",
@@ -52,6 +55,8 @@ const SOURCE_CONFIG = {
 interface StepUploadProcessProps {
   sourceType: SourceType;
   onParsed: (rows: ImportRow[]) => void;
+  suppliers?: Supplier[];
+  selectedSupplierId: string;
 }
 
 function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
@@ -64,9 +69,10 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
       ? String(raw.category ?? raw.Categoria ?? raw.categoria ?? raw.Categoría ?? raw["Categoría"] ?? "").trim()
       : "Otros",
     supplier: String(raw.supplier ?? raw.Proveedor ?? raw.proveedor ?? raw.PROVEEDOR ?? ""),
-    costPrice: Number(raw.costPrice ?? raw["Precio Costo"] ?? raw["precio costo"] ?? raw["Precio de Costo"] ?? raw.costo ?? 0) || 0,
-    salePrice: Number(raw.salePrice ?? raw["Precio Venta"] ?? raw["precio venta"] ?? raw["Precio de Venta"] ?? raw.precio ?? raw.Precio ?? 0) || 0,
-    stock: Number(raw.stock ?? raw.Stock ?? raw.Cantidad ?? raw.cantidad ?? raw.CANTIDAD ?? raw.qty ?? 0) || 0,
+    costPrice: Number(raw.costPrice ?? raw["Precio Costo"] ?? raw["precio costo"] ?? raw["Precio de Costo"] ?? raw.costo ?? raw.precio ?? raw.Precio ?? 0) || 0,
+    salePrice: Number(raw.salePrice ?? raw["Precio Venta"] ?? raw["precio venta"] ?? raw["Precio de Venta"] ?? 0) || 0,
+    quantity: Number(raw.quantity ?? raw.Quantity ?? raw.Cantidad ?? raw.cantidad ?? raw.CANTIDAD ?? raw.qty ?? 0) || 0,
+    stock: Number(raw.stock ?? raw.Stock ?? raw.STOCK ?? 0) || 0,
     minStock: Number(raw.minStock ?? raw["Stock Minimo"] ?? raw["Stock Mínimo"] ?? 5) || 5,
     tax: Number(raw.tax ?? raw.Impuesto ?? raw.ITBIS ?? 18) || 18,
     location: String(raw.location ?? raw.Ubicacion ?? raw.Ubicación ?? raw.ubicacion ?? ""),
@@ -118,6 +124,8 @@ async function processWithAI(file: File, mimeType: string): Promise<ImportRow[]>
 export default function StepUploadProcess({
   sourceType,
   onParsed,
+  suppliers = [],
+  selectedSupplierId,
 }: StepUploadProcessProps) {
   const config = SOURCE_CONFIG[sourceType];
   const Icon = config.icon;
@@ -154,6 +162,10 @@ export default function StepUploadProcess({
           setIsProcessing(false);
           return;
         }
+
+        const supplierObj = suppliers.find(s => s.id === selectedSupplierId);
+        const supplierName = supplierObj ? supplierObj.commercialName : "";
+        rows = rows.map(r => ({ ...r, supplier: supplierName }));
 
         setTimeout(() => onParsed(rows), 300);
       } catch (err: unknown) {
@@ -193,16 +205,22 @@ export default function StepUploadProcess({
 
       {/* Drop Zone */}
       <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+        onDragOver={(e) => { 
+          e.preventDefault(); 
+          if (!isProcessing) setIsDragging(true); 
+        }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        onClick={() => !isProcessing && fileRef.current?.click()}
+        onClick={() => {
+          if (isProcessing) return;
+          fileRef.current?.click();
+        }}
         className={cn(
           "relative rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer min-h-[240px] flex flex-col items-center justify-center gap-4 p-8",
           isDragging
             ? cn(config.border, config.bg)
             : "border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50",
-          isProcessing && "pointer-events-none"
+          isProcessing && "opacity-50"
         )}
       >
         <input
@@ -244,7 +262,9 @@ export default function StepUploadProcess({
               <p className="font-bold text-neutral-900 text-sm">
                 {config.hint}
               </p>
-              <p className="text-xs text-neutral-400 mt-1">{config.accept}</p>
+              <p className="text-xs text-neutral-400 mt-1">
+                {config.accept}
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <div className="h-px w-12 bg-neutral-200" />
@@ -253,11 +273,13 @@ export default function StepUploadProcess({
             </div>
             <button
               type="button"
+              disabled={isProcessing}
               className={cn(
                 "rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors border-2",
                 config.border,
                 config.bg,
-                config.color
+                config.color,
+                isProcessing && "opacity-50 cursor-not-allowed"
               )}
             >
               <Upload className="h-4 w-4 inline mr-2" />

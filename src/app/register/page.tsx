@@ -368,6 +368,10 @@ export default function RegisterPage() {
 
       // 2. Insertar Tenant usando supabaseAdmin (bypasea RLS con service_role)
       setProvisioningStep(1);
+      // Calcular fecha de fin de prueba (7 días desde ahora)
+      const TRIAL_DAYS = 7;
+      const trialEndDate = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
       const { data: tenantData, error: tenantError } = await supabaseAdmin
         .from("tenants")
         .insert({
@@ -384,7 +388,8 @@ export default function RegisterPage() {
             formato_ticket_default: "80mm"
           },
           plan_id: form.plan_id,
-          estado: "ACTIVO"
+          estado: "TRIAL",
+          trial_hasta: trialEndDate
         })
         .select()
         .single();
@@ -449,7 +454,8 @@ export default function RegisterPage() {
         status: "active",
         config: tenantData.config,
         plan_id: tenantData.plan_id || undefined,
-        estado: tenantData.estado || undefined
+        estado: tenantData.estado || "TRIAL",
+        trial_hasta: tenantData.trial_hasta || trialEndDate
       };
 
       const localUser: TenantUser = {

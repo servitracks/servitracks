@@ -91,19 +91,27 @@ export default function QuotationCreateDialog({
         }
       }
 
-      // Default state for new quote
-      setCustomerId("");
-      setVehicleId("");
-      setNotes("");
-      setStatus("draft");
-      setItems([]);
-      
-      // Default validity date: 15 days from now
-      const defaultDate = new Date();
-      defaultDate.setDate(defaultDate.getDate() + 15);
-      setValidUntil(defaultDate.toISOString().split("T")[0]);
+      // If we are NOT editing, we simply keep the local state 
+      // (this prevents data loss if they close the modal by mistake)
+      if (!quoteIdToEdit && !validUntil) {
+        // Set default validity date only if not already set
+        const defaultDate = new Date();
+        defaultDate.setDate(defaultDate.getDate() + 15);
+        setValidUntil(defaultDate.toISOString().split("T")[0]);
+      }
     }
   }, [open, quoteIdToEdit, quotes]);
+
+  const handleReset = () => {
+    setCustomerId("");
+    setVehicleId("");
+    setNotes("");
+    setStatus("draft");
+    setItems([]);
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 15);
+    setValidUntil(defaultDate.toISOString().split("T")[0]);
+  };
 
   // Clean vehicle selection if customer changes
   useEffect(() => {
@@ -205,12 +213,14 @@ export default function QuotationCreateDialog({
       toast.success(`Incrementado "${item.name}"`);
     } else {
       // Add new item
-      const taxRate = isProduct ? (item as Product).tax : 18; // Default to 18% for services if not specified
+      const taxRate = isProduct ? (item as Product).tax : ((item as Service).tax || 0);
       const newItem: QuoteItem = {
         id: `qi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         name: item.name,
         quantity: 1,
-        unitPrice: isProduct ? ((item as Product).salePrice / (1 + taxRate / 100)) : (item as Service).price,
+        unitPrice: isProduct 
+          ? ((item as Product).salePrice / (1 + taxRate / 100)) 
+          : ((item as Service).price / (1 + taxRate / 100)),
         taxPercentage: taxRate,
         discountPercentage: 0,
         total: 0,
@@ -325,12 +335,16 @@ export default function QuotationCreateDialog({
       toast.success(`Cotización ${quoteNumber} creada exitosamente`);
     }
 
+    handleReset();
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-6xl rounded-2xl p-6 bg-white overflow-hidden max-h-[92vh] flex flex-col">
+      <DialogContent 
+        className="sm:max-w-6xl rounded-2xl p-6 bg-white overflow-hidden max-h-[92vh] flex flex-col"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader className="mb-2 shrink-0">
           <DialogTitle className="text-xl font-bold text-neutral-900">
             {quoteIdToEdit ? "Editar Cotización" : "Crear Nueva Cotización"}
@@ -468,7 +482,7 @@ export default function QuotationCreateDialog({
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
                     <input
-                      placeholder="Buscar repuesto por nombre, SKU o marca..."
+                      placeholder="Buscar repuesto o servicio..."
                       value={itemSearch}
                       onChange={(e) => setItemSearch(e.target.value)}
                       onKeyDown={(e) => {
@@ -496,12 +510,37 @@ export default function QuotationCreateDialog({
                   </Button>
                 </div>
 
-                {/* Search Results List (Only products/repuestos) */}
+                {/* Search Results List */}
                 {itemSearch.trim() && (
                   <div className="border border-neutral-200 rounded-xl bg-white p-2 max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar shrink-0 shadow-inner">
-                    {filteredProducts.length > 0 ? (
+                    
+                    {/* Services Results */}
+                    {filteredServices.length > 0 && (
                       <>
                         <div className="text-[9px] font-bold text-neutral-400 uppercase px-3 pt-1 pb-1.5 flex justify-between items-center border-b border-neutral-50 mb-1">
+                          <span>Servicios / Mano de Obra</span>
+                        </div>
+                        {filteredServices.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => { handleAddItem(s, "service"); setItemSearch(""); }}
+                            className="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-50 rounded-lg flex justify-between items-center transition-colors border-b border-neutral-50"
+                          >
+                            <span className="font-semibold text-neutral-800 flex items-center gap-1.5">
+                              <Wrench className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                              {s.name}
+                            </span>
+                            <span className="font-bold text-neutral-900">RD$ {s.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Products Results */}
+                    {filteredProducts.length > 0 && (
+                      <>
+                        <div className="text-[9px] font-bold text-neutral-400 uppercase px-3 pt-2 pb-1.5 flex justify-between items-center border-b border-neutral-50 mb-1 mt-1">
                           <span>Repuestos</span>
                           {items.some((i) => i.serviceId) && (
                             <span className="text-[8px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded font-normal">Filtrado por compatibilidad</span>
@@ -522,8 +561,10 @@ export default function QuotationCreateDialog({
                           </button>
                         ))}
                       </>
-                    ) : (
-                      <div className="text-center text-xs text-neutral-400 py-4">No se encontraron repuestos</div>
+                    )}
+
+                    {filteredProducts.length === 0 && filteredServices.length === 0 && (
+                      <div className="text-center text-xs text-neutral-400 py-4">No se encontraron resultados</div>
                     )}
                   </div>
                 )}

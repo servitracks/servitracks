@@ -26,6 +26,7 @@ export default function DashboardLayout() {
   const location = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadChatsCount, setUnreadChatsCount] = useState(0);
   const [initialSyncDone, setInitialSyncDone] = useState(false);
@@ -106,6 +107,39 @@ export default function DashboardLayout() {
       fetchMissingUser();
     }
   }, [currentUserId, currentUser]);
+
+  // Refrescar estado del tenant (trial_hasta, estado, plan_id) desde Supabase
+  // para que el modal de prueba expirada funcione incluso si el store local es viejo
+  useEffect(() => {
+    if (!currentTenant?.id) return;
+
+    async function refreshTenantStatus() {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("tenants")
+          .select("estado, trial_hasta, plan_id, status")
+          .eq("id", currentTenant!.id)
+          .single();
+        
+        if (!error && data) {
+          const updates: Partial<typeof currentTenant> = {};
+          if (data.estado && data.estado !== currentTenant!.estado) updates.estado = data.estado;
+          if (data.trial_hasta && data.trial_hasta !== currentTenant!.trial_hasta) updates.trial_hasta = data.trial_hasta;
+          if (data.plan_id && data.plan_id !== currentTenant!.plan_id) updates.plan_id = data.plan_id;
+          if (data.status && data.status !== currentTenant!.status) updates.status = data.status;
+          
+          if (Object.keys(updates).length > 0) {
+            console.log("[Trial Check] Actualizando estado del tenant desde Supabase:", updates);
+            updateTenant(currentTenant!.id, updates);
+          }
+        }
+      } catch (err) {
+        console.error("[Trial Check] Error al refrescar estado:", err);
+      }
+    }
+
+    refreshTenantStatus();
+  }, [currentTenant?.id]);
 
   // Control de Acceso basado en Roles (RBAC) y redirección automática en tiempo real
   useEffect(() => {
@@ -494,8 +528,13 @@ export default function DashboardLayout() {
   }
   
   const trialDays = currentTenant.trial_hasta ? Math.max(0, Math.ceil((new Date(currentTenant.trial_hasta).getTime() - Date.now()) / 86400000)) : 0;
-  const isTrialExpired = currentTenant?.estado === "TRIAL" && currentTenant.trial_hasta && new Date(currentTenant.trial_hasta).getTime() < Date.now();
-  const isSuspended = currentTenant?.estado === "SUSPENDIDO" || currentTenant?.estado === "CANCELADO";
+  const isSuperAdmin = currentUser?.role === 'superadmin' || currentUser?.email === 'admin@servitracks.com' || currentUser?.email === 'autocheck.do@gmail.com';
+  const isTrialExpired = !isSuperAdmin && currentTenant?.estado === "TRIAL" && currentTenant.trial_hasta && new Date(currentTenant.trial_hasta).getTime() < Date.now();
+  const isTrialActive = !isSuperAdmin && currentTenant?.estado === "TRIAL" && currentTenant.trial_hasta && new Date(currentTenant.trial_hasta).getTime() >= Date.now();
+  const isSuspended = !isSuperAdmin && (currentTenant?.estado === "SUSPENDIDO" || currentTenant?.estado === "CANCELADO");
+  
+  const isOnPlanesTab = location.pathname.includes('/settings') && location.search.includes('tab=planes');
+  const showExpiredOverlay = isTrialExpired && !isOnPlanesTab;
 
   function onLogout() {
     logout();
@@ -673,7 +712,7 @@ export default function DashboardLayout() {
       )}
 
       {/* Overlay de Prueba Vencida Premium */}
-      {isTrialExpired && (
+      {showExpiredOverlay && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/20 backdrop-blur-sm p-4">
           <motion.div 
             initial={{ scale: 0.98, opacity: 0, y: 10 }}
@@ -698,7 +737,7 @@ export default function DashboardLayout() {
               </h2>
               
               <p className="mx-auto max-w-[320px] text-[13px] font-medium leading-relaxed text-slate-500 mb-6">
-                Tu período de prueba gratuito para el taller <span className="text-slate-900 font-bold">{currentTenant.name}</span> ha expirado. Debes adquirir un plan activo para seguir utilizando ServiTracks.
+                Tu período de prueba gratuito para <strong>{currentTenant.name}</strong> ha expirado. Debes adquirir un plan activo para seguir utilizando ServiTracks.
               </p>
 
               <div className="space-y-4 mb-4">
@@ -711,8 +750,8 @@ export default function DashboardLayout() {
                   </Button>
                   
                   <Button 
-                    className="h-11 w-full rounded-xl bg-primary hover:bg-primary/95 text-white text-sm font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                    onClick={() => window.location.assign(`/t/${currentTenant.slug}/settings?tab=plan`)}
+                    className="h-11 w-full rounded-xl bg-slate-950 hover:bg-slate-900 text-white text-sm font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-transparent"
+                    onClick={() => navigate(`/${currentTenant.slug}/settings?tab=planes`)}
                   >
                     <CreditCard className="h-4 w-4" /> Ver planes
                   </Button>
@@ -725,6 +764,70 @@ export default function DashboardLayout() {
                     onClick={onLogout}
                   >
                     <LogOut className="h-3.5 w-3.5" /> Salir
+                  </Button>
+                </div>
+              </div>
+
+              <div className="text-center pt-3">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">ServiTracks · ID: {currentTenant.id.slice(0, 8)}</p>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal para Mejorar Plan (Upgrade Modal - Prueba Activa) */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/20 backdrop-blur-sm p-4 animate-fade-in">
+          <motion.div 
+            initial={{ scale: 0.98, opacity: 0, y: 10 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="w-full max-w-md overflow-hidden rounded-[2rem] border border-white/40 bg-white/90 shadow-[0_20px_50px_rgba(0,0,0,0.1)] backdrop-blur-xl relative"
+          >
+            <button 
+              onClick={() => setShowUpgradeModal(false)}
+              className="absolute top-4 right-4 p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-full cursor-pointer transition-colors"
+            >
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.49999L3.21846 10.9684C2.99391 11.193 2.99391 11.557 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31316L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.557 12.0062 11.193 11.7816 10.9684L8.31322 7.49999L11.7816 4.03157Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path></svg>
+            </button>
+
+            <div className="relative p-6 pt-8 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500 text-white shadow-xl ring-2 ring-white">
+                <Shield className="h-6 w-6" />
+              </div>
+              
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-emerald-700 mb-3 border border-emerald-500/20">
+                Prueba Activa
+              </div>
+
+              <h2 className="font-display text-2xl font-black text-slate-900 tracking-tight leading-none mb-2">
+                ¡Potencia tu Taller!
+              </h2>
+              
+              <p className="mx-auto max-w-[320px] text-[13px] font-medium leading-relaxed text-slate-500 mb-6">
+                Te quedan <strong>{trialDays} {trialDays === 1 ? 'día' : 'días'}</strong> de prueba. Explora nuestros planes para asegurar acceso ininterrumpido a todas las herramientas de ServiTracks.
+              </p>
+
+              <div className="space-y-4 mb-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <Button 
+                    className="h-11 w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                    onClick={() => {
+                      setShowUpgradeModal(false);
+                      setShowSoporteModal(true);
+                    }}
+                  >
+                    <MessageCircle className="h-4 w-4" /> Contactar soporte
+                  </Button>
+                  
+                  <Button 
+                    className="h-11 w-full rounded-xl bg-slate-950 hover:bg-slate-900 text-white text-sm font-bold shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-transparent"
+                    onClick={() => {
+                      setShowUpgradeModal(false);
+                      navigate(`/${currentTenant.slug}/settings?tab=planes`);
+                    }}
+                  >
+                    <CreditCard className="h-4 w-4" /> Ver planes
                   </Button>
                 </div>
               </div>
@@ -785,6 +888,24 @@ export default function DashboardLayout() {
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} unreadChatsCount={unreadChatsCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
+        {/* Banner de cuenta regresiva de prueba */}
+        {isTrialActive && (
+          <div className="bg-black px-4 py-2.5 flex items-center justify-center gap-3 text-white text-xs font-bold shadow-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+            </span>
+            <span>
+              🕐 Período de prueba: Te {trialDays === 1 ? 'queda' : 'quedan'} <strong className="text-white underline underline-offset-2">{trialDays} {trialDays === 1 ? 'día' : 'días'}</strong> restantes.
+            </span>
+            <button 
+              className="ml-2 bg-white/20 hover:bg-white/30 transition-colors rounded-lg px-3 py-1 text-[11px] font-bold cursor-pointer"
+              onClick={() => setShowUpgradeModal(true)}
+            >
+              Contratar plan
+            </button>
+          </div>
+        )}
         <HydrationGuard>
           <main className="flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="mx-auto max-w-7xl">

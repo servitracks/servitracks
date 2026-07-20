@@ -1,20 +1,22 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2 } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useParams } from "@/lib/next-compat";
+import { useParams, useSearchParams } from "@/lib/next-compat";
 import { EcfSettings } from "@/components/settings/EcfSettings";
+import { getPlans, formatRD } from "@/lib/storage";
+import type { Plan } from "@/store/types";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
@@ -24,6 +26,7 @@ const TABS = [
   { id: "print", label: "Impresión", icon: Printer },
   { id: "users", label: "Usuarios y Roles", icon: Users },
   { id: "security", label: "Seguridad", icon: Shield },
+  { id: "planes", label: "Planes", icon: CreditCard },
 ];
 
 const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
@@ -64,7 +67,32 @@ export default function SettingsPage() {
     const allowedIds = new Set(sameEmailUsers.map((u) => u.tenantId));
     return tenants.filter((t) => allowedIds.has(t.id));
   }, [currentUser, users, tenants, currentTenant]);
-  const [tab, setTab] = useState("taller");
+  // Check URL params for initial tab (used by "Contratar plan" banner)
+  const searchParams = useSearchParams();
+  const initialTab = searchParams?.get?.("tab") || "taller";
+  const [tab, setTab] = useState(initialTab);
+
+  // Sync tab if URL changes (e.g. navigating from banner)
+  useEffect(() => {
+    const urlTab = searchParams?.get?.("tab");
+    if (urlTab && TABS.some(t => t.id === urlTab)) {
+      setTab(urlTab);
+    }
+  }, [searchParams]);
+
+  // ── Plans tab state ──
+  const [plansData, setPlansData] = useState<Plan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+
+  useEffect(() => {
+    if (tab === "planes") {
+      setPlansLoading(true);
+      getPlans().then((p) => {
+        setPlansData(p);
+        setPlansLoading(false);
+      }).catch(() => setPlansLoading(false));
+    }
+  }, [tab]);
 
   // ── Taller tab state ──
   const [tallerForm, setTallerForm] = useState({
@@ -257,6 +285,8 @@ export default function SettingsPage() {
   // ── Users tab state ──
   const [inviteOpen, setInviteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TenantUser | null>(null);
+  const [pinTarget, setPinTarget] = useState<TenantUser | null>(null);
+  const [pinForm, setPinForm] = useState("");
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", password: "", role: "mechanic" as TenantUser["role"] });
   const [isInviting, setIsInviting] = useState(false);
 
@@ -338,6 +368,18 @@ export default function SettingsPage() {
     deleteUser(deleteTarget.id);
     toast.success(`Usuario "${deleteTarget.name}" eliminado`);
     setDeleteTarget(null);
+  };
+
+  const handleSavePin = () => {
+    if (!pinTarget) return;
+    if (pinForm && pinForm.length !== 4) {
+      toast.error("El PIN debe tener exactamente 4 dígitos");
+      return;
+    }
+    updateUser(pinTarget.id, { pin: pinForm });
+    toast.success(`PIN asignado correctamente a ${pinTarget.name}`);
+    setPinTarget(null);
+    setPinForm("");
   };
 
   // ── Security tab state ──
@@ -1070,16 +1112,56 @@ export default function SettingsPage() {
                       {u.status === "active" ? "Activo" : u.status === "invited" ? "Invitado" : "Inactivo"}
                     </Badge>
                     {u.role !== "owner" && (
-                      <button onClick={() => setDeleteTarget(u)}
-                        className="text-neutral-300 hover:text-rose-500 transition-colors cursor-pointer border-none bg-transparent">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => { setPinTarget(u); setPinForm(u.pin || ""); }}
+                          className="text-neutral-400 hover:text-emerald-600 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-emerald-50"
+                          title="Asignar PIN de Caja">
+                          <Key className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setDeleteTarget(u)}
+                          className="text-neutral-300 hover:text-rose-500 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-rose-50">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
+
+          {/* User PIN Modal */}
+          <Dialog open={!!pinTarget} onOpenChange={(val) => !val && setPinTarget(null)}>
+            <DialogContent className="sm:max-w-sm rounded-2xl p-6">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Key className="h-5 w-5 text-emerald-600" /> Asignar PIN
+                </DialogTitle>
+                <DialogDescription>
+                  Establece un PIN de 4 dígitos para {pinTarget?.name}. Este PIN se usará para confirmar operaciones como el cierre de caja.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label>PIN (4 dígitos numéricos)</Label>
+                  <Input 
+                    type="password"
+                    maxLength={4}
+                    value={pinForm}
+                    onChange={(e) => setPinForm(e.target.value.replace(/\D/g, ""))}
+                    className="font-mono text-center text-xl tracking-[1em]"
+                    placeholder="••••"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPinTarget(null)} className="rounded-xl">Cancelar</Button>
+                <Button onClick={handleSavePin} className="rounded-xl bg-black text-white hover:bg-neutral-800">
+                  Guardar PIN
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 
@@ -1161,6 +1243,68 @@ export default function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ── PLANES ── */}
+      {tab === "planes" && (
+        <div className="space-y-6">
+          <div>
+            <CardTitle>Planes de Suscripción</CardTitle>
+            <CardDescription>Explora y contrata el plan que mejor se adapte a las necesidades de tu taller.</CardDescription>
+          </div>
+          
+          {plansLoading ? (
+            <div className="text-center py-12 text-sm text-neutral-500 font-medium">Cargando planes...</div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-3">
+              {plansData.map((p) => (
+                <Card key={p.id} className={cn("border p-6 shadow-sm bg-white rounded-xl flex flex-col", p.destacado ? "ring-2 ring-black border-black" : "border-neutral-200/80")}>
+                  <div className="flex items-start justify-between">
+                    <span className="font-display text-xl font-black text-neutral-900">{p.nombre}</span>
+                    {p.destacado && <Badge className="bg-neutral-900 text-white border-none">Popular</Badge>}
+                  </div>
+                  <div className="mt-2 font-display text-2xl font-extrabold text-neutral-900">{formatRD(p.precio_mensual)}<span className="text-sm font-normal text-neutral-400">/mes</span></div>
+                  {p.precio_anual > 0 && (
+                    <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual)}/año</div>
+                  )}
+                  <div className="mt-4 space-y-2 text-sm text-neutral-700 border-t border-neutral-100 pt-3 flex-grow">
+                    <div>👥 Hasta {p.limite_empleados} Técnicos/Empleados</div>
+                    <div>📦 {p.limite_ordenes_mes ?? "∞"} Órdenes/mes</div>
+                    {(p.precio_sucursal_adicional || 0) > 0 ? (
+                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra a {formatRD(p.precio_sucursal_adicional)}/mes</div>
+                    ) : (
+                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra sin costo</div>
+                    )}
+                    <div className="text-blue-600 font-semibold">💬 {(p.limite_whatsapp_mes || 0).toLocaleString()} Mensajes WhatsApp</div>
+                    <div className="border-t border-neutral-100 pt-2 space-y-1">
+                      {Object.entries(p.modulos).map(([k, v]) => (
+                        <div key={k} className={cn("flex items-center gap-2", v ? "text-neutral-950 font-bold" : "text-neutral-400 line-through opacity-50 font-medium")}>
+                          <span>{v ? "✓" : "✗"}</span>
+                          <span className="capitalize">{k === "facturacion_fiscal" ? "Facturación Electrónica" : k.replace(/_/g, " ")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-6 pt-4 border-t border-neutral-100">
+                    <Button 
+                      className="w-full rounded-xl font-bold cursor-pointer bg-black text-white hover:bg-neutral-800"
+                      onClick={() => {
+                        const url = p.polar_product_monthly_url;
+                        if (url) {
+                          window.open(url, "_blank");
+                        } else {
+                          window.open(`https://wa.me/18299681720?text=Hola ServiTracks, me interesa contratar el plan ${p.nombre} para mi taller ${taller.name}.`, "_blank");
+                        }
+                      }}
+                    >
+                      Contratar {p.nombre}
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

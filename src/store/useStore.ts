@@ -148,6 +148,7 @@ interface AppState {
   addPurchaseOrder: (po: PurchaseOrder) => void;
   updatePurchaseOrder: (id: string, updates: Partial<PurchaseOrder>) => void;
   deletePurchaseOrder: (id: string) => void;
+  checkInventoryForPurchaseOrders: (tenantId: string) => void;
   addGoodsReceipt: (gr: GoodsReceipt) => void;
   addAccountPayable: (ap: AccountPayable) => void;
   updateAccountPayable: (id: string, updates: Partial<AccountPayable>) => void;
@@ -262,6 +263,7 @@ export const useStore = create<AppState>()(
       services: [],
 
       movements: [],
+      purchaseOrders: [],
       cajas: [],
       cajaMovements: [],
       invoices: [],
@@ -435,6 +437,13 @@ export const useStore = create<AppState>()(
             movements: newMovements
           };
         });
+        
+        // Disparador Automático de Pedidos (Revisar niveles de stock bajos)
+        if (invoice.status !== 'cancelled') {
+          setTimeout(() => {
+            get().checkInventoryForPurchaseOrders(invoice.tenantId);
+          }, 500);
+        }
         
         // Integración con Mantenimiento Automático (Omnicanal)
         if (invoice.vehicleId && invoice.status === 'paid') {
@@ -611,6 +620,90 @@ export const useStore = create<AppState>()(
         })),
       deletePurchaseOrder: (id) =>
         set((state) => ({ purchaseOrders: state.purchaseOrders.filter((po) => po.id !== id) })),
+
+      checkInventoryForPurchaseOrders: (tenantId) => {
+        const state = get() as AppState;
+        const tenantProducts = state.products.filter(p => p.tenantId === tenantId && !p.isCombo);
+        
+        const newOrders: PurchaseOrder[] = [];
+        const updatedOrders: PurchaseOrder[] = [];
+
+        tenantProducts.forEach(product => {
+          if (product.stock <= product.minStock) {
+            const supplierId = product.supplier || "Suplidor Desconocido";
+            
+            // Revisa si ya hay un borrador para este suplidor
+            let draftOrder = state.purchaseOrders.find(
+              po => po.tenantId === tenantId && po.status === 'borrador' && po.supplierId === supplierId
+            );
+            
+            if (!draftOrder) {
+               draftOrder = newOrders.find(po => po.supplierId === supplierId);
+            }
+
+            const neededQuantity = Math.max(1, (product.minStock * 2) - product.stock);
+            
+            const newItem: PurchaseOrderItem = {
+              id: Math.random().toString(36).substr(2, 9),
+              productId: product.id,
+              productName: product.name,
+              quantity: neededQuantity,
+              unitPrice: product.costPrice || 0,
+              salePrice: product.salePrice || 0,
+              receivedQuantity: 0
+            };
+
+            if (draftOrder) {
+              const existingItem = draftOrder.items.find(i => i.productId === product.id);
+              if (!existingItem) {
+                // Modificar una copia fresca
+                const clonedDraft = JSON.parse(JSON.stringify(draftOrder)) as PurchaseOrder;
+                clonedDraft.items.push(newItem);
+                clonedDraft.subtotal += (newItem.quantity * newItem.unitPrice);
+                clonedDraft.total = clonedDraft.subtotal + clonedDraft.tax;
+                clonedDraft.updatedAt = new Date().toISOString();
+                
+                if (!newOrders.some(no => no.id === clonedDraft.id)) {
+                   const existingUpdateIdx = updatedOrders.findIndex(uo => uo.id === clonedDraft.id);
+                   if (existingUpdateIdx !== -1) updatedOrders[existingUpdateIdx] = clonedDraft;
+                   else updatedOrders.push(clonedDraft);
+                } else {
+                   const newOrderIdx = newOrders.findIndex(no => no.id === clonedDraft.id);
+                   if (newOrderIdx !== -1) newOrders[newOrderIdx] = clonedDraft;
+                }
+              }
+            } else {
+              const newOrder: PurchaseOrder = {
+                id: `po_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                tenantId,
+                supplierId,
+                number: `OC-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
+                paymentStatus: 'pending',
+                status: 'borrador',
+                items: [newItem],
+                subtotal: newItem.quantity * newItem.unitPrice,
+                tax: 0,
+                total: newItem.quantity * newItem.unitPrice,
+                createdBy: 'auto_system',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              };
+              newOrders.push(newOrder);
+            }
+          }
+        });
+
+        if (newOrders.length > 0 || updatedOrders.length > 0) {
+          set(s => {
+             const baseOrders = s.purchaseOrders.map(po => {
+               const updated = updatedOrders.find(uo => uo.id === po.id);
+               return updated ? updated : po;
+             });
+             return { purchaseOrders: [...baseOrders, ...newOrders] };
+          });
+        }
+      },
+
       addGoodsReceipt: (gr) =>
         set((state) => ({ goodsReceipts: [...state.goodsReceipts, gr] })),
       addAccountPayable: (ap) =>

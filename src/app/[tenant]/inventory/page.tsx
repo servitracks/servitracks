@@ -46,6 +46,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -448,8 +449,10 @@ export default function InventoryPage() {
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
   const isOwner = activeRole === 'owner';
 
-  const { addProduct, updateProduct, deleteProduct, addMovement, addAccountPayable } = useStore();
+  const { addProduct, updateProduct, deleteProduct, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();
   const allProducts = useStore((s) => s.products);
+  const allPurchaseOrders = useStore((s) => s.purchaseOrders) || [];
+  const purchaseOrders = tenantId ? allPurchaseOrders.filter((po) => po.tenantId === tenantId) : [];
   const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
 
   const allServices = useStore((s) => s.services);
@@ -459,7 +462,7 @@ export default function InventoryPage() {
   const movements = tenantId ? allMovements.filter((m) => m.tenantId === tenantId) : [];
 
   const allSuppliers = useStore((s) => s.suppliers);
-  const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && s.status === "activo") : [];
+  const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && s.status !== "inactivo") : [];
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
@@ -470,6 +473,8 @@ export default function InventoryPage() {
   const [isCreateComboOpen, setIsCreateComboOpen] = useState(false);
   const [isQuoteOpen, setIsQuoteOpen] = useState(false);
   const [isPrintLabelOpen, setIsPrintLabelOpen] = useState(false);
+  const [isPoPreviewOpen, setIsPoPreviewOpen] = useState(false);
+  const [selectedPo, setSelectedPo] = useState<any>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [adjustQty, setAdjustQty] = useState("");
@@ -688,41 +693,125 @@ export default function InventoryPage() {
     toast.success(`${products.length} productos exportados`);
   };
 
-  const handleImport = (rows: ImportRow[]) => {
+  const handleImport = (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => {
     let imported = 0;
+    let totalPurchaseCost = 0;
+    let totalPurchaseTax = 0;
+    
+    // Preparar items para la orden de compra
+    const purchaseOrderItems: any[] = [];
     rows.forEach((row) => {
       if (!row.name.trim()) return;
-      const newProduct: Product = {
-        id: `p${Date.now()}-${imported}`,
-        tenantId: tenantId,
-        name: row.name.trim(),
-        sku: row.sku || `SKU-${Date.now()}-${imported}`,
-        barcode: "",
-        category: row.category || "Otros",
-        brand: row.brand || "",
-        supplier: row.supplier || "",
-        costPrice: row.costPrice || 0,
-        salePrice: row.salePrice || 0,
-        stock: row.stock || 0,
-        minStock: row.minStock || 5,
-        tax: row.tax || 18,
-        location: row.location || "",
-      };
-      addProduct(newProduct);
-      if (row.stock > 0) {
+      
+      const existingProduct = products.find(p => 
+        (row.sku && p.sku === row.sku) || 
+        p.name.toLowerCase() === row.name.trim().toLowerCase()
+      );
+      
+      let productId = "";
+      let productName = row.name.trim();
+
+      if (existingProduct) {
+        productId = existingProduct.id;
+        productName = existingProduct.name;
+        updateProduct(existingProduct.id, {
+          stock: existingProduct.stock + (Number(row.quantity) || 0),
+          costPrice: row.costPrice > 0 ? row.costPrice : existingProduct.costPrice,
+          salePrice: row.salePrice > 0 ? row.salePrice : existingProduct.salePrice,
+        });
+      } else {
+        const newProduct: Product = {
+          id: `p${Date.now()}-${imported}`,
+          tenantId: tenantId,
+          name: row.name.trim(),
+          sku: row.sku || `SKU-${Date.now()}-${imported}`,
+          barcode: "",
+          category: row.category || "Otros",
+          brand: row.brand || "",
+          supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",
+          costPrice: row.costPrice || 0,
+          salePrice: row.salePrice || 0,
+          stock: (Number(row.stock) || 0) + (Number(row.quantity) || 0),
+          minStock: row.minStock || 5,
+          tax: row.tax || 18,
+          location: row.location || "",
+        };
+        productId = newProduct.id;
+        addProduct(newProduct);
+      }
+      
+      if (row.quantity > 0) {
+        const itemCost = Number(row.costPrice) || 0;
+        const itemQty = Number(row.quantity);
+        const itemTaxPct = Number(row.tax) || 18;
+        
+        const lineTotalCost = itemCost * itemQty;
+        const lineTax = Math.round(lineTotalCost * (itemTaxPct / 100));
+        
+        totalPurchaseCost += lineTotalCost;
+        totalPurchaseTax += lineTax;
         addMovement({
           id: `m${Date.now()}-${imported}`,
           tenantId: tenantId,
-          productId: newProduct.id,
-          productName: newProduct.name,
+          productId: productId,
+          productName: productName,
           type: "in",
-          quantity: row.stock,
-          reason: "Importación masiva",
+          quantity: row.quantity,
+          reason: "Importación de compra",
           date: new Date().toISOString(),
+        });
+        
+        purchaseOrderItems.push({
+          id: `po_item_${Date.now()}-${imported}`,
+          productId: productId,
+          productName: productName,
+          quantity: itemQty,
+          unitPrice: itemCost,
+          salePrice: row.salePrice || 0,
+          receivedQuantity: itemQty
         });
       }
       imported++;
     });
+
+    if (supplierId && totalPurchaseCost > 0) {
+      const selectedSupplier = suppliers.find(s => s.id === supplierId);
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + (selectedSupplier?.creditDays || 30));
+
+      addAccountPayable({
+        id: `ap_${Date.now()}`,
+        tenantId,
+        supplierId,
+        invoiceNumber: invoiceNumber?.trim() || `IMPORT-${Date.now().toString().slice(-6)}`,
+        amount: totalPurchaseCost + totalPurchaseTax,
+        paidAmount: 0,
+        dueDate: dueDate.toISOString(),
+        status: "pendiente",
+        createdAt: new Date().toISOString(),
+        notes: `Importación masiva de ${imported} productos.`,
+      });
+
+      addPurchaseOrder({
+        id: `po_${Date.now()}`,
+        tenantId,
+        supplierId,
+        number: `OC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        invoiceNumber: invoiceNumber?.trim() || `IMPORT-${Date.now().toString().slice(-6)}`,
+        paymentStatus: "pending",
+        status: "recibida_completa",
+        items: purchaseOrderItems,
+        subtotal: totalPurchaseCost,
+        tax: totalPurchaseTax,
+        total: totalPurchaseCost + totalPurchaseTax,
+        notes: `Generada automáticamente por importación de inventario.`,
+        createdBy: currentUserId || "admin",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        expectedDelivery: new Date().toISOString(),
+      });
+    }
+
     toast.success(`✓ ${imported} producto${imported !== 1 ? "s" : ""} importado${imported !== 1 ? "s" : ""} al inventario`);
   };
 
@@ -787,6 +876,7 @@ export default function InventoryPage() {
             <TabsTrigger value="products" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Productos</TabsTrigger>
             <TabsTrigger value="combos" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Combos / Paquetes</TabsTrigger>
             <TabsTrigger value="movements" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Movimientos</TabsTrigger>
+            <TabsTrigger value="pedidos" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm text-blue-600 data-[state=active]:text-blue-700">Pedidos (Auto)</TabsTrigger>
           </TabsList>
           {/* Search + filter */}
           <div className="flex gap-3 w-full sm:w-auto">
@@ -1060,6 +1150,67 @@ export default function InventoryPage() {
             </Table>
           </div>
         </TabsContent>
+        <TabsContent value="pedidos" className="mt-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            {purchaseOrders.length === 0 ? (
+              <div className="col-span-3 text-center p-8 bg-neutral-50 rounded-xl border border-neutral-100 flex flex-col items-center justify-center">
+                <div className="h-12 w-12 rounded-full bg-white flex items-center justify-center shadow-sm border border-neutral-100 mb-3">
+                  <Package className="h-5 w-5 text-neutral-400" />
+                </div>
+                <p className="text-neutral-900 font-bold">No hay pedidos registrados</p>
+                <p className="text-sm text-neutral-500 mt-1 max-w-sm">Los borradores se generarán aquí automáticamente cuando el stock de un producto baje del mínimo establecido.</p>
+              </div>
+            ) : purchaseOrders.map((po) => (
+              <Card key={po.id} className="border-neutral-100 shadow-sm overflow-hidden flex flex-col">
+                <div className="p-4 bg-neutral-50 border-b border-neutral-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-neutral-900 truncate max-w-[150px]" title={po.supplierId || 'Suplidor Desconocido'}>
+                      {po.supplierId || 'Suplidor Desconocido'}
+                    </h3>
+                    <p className="text-[11px] text-neutral-500 mt-0.5">{new Date(po.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <Badge variant="outline" className={cn(
+                    "text-[10px] uppercase font-black tracking-wider px-2 py-0.5 border",
+                    po.status === 'borrador' ? "bg-amber-50 text-amber-600 border-amber-200" :
+                    po.status === 'enviada' ? "bg-blue-50 text-blue-600 border-blue-200" :
+                    "bg-emerald-50 text-emerald-600 border-emerald-200"
+                  )}>
+                    {po.status === 'borrador' ? 'Borrador' : po.status === 'enviada' ? 'Enviado' : 'Recibido'}
+                  </Badge>
+                </div>
+                <div className="p-4 flex-1">
+                  <p className="text-xs font-semibold text-neutral-500 mb-3 uppercase tracking-wider">
+                    {po.items.length} producto{po.items.length !== 1 && 's'}
+                  </p>
+                  <div className="space-y-2.5 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
+                    {po.items.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-sm">
+                        <span className="text-neutral-700 truncate pr-2 flex-1 text-xs">{item.productName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-neutral-900 text-xs">{item.quantity} unid.</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] text-neutral-500 font-medium">Total Estimado</p>
+                    <p className="text-sm font-black text-neutral-900">
+                      RD$ {po.total.toLocaleString()}
+                    </p>
+                  </div>
+                  <Button size="sm" className="rounded-lg bg-black text-white hover:bg-neutral-800 transition-colors h-8 text-xs" onClick={() => {
+                     setSelectedPo(po);
+                     setIsPoPreviewOpen(true);
+                  }}>
+                    Revisar & Enviar
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
       </Tabs>
 
       {/* Create Dialog */}
@@ -1144,6 +1295,7 @@ export default function InventoryPage() {
         open={isImportOpen}
         onClose={() => setIsImportOpen(false)}
         onImport={handleImport}
+        suppliers={suppliers}
       />
 
       <QuoteRequestDialog
@@ -1164,6 +1316,133 @@ export default function InventoryPage() {
         onOpenChange={setIsCreateComboOpen}
         tenantId={tenantId}
       />
+
+      {/* PO Preview Dialog */}
+      <Dialog open={isPoPreviewOpen} onOpenChange={setIsPoPreviewOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-3xl p-0 overflow-hidden bg-white shadow-2xl">
+          {selectedPo && (
+            <>
+              <DialogHeader className="p-6 pb-4 border-b border-neutral-100">
+                <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                  <Package className="h-5 w-5 text-neutral-800" />
+                  Orden #{selectedPo.number || selectedPo.id.slice(-6).toUpperCase()}
+                </DialogTitle>
+                <DialogDescription className="text-sm text-neutral-500">
+                  {selectedPo.supplierId || 'Suplidor Desconocido'} — Creada el {new Date(selectedPo.createdAt).toLocaleDateString()}
+                </DialogDescription>
+              </DialogHeader>
+              
+              <div className="max-h-[50vh] overflow-y-auto">
+                <Table>
+                  <TableHeader className="bg-neutral-50/50">
+                    <TableRow>
+                      <TableHead>Producto</TableHead>
+                      <TableHead className="text-right w-24">Cantidad</TableHead>
+                      <TableHead className="text-right w-28">Precio Ref.</TableHead>
+                      <TableHead className="text-right w-28">Subtotal</TableHead>
+                      <TableHead className="w-10"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedPo.items.map((item: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-medium text-sm">{item.productName}</TableCell>
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            min="1"
+                            className="h-8 w-20 text-right ml-auto px-2"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value) || 0;
+                              const newItems = [...selectedPo.items];
+                              newItems[idx] = { ...newItems[idx], quantity: val };
+                              const newTotal = newItems.reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
+                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              setSelectedPo(updatedPo);
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right text-neutral-500 font-mono">
+                          RD$ {(item.unitPrice || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right font-bold text-neutral-900">RD$ {((item.unitPrice || 0) * item.quantity).toLocaleString()}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
+                            onClick={() => {
+                              const newItems = selectedPo.items.filter((_: any, i: number) => i !== idx);
+                              const newTotal = newItems.reduce((acc: number, curr: any) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
+                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              setSelectedPo(updatedPo);
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="p-5 sm:px-6 border-t border-neutral-100 bg-neutral-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+                <div>
+                  <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado</p>
+                  <p className="text-2xl font-black text-neutral-900 leading-none whitespace-nowrap">RD$ {selectedPo.total.toLocaleString()}</p>
+                </div>
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                  <Button 
+                    variant="ghost"
+                    onClick={() => {
+                      if (confirm("¿Estás seguro de que deseas cancelar este pedido?")) {
+                        deletePurchaseOrder(selectedPo.id);
+                        toast.success("Pedido cancelado correctamente.");
+                        setIsPoPreviewOpen(false);
+                      }
+                    }}
+                    className="rounded-xl text-rose-600 hover:text-rose-700 hover:bg-rose-100 font-semibold px-4"
+                  >
+                    Cancelar Pedido
+                  </Button>
+                  <Button variant="outline" onClick={() => setIsPoPreviewOpen(false)} className="rounded-xl border-neutral-200 bg-white font-semibold shadow-sm">
+                    Cerrar
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      updatePurchaseOrder(selectedPo.id, { status: 'enviada' });
+                      toast.success("Orden marcada como enviada.");
+                      
+                      let msg = `*Orden de Compra #${selectedPo.number || selectedPo.id.slice(-6).toUpperCase()}* - ${currentTenant?.name || 'Taller'}\n\nHola, necesitamos solicitar los siguientes artículos:\n\n`;
+                      selectedPo.items.forEach((item: any) => {
+                        msg += `- ${item.quantity}x ${item.productName}\n`;
+                      });
+                      msg += `\nGracias. Quedamos a la espera.`;
+                      
+                      const supplier = suppliers.find(s => s.commercialName === selectedPo.supplierId || s.id === selectedPo.supplierId);
+                      let phone = "";
+                      if (supplier && supplier.contacts && supplier.contacts.length > 0) {
+                        phone = supplier.contacts[0].whatsapp || supplier.contacts[0].phone || "";
+                      }
+                      
+                      const url = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
+                      window.open(url, '_blank');
+                      setIsPoPreviewOpen(false);
+                    }}
+                    className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-sm"
+                  >
+                    Marcar & Enviar
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

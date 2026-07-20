@@ -39,6 +39,7 @@ export interface TenantUser {
   email: string;
   role: 'owner' | 'mechanic' | 'cashier' | 'receptionist' | 'warehouse';
   status: 'active' | 'invited' | 'inactive';
+  pin?: string;
   createdAt: string;
 }
 

@@ -50,12 +50,6 @@ const CATEGORIAS_GASTOS = [
   "Otros"
 ];
 
-// Default simulated employees for PIN signing
-const DEFAULT_EMPLEADOS: Empleado[] = [
-  { id: "emp-yeri", nombre: "Yeri", apellido: "Orlando", rol: "ADMIN", pin: "1234" },
-  { id: "emp-carlos", nombre: "Carlos", apellido: "Méndez", rol: "CAJERO", pin: "0000" }
-];
-
 export default function CajaPage() {
   const { tenant } = useParams();
   
@@ -69,11 +63,14 @@ export default function CajaPage() {
     updateTenant,
     technicians = [],
     invoices = [],
-    updateInvoice
+    updateInvoice,
+    users = []
   } = useStore();
 
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
+
+  const tenantUsers = useMemo(() => users.filter(u => u.tenantId === tenantId && (u.role === 'cashier' || u.role === 'owner')), [users, tenantId]);
 
   // Active caja shift
   const activeCaja = useMemo(() => {
@@ -204,6 +201,7 @@ export default function CajaPage() {
   const [isMovOpen, setIsMovOpen] = useState(false);
   const [isCajaChicaOpen, setIsCajaChicaOpen] = useState(false);
   const [isHistoricoOpen, setIsHistoricoOpen] = useState(false);
+  const [isPrintMovimientosOpen, setIsPrintMovimientosOpen] = useState(false);
   const [isTicketPreviewOpen, setIsTicketPreviewOpen] = useState(false);
   const [selectedTicketCaja, setSelectedTicketCaja] = useState<Caja | null>(null);
   const [isCxcOpen, setIsCxcOpen] = useState(false);
@@ -339,7 +337,7 @@ export default function CajaPage() {
   }, [cxcInvoices, cxcSearch]);
   // Apertura Form States
   const [aperturaMonto, setAperturaMonto] = useState("");
-  const [aperturaCajero, setAperturaCajero] = useState(DEFAULT_EMPLEADOS[0].id);
+  const [aperturaCajero, setAperturaCajero] = useState("");
   const [aperturaNotas, setAperturaNotas] = useState("");
 
   // Movimiento Form States
@@ -354,7 +352,7 @@ export default function CajaPage() {
   const [contadoEfectivo, setContadoEfectivo] = useState("");
   const [contadoTarjeta, setContadoTarjeta] = useState("");
   const [contadoTransferencia, setContadoTransferencia] = useState("");
-  const [cierreCajeroId, setCierreCajeroId] = useState(DEFAULT_EMPLEADOS[0].id);
+  const [cierreCajeroId, setCierreCajeroId] = useState("");
   const [cierrePin, setCierrePin] = useState("");
   const [cierreNotas, setCierreNotas] = useState("");
 
@@ -370,6 +368,55 @@ export default function CajaPage() {
 
   // Sort configuration for movements table
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+
+  // Clickable Cards State
+  const [detailsModalType, setDetailsModalType] = useState<'CASH_IN_BOX' | 'SALES_CASH' | 'SALES_CARD' | 'SALES_TRANSFER' | null>(null);
+
+  const detailsData = useMemo(() => {
+    if (!detailsModalType) return { title: '', total: 0, items: [] as MovimientoCaja[] };
+    
+    let items: MovimientoCaja[] = [];
+    let title = '';
+    let total = 0;
+
+    switch (detailsModalType) {
+      case 'CASH_IN_BOX':
+        title = 'Detalle: Efectivo en Caja';
+        total = metrics.efectivoEsperado;
+        const initialMov = activeCaja ? {
+          id: 'apertura',
+          tenant_id: tenantId,
+          caja_id: activeCaja.id,
+          empleado_id: activeCaja.empleado_id,
+          tipo: 'INGRESO' as const,
+          concepto: 'Apertura de Caja',
+          monto: activeCaja.monto_inicial,
+          metodo: 'EFECTIVO' as const,
+          creado_en: activeCaja.abierta_en
+        } : null;
+        
+        items = activeMovements.filter(m => m.metodo === 'EFECTIVO');
+        if (initialMov) items = [initialMov, ...items];
+        items.sort((a,b) => new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime());
+        break;
+      case 'SALES_CASH':
+        title = 'Detalle: Ventas en Efectivo';
+        total = metrics.ingresosEfectivo;
+        items = activeMovements.filter(m => (m.tipo === 'VENTA' || m.tipo === 'INGRESO' || m.tipo === 'ABONO') && m.metodo === 'EFECTIVO');
+        break;
+      case 'SALES_CARD':
+        title = 'Detalle: Ventas con Tarjeta';
+        total = metrics.tarjetaTotal;
+        items = activeMovements.filter(m => (m.tipo === 'VENTA' || m.tipo === 'INGRESO' || m.tipo === 'ABONO') && m.metodo === 'TARJETA');
+        break;
+      case 'SALES_TRANSFER':
+        title = 'Detalle: Ventas por Transferencia';
+        total = metrics.transferenciaTotal;
+        items = activeMovements.filter(m => (m.tipo === 'VENTA' || m.tipo === 'INGRESO' || m.tipo === 'ABONO') && m.metodo === 'TRANSFERENCIA');
+        break;
+    }
+    return { title, total, items };
+  }, [detailsModalType, activeMovements, activeCaja, metrics]);
 
   // Open Caja Shift
   const handleAperturaSubmit = (e: React.FormEvent) => {
@@ -466,13 +513,13 @@ export default function CajaPage() {
     if (!activeCaja) return;
 
     // Validate Employee PIN
-    const empleado = DEFAULT_EMPLEADOS.find(emp => emp.id === cierreCajeroId);
+    const empleado = tenantUsers.find(emp => emp.id === cierreCajeroId);
     if (!empleado) {
-      toast.error("Empleado no válido");
+      toast.error("Cajero no válido o no seleccionado");
       return;
     }
 
-    if (cierrePin !== empleado.pin) {
+    if (!empleado.pin || cierrePin !== empleado.pin) {
       toast.error("PIN incorrecto. Inténtelo de nuevo.");
       return;
     }
@@ -666,28 +713,40 @@ export default function CajaPage() {
 
       {/* ── TOP METRICS ROW ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-none bg-[#0f3b6c] shadow-sm rounded-2xl overflow-hidden text-white">
+        <Card 
+          className="border-none bg-[#0f3b6c] shadow-sm rounded-2xl overflow-hidden text-white cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98]"
+          onClick={() => setDetailsModalType('CASH_IN_BOX')}
+        >
           <CardContent className="p-5 flex flex-col justify-center h-full">
             <span className="text-xs font-semibold text-blue-200 uppercase tracking-wider block mb-1">Efectivo en Caja</span>
             <h3 className="text-3xl font-black">{formatRD(metrics.efectivoEsperado)}</h3>
           </CardContent>
         </Card>
         
-        <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden">
+        <Card 
+          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          onClick={() => setDetailsModalType('SALES_CASH')}
+        >
           <CardContent className="p-5 flex flex-col justify-center h-full">
             <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Efectivo</span>
             <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.ingresosEfectivo)}</h3>
           </CardContent>
         </Card>
 
-        <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden">
+        <Card 
+          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          onClick={() => setDetailsModalType('SALES_CARD')}
+        >
           <CardContent className="p-5 flex flex-col justify-center h-full">
             <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Tarjeta</span>
             <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.tarjetaTotal)}</h3>
           </CardContent>
         </Card>
 
-        <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden">
+        <Card 
+          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          onClick={() => setDetailsModalType('SALES_TRANSFER')}
+        >
           <CardContent className="p-5 flex flex-col justify-center h-full">
             <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Transferencia</span>
             <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.transferenciaTotal)}</h3>
@@ -705,7 +764,7 @@ export default function CajaPage() {
             {activeCaja ? (
               <div className="mt-3 space-y-1.5">
                 <p className="text-xs text-neutral-500">{formatDateTimeRD(activeCaja.abierta_en)}</p>
-                <p className="text-xs text-neutral-700">Empleado: <span className="font-bold">{DEFAULT_EMPLEADOS.find(e => e.id === activeCaja.empleado_id)?.nombre || "Administrador"}</span></p>
+                <p className="text-xs text-neutral-700">Empleado: <span className="font-bold">{tenantUsers.find(e => e.id === activeCaja.empleado_id)?.name || "Cajero"}</span></p>
                 <Badge className="mt-2 bg-orange-100 text-orange-800 border-none font-bold text-[10px] rounded-md px-2 py-0.5">
                   🌅 Turno: {new Date(activeCaja.abierta_en).getHours() < 12 ? 'Mañana' : 'Tarde'}
                 </Badge>
@@ -810,14 +869,24 @@ export default function CajaPage() {
               {processedActiveMovements.length}
             </Badge>
           </div>
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-            <Input 
-              placeholder="Buscar movimiento..." 
-              value={movSearch}
-              onChange={(e) => setMovSearch(e.target.value)}
-              className="pl-9 h-9 text-xs rounded-xl border-neutral-200"
-            />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative w-full sm:w-64">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+              <Input 
+                placeholder="Buscar movimiento..." 
+                value={movSearch}
+                onChange={(e) => setMovSearch(e.target.value)}
+                className="pl-9 h-9 text-xs rounded-xl border-neutral-200"
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => setIsPrintMovimientosOpen(true)}
+              className="h-9 rounded-xl border-neutral-200 text-neutral-600 gap-1.5 px-3 whitespace-nowrap"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline text-xs font-bold">Imprimir</span>
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -923,13 +992,23 @@ export default function CajaPage() {
             <Button 
               variant="outline"
               className="rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold gap-2 text-xs h-9 cursor-pointer"
-              onClick={() => toast.info("Funcionalidad de impresión múltiple en desarrollo")}
+              onClick={() => {
+                if (activeCaja) {
+                  setSelectedTicketCaja(activeCaja);
+                  setIsTicketPreviewOpen(true);
+                } else if (closedShifts.length > 0) {
+                  setSelectedTicketCaja(closedShifts[0]);
+                  setIsTicketPreviewOpen(true);
+                } else {
+                  toast.error("No hay cuadres disponibles para imprimir");
+                }
+              }}
             >
               <Printer className="h-3.5 w-3.5" /> Imprimir Cuadre
             </Button>
             <Button 
               className="rounded-xl bg-[#0f3b6c] text-white hover:bg-blue-900 font-bold gap-2 text-xs h-9 cursor-pointer"
-              onClick={() => toast.info("Generación de reporte completo en desarrollo")}
+              onClick={() => setIsHistoricoOpen(true)}
             >
               <Printer className="h-3.5 w-3.5" /> Imprimir Cierres
             </Button>
@@ -1028,8 +1107,8 @@ export default function CajaPage() {
                   <SelectValue placeholder="Seleccione cajero" />
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
-                  {DEFAULT_EMPLEADOS.map(emp => (
-                    <SelectItem key={emp.id} value={emp.id}>{emp.nombre} {emp.apellido} ({emp.rol})</SelectItem>
+                  {tenantUsers.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.role})</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1077,18 +1156,6 @@ export default function CajaPage() {
               Desglose y cuente los valores físicos presentes en la caja. Confirme su firma mediante PIN.
             </DialogDescription>
           </DialogHeader>
-
-          {/* Quick instructions / Help for testing */}
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex gap-2 items-start mt-2">
-            <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">Información de PIN para pruebas:</p>
-              <ul className="list-disc pl-4 mt-1 space-y-0.5">
-                <li><strong>Yeri Orlando (ADMIN)</strong>: PIN = <code className="bg-amber-100 font-bold px-1 rounded">1234</code></li>
-                <li><strong>Carlos Méndez (CAJERO)</strong>: PIN = <code className="bg-amber-100 font-bold px-1 rounded">0000</code></li>
-              </ul>
-            </div>
-          </div>
 
           <form onSubmit={handleCierreSubmit} className="space-y-4 pt-2">
             {/* Split count breakdown */}
@@ -1175,8 +1242,8 @@ export default function CajaPage() {
                     <SelectValue placeholder="Seleccione firma" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
-                    {DEFAULT_EMPLEADOS.map(emp => (
-                      <SelectItem key={emp.id} value={emp.id}>{emp.nombre} {emp.apellido} ({emp.rol})</SelectItem>
+                    {tenantUsers.map(emp => (
+                      <SelectItem key={emp.id} value={emp.id}>{emp.name} {} ({emp.role})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1468,8 +1535,8 @@ export default function CajaPage() {
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   <SelectItem value="all">Todos los cajeros</SelectItem>
-                  {DEFAULT_EMPLEADOS.map(emp => (
-                    <SelectItem key={emp.id} value={emp.id}>{emp.nombre}</SelectItem>
+                  {tenantUsers.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1499,7 +1566,7 @@ export default function CajaPage() {
                     closedShifts.map((shift) => (
                       <tr key={shift.id} className="hover:bg-neutral-50/50 transition-colors">
                         <td className="p-3 font-semibold text-neutral-800">
-                          {DEFAULT_EMPLEADOS.find(e => e.id === shift.empleado_id)?.nombre || "Cajero"}
+                          {tenantUsers.find((u) => u.id === shift.abierta_por)?.name || "Cajero"}
                         </td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.abierta_en)}</td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.cerrada_en || "")}</td>
@@ -1622,7 +1689,7 @@ export default function CajaPage() {
                   <div className="flex justify-between">
                     <span>CAJERO:</span>
                     <span className="font-bold">
-                      {DEFAULT_EMPLEADOS.find(e => e.id === selectedTicketCaja.empleado_id)?.nombre || "Cajero"}
+                      {tenantUsers.find()?.name || "Cajero"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -1682,6 +1749,17 @@ export default function CajaPage() {
                         <span>TRANSFERENC:</span>
                         <span>{formatRD(selectedTicketCaja.monto_contado_transferencia || 0)}</span>
                       </div>
+
+                      <div className="border-t border-dashed border-neutral-400 my-2" />
+                      
+                      <div className="flex justify-between font-bold text-[11px] pt-1 uppercase">
+                        <span>TOTAL INGRESOS:</span>
+                        <span>{formatRD(
+                          (selectedTicketCaja.monto_contado_efectivo || 0) - (selectedTicketCaja.monto_inicial || 0) + 
+                          (selectedTicketCaja.monto_contado_tarjeta || 0) + 
+                          (selectedTicketCaja.monto_contado_transferencia || 0)
+                        )}</span>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -1697,6 +1775,27 @@ export default function CajaPage() {
                       <div className="flex justify-between font-bold text-xs">
                         <span>EST. CAJA:</span>
                         <span>{formatRD(metrics.efectivoEsperado)}</span>
+                      </div>
+
+                      <div className="border-t border-dashed border-neutral-400 my-2" />
+                      
+                      <div className="text-center font-bold text-[9px] uppercase tracking-wide mb-1 text-neutral-500">
+                        OTROS MEDIOS
+                      </div>
+                      <div className="flex justify-between">
+                        <span>TARJETAS:</span>
+                        <span>{formatRD(metrics.tarjetaTotal)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>TRANSFERENC:</span>
+                        <span>{formatRD(metrics.transferenciaTotal)}</span>
+                      </div>
+
+                      <div className="border-t border-dashed border-neutral-400 my-2" />
+                      
+                      <div className="flex justify-between font-bold text-[11px] pt-1 uppercase">
+                        <span>TOTAL INGRESOS:</span>
+                        <span>{formatRD(metrics.ingresosEfectivo + metrics.tarjetaTotal + metrics.transferenciaTotal)}</span>
                       </div>
                     </>
                   )}
@@ -1979,6 +2078,202 @@ export default function CajaPage() {
         invoice={selectedInvoice} 
         defaultEdit={selectedInvoiceEdit}
       />
+      {/* DIALOG: Detalles de Tarjetas (KPIs) */}
+      <Dialog open={!!detailsModalType} onOpenChange={(open) => !open && setDetailsModalType(null)}>
+        <DialogContent className="sm:max-w-2xl rounded-2xl p-0 overflow-hidden bg-neutral-50/50">
+          <DialogHeader className="p-6 pb-4 bg-white border-b border-neutral-100 flex flex-row items-center justify-between">
+            <div>
+              <DialogTitle className="font-heading text-lg font-bold text-neutral-900">
+                {detailsData.title}
+              </DialogTitle>
+              <DialogDescription className="text-xs text-neutral-500 mt-1">
+                Desglose de los movimientos y pagos realizados correspondientes a esta categoría.
+              </DialogDescription>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider">Total</span>
+              <p className="text-2xl font-black text-neutral-900 leading-none">{formatRD(detailsData.total)}</p>
+            </div>
+          </DialogHeader>
+          <div className="p-0 max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-left text-xs border-collapse bg-white">
+              <thead className="sticky top-0 bg-neutral-50 border-b border-neutral-100 shadow-sm z-10">
+                <tr className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
+                  <th className="p-4 w-32">Hora</th>
+                  <th className="p-4 w-28">Tipo</th>
+                  <th className="p-4">Concepto</th>
+                  <th className="p-4 text-right">Monto</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {detailsData.items.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-10 text-center text-neutral-400 font-semibold bg-white">
+                      No hay transacciones para mostrar en esta categoría.
+                    </td>
+                  </tr>
+                ) : (
+                  detailsData.items.map(mov => {
+                    const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
+                    const isEgreso = ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA', 'PAGO_NOMINA'].includes(mov.tipo);
+                    
+                    return (
+                      <tr key={mov.id} className="hover:bg-neutral-50/50 transition-colors">
+                        <td className="p-4 text-neutral-500 font-medium whitespace-nowrap">
+                          {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                        <td className="p-4">
+                          <Badge className={cn(
+                            "rounded-full px-2 py-0.5 text-[9px] font-bold border-none",
+                            isIngreso ? "bg-emerald-100 text-emerald-700" : isEgreso ? "bg-rose-100 text-rose-700" : "bg-neutral-100 text-neutral-700"
+                          )}>
+                            {mov.tipo}
+                          </Badge>
+                        </td>
+                        <td className="p-4 font-semibold text-neutral-800">
+                          {mov.concepto}
+                        </td>
+                        <td className={cn(
+                          "p-4 text-right font-bold text-sm tabular-nums whitespace-nowrap",
+                          isIngreso ? "text-emerald-600" : "text-rose-500"
+                        )}>
+                          {isIngreso ? "+" : "-"}{formatRD(mov.monto)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG 10: Imprimir Movimientos del Turno */}
+      <Dialog open={isPrintMovimientosOpen} onOpenChange={setIsPrintMovimientosOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-2xl p-6 bg-white">
+          <DialogHeader className="border-b border-neutral-100 pb-3 mb-4">
+            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+              <Printer className="h-5 w-5 text-neutral-800" /> Imprimir Movimientos del Turno
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Vista previa del reporte de movimientos agrupados por método de pago.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] overflow-y-auto pr-2 border border-neutral-200 rounded-xl p-4 bg-neutral-50/50">
+            <div id="print-movimientos-container" className="bg-white p-6 min-h-[500px]">
+              <div className="text-center mb-6 border-b border-neutral-200 pb-4">
+                <h2 className="text-xl font-black uppercase text-neutral-900">{currentTenant?.name || 'ServiTracks'}</h2>
+                <p className="text-sm font-semibold text-neutral-600">Reporte de Movimientos del Turno</p>
+                <div className="text-xs text-neutral-500 mt-2 flex justify-center gap-4">
+                  <span>Turno ID: #{activeCaja?.id?.slice(-6).toUpperCase() || 'N/A'}</span>
+                  <span>Fecha: {new Date().toLocaleDateString('es-DO')}</span>
+                </div>
+              </div>
+
+              {['EFECTIVO', 'TARJETA', 'TRANSFERENCIA'].map(metodo => {
+                const movs = processedActiveMovements.filter(m => m.metodo === metodo);
+                if (movs.length === 0) return null;
+                
+                const totalIn = movs.filter(m => ['INGRESO', 'VENTA', 'ABONO'].includes(m.tipo)).reduce((s, m) => s + m.monto, 0);
+                const totalOut = movs.filter(m => ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA'].includes(m.tipo)).reduce((s, m) => s + m.monto, 0);
+
+                return (
+                  <div key={metodo} className="mb-6 page-break-inside-avoid">
+                    <h3 className="text-sm font-bold bg-neutral-100 p-2 border-l-4 border-black mb-3">
+                      PAGOS CON {metodo}
+                    </h3>
+                    <table className="w-full text-xs text-left mb-2">
+                      <thead>
+                        <tr className="border-b border-neutral-200 text-neutral-600 font-bold">
+                          <th className="py-2 w-20">Hora</th>
+                          <th className="py-2 w-20">Tipo</th>
+                          <th className="py-2">Concepto</th>
+                          <th className="py-2 text-right w-24">Monto</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {movs.map(mov => {
+                          const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
+                          return (
+                            <tr key={mov.id}>
+                              <td className="py-1.5 text-neutral-600">
+                                {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="py-1.5 font-bold">{mov.tipo}</td>
+                              <td className="py-1.5">{mov.concepto}</td>
+                              <td className="py-1.5 text-right font-mono">
+                                {isIngreso ? "+" : "-"}{formatRD(mov.monto)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    <div className="flex justify-end gap-6 text-xs font-bold pt-2 border-t border-dashed border-neutral-300">
+                      <span className="text-emerald-700">Ingresos: {formatRD(totalIn)}</span>
+                      <span className="text-rose-700">Egresos: {formatRD(totalOut)}</span>
+                      <span className="text-neutral-900 border-l border-neutral-300 pl-4">
+                        Neto: {formatRD(totalIn - totalOut)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="mt-8 border-t-2 border-black pt-4">
+                <div className="flex justify-between items-center font-black text-sm">
+                  <span>TOTAL INGRESOS DEL TURNO</span>
+                  <span>{formatRD(metrics.ingresosEfectivo + metrics.tarjetaTotal + metrics.transferenciaTotal)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4 flex gap-2">
+            <Button variant="outline" onClick={() => setIsPrintMovimientosOpen(false)} className="rounded-xl border-neutral-200">
+              Cerrar
+            </Button>
+            <Button 
+              onClick={() => {
+                const printContents = document.getElementById("print-movimientos-container")?.innerHTML;
+                if (!printContents) return;
+                
+                const originalContents = document.body.innerHTML;
+                
+                document.body.innerHTML = `
+                  <div style="font-family: sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; color: black;">
+                    <style>
+                      table { border-collapse: collapse; width: 100%; }
+                      th, td { border-bottom: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+                      th { font-weight: bold; }
+                      td.text-right, th.text-right { text-align: right; }
+                      h3 { background: #f3f4f6; padding: 8px; border-left: 4px solid black; font-size: 14px; margin-top: 20px; }
+                      .page-break-inside-avoid { page-break-inside: avoid; }
+                      .border-t { border-top: 1px solid #ddd; }
+                      .border-t-2 { border-top: 2px solid black; }
+                      .pt-4 { padding-top: 16px; }
+                      .mb-6 { margin-bottom: 24px; }
+                      .text-emerald-700 { color: #047857; }
+                      .text-rose-700 { color: #be123c; }
+                      .font-bold { font-weight: bold; }
+                      .text-center { text-align: center; }
+                    </style>
+                    ${printContents}
+                  </div>
+                `;
+                
+                window.print();
+                window.location.reload();
+              }}
+              className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2"
+            >
+              <Printer className="h-4 w-4" /> Proceder a Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
