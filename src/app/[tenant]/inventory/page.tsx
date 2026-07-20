@@ -507,7 +507,7 @@ export default function InventoryPage() {
     return matchSearch && matchCat && p.isCombo;
   });
 
-  const totalValue = products.reduce((acc, p) => acc + p.costPrice * p.stock, 0);
+  const totalValue = products.reduce((acc, p) => acc + p.salePrice * p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
   const outOfStockCount = products.filter((p) => p.stock === 0).length;
   const handleCreate = (e: React.FormEvent) => {
