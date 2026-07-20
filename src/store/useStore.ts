@@ -5,12 +5,12 @@ import type {
   Service, Product, InventoryMovement, WorkOrder, Invoice,
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
-  Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest,
+  Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest,
   Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, InventorySession
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -263,7 +263,6 @@ export const useStore = create<AppState>()(
       services: [],
 
       movements: [],
-      purchaseOrders: [],
       cajas: [],
       cajaMovements: [],
       invoices: [],

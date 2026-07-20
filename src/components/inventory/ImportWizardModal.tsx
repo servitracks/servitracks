@@ -71,7 +71,6 @@ export default function ImportWizardModal({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent 
         className="sm:max-w-3xl rounded-2xl max-h-[92vh] overflow-hidden flex flex-col p-0"
-        onInteractOutside={(e) => e.preventDefault()}
       >
         {/* Header */}
         <DialogHeader className="px-6 pt-6 pb-0 flex-shrink-0">
