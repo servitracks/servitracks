@@ -1566,7 +1566,7 @@ export default function CajaPage() {
                     closedShifts.map((shift) => (
                       <tr key={shift.id} className="hover:bg-neutral-50/50 transition-colors">
                         <td className="p-3 font-semibold text-neutral-800">
-                          {tenantUsers.find((u) => u.id === shift.abierta_por)?.name || "Cajero"}
+                          {tenantUsers.find((u) => u.id === (shift as any).abierta_por)?.name || "Cajero"}
                         </td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.abierta_en)}</td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.cerrada_en || "")}</td>
@@ -1689,7 +1689,7 @@ export default function CajaPage() {
                   <div className="flex justify-between">
                     <span>CAJERO:</span>
                     <span className="font-bold">
-                      {tenantUsers.find()?.name || "Cajero"}
+                      {tenantUsers.find((u) => u.id === (selectedTicketCaja as any).abierta_por)?.name || "Cajero"}
                     </span>
                   </div>
                   <div className="flex justify-between">

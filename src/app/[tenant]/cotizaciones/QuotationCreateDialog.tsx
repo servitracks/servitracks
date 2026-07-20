@@ -343,7 +343,6 @@ export default function QuotationCreateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
         className="sm:max-w-6xl rounded-2xl p-6 bg-white overflow-hidden max-h-[92vh] flex flex-col"
-        onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader className="mb-2 shrink-0">
           <DialogTitle className="text-xl font-bold text-neutral-900">
