@@ -178,22 +178,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     navigate("/login");
   };
 
-  const handleForceSync = async () => {
-    if (!currentTenant) return;
-    const toastId = toast.loading("Subiendo inventario y datos a la nube... Esto puede tardar unos segundos.");
-    try {
-      const { syncStoreToSupabase } = await import("@/lib/supabaseSync");
-      await syncStoreToSupabase(currentTenant.id, useStore.getState());
-      toast.dismiss(toastId);
-      toast.success("¡Rescate Exitoso! Todos tus datos locales están ahora asegurados en la nube (Vercel).", {
-        duration: 5000
-      });
-    } catch (err: any) {
-      console.error(err);
-      toast.dismiss(toastId);
-      toast.error("Error al sincronizar: " + err.message);
-    }
-  };
+
 
   const initials = currentUser
     ? currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
@@ -271,9 +256,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
               <DropdownMenuItem onClick={handleOpenProfile} className="rounded-lg py-2 cursor-pointer gap-2">
                 <User className="h-4 w-4 text-neutral-400" /> Perfil
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleForceSync} className="rounded-lg py-2 cursor-pointer gap-2">
-                <CloudUpload className="h-4 w-4 text-blue-500" /> Sincronizar a la Nube
-              </DropdownMenuItem>
+
               <DropdownMenuItem onClick={handleSupport} className="rounded-lg py-2 cursor-pointer gap-2">
                 <Headphones className="h-4 w-4 text-neutral-400" /> Soporte
               </DropdownMenuItem>

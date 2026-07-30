@@ -72,7 +72,7 @@ export default function POSPage() {
     laborPrice: s.laborPrice ? (s.price * s.laborPrice) / 100 : undefined,
     stock: 9999,
     minStock: 0,
-    tax: 0.18,
+    tax: s.tax || 0,
   });
 
   const [search, setSearch]           = useState("");
@@ -182,7 +182,12 @@ export default function POSPage() {
   const addToCart = (product: Product) => {
     if (product.stock <= 0) { toast.error("Sin stock disponible"); return; }
     setCart((prev) => {
-      const calculatedLaborPrice = product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined;
+      // Servicios (sku empieza con SRV-) ya tienen laborPrice calculado en serviceToProduct().
+      // Solo los productos de inventario necesitan convertir de porcentaje a monto.
+      const isService = product.sku?.startsWith('SRV-') || product.category === 'Servicios';
+      const calculatedLaborPrice = isService
+        ? product.laborPrice  // Ya es monto calculado (ej: RD$240)
+        : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined); // Porcentaje → monto
       const ex = prev.find((i) => i.id === product.id);
       if (ex) return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
       return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice }];
@@ -223,7 +228,7 @@ export default function POSPage() {
       laborPrice: amount,
       stock: 9999,
       minStock: 0,
-      tax: 0.18,
+      tax: 18,
       quantity: 1,
     };
     setCart((prev) => [...prev, laborItem]);
@@ -271,7 +276,10 @@ export default function POSPage() {
               if (ex) {
                 newCart = newCart.map(i => i.id === product.id ? { ...i, quantity: i.quantity + part.quantity } : i);
               } else {
-                const calculatedLaborPrice = product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined;
+                const isService = product.sku?.startsWith('SRV-') || product.category === 'Servicios';
+                const calculatedLaborPrice = isService
+                  ? product.laborPrice
+                  : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined);
                 newCart.push({ ...product, quantity: part.quantity, laborPrice: calculatedLaborPrice });
               }
             }
@@ -321,7 +329,7 @@ export default function POSPage() {
             name: i.name,
             quantity: i.quantity,
             salePrice: i.salePrice,
-            tax: typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : 0.18,
+            tax: typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : (i.tax > 0 ? i.tax / 100 : 0.18),
             category: i.category,
           })),
           subtotal,

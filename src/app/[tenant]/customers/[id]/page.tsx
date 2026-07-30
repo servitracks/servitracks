@@ -4,7 +4,7 @@ import { useParams, useRouter } from "@/lib/next-compat";
 import { supabaseAdmin } from "@/lib/supabase";
 import {
   ArrowLeft, Car, Plus, Settings, Phone, Mail, MapPin,
-  History, ShieldCheck, Wrench, Clock,
+  History, ShieldCheck, Wrench, Clock, Receipt, FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -23,7 +23,7 @@ const COLORS = ["Blanco", "Negro", "Gris", "Rojo", "Azul", "Verde", "Plata", "Be
 export default function CustomerDetailPage() {
   const { id, tenant } = useParams();
   const router = useRouter();
-  const { customers, vehicles, orders, addVehicle, tenants } = useStore();
+  const { customers, vehicles, orders, invoices, addVehicle, tenants } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
 
@@ -35,7 +35,8 @@ export default function CustomerDetailPage() {
     ...supaVehicles,
     ...storeCustomerVehicles.filter(v => !supaVehicles.some(sv => sv.id === v.id))
   ];
-  const customerOrders = orders.filter(o => o.customerId === id && o.tenantId === tenantId);
+  const customerOrders = orders.filter(o => o.customerId === id && o.tenantId === tenantId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const customerInvoices = invoices.filter(i => i.customerId === id && i.tenantId === tenantId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const totalSpent = customerOrders.reduce((s, o) => s + (o.total || 0), 0);
 
   // Cargar vehículos del cliente desde Supabase
@@ -195,6 +196,9 @@ export default function CustomerDetailPage() {
               <TabsTrigger value="history" className="rounded-lg px-5 py-1.5 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm transition-all">
                 Historial de Servicios
               </TabsTrigger>
+              <TabsTrigger value="invoices" className="rounded-lg px-5 py-1.5 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm transition-all">
+                Facturas
+              </TabsTrigger>
               <TabsTrigger value="documents" className="rounded-lg px-5 py-1.5 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-sm transition-all">
                 Documentos
               </TabsTrigger>
@@ -294,6 +298,57 @@ export default function CustomerDetailPage() {
                             )}>
                               {order.status === "pending" ? "Pendiente" : order.status === "repairing" ? "En Reparación"
                                 : order.status === "finished" ? "Finalizado" : order.status === "delivered" ? "Entregado" : order.status}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            {/* FACTURAS */}
+            <TabsContent value="invoices" className="space-y-4">
+              {customerInvoices.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center border-2 border-dashed border-neutral-200 rounded-2xl">
+                  <Receipt className="h-10 w-10 text-neutral-300 mb-3" />
+                  <p className="text-sm font-medium text-neutral-500">Sin historial de facturas</p>
+                </div>
+              ) : (
+                <Card className="border-neutral-100 shadow-sm overflow-hidden">
+                  <CardContent className="p-0">
+                    <div className="divide-y divide-neutral-50">
+                      {customerInvoices.map((inv) => (
+                        <div key={inv.id} className="flex items-center justify-between p-4 hover:bg-neutral-50/50 transition-all">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full flex-shrink-0 bg-blue-50">
+                              <FileText className="h-4 w-4 text-blue-500" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-neutral-900 flex items-center">
+                                Factura #{inv.id.slice(-6).toUpperCase()}
+                                {inv.ncf && <span className="ml-2 text-[10px] text-neutral-500 font-mono border border-neutral-200 bg-white px-1.5 py-0.5 rounded">NCF: {inv.ncf}</span>}
+                              </p>
+                              <p className="text-xs text-neutral-400 flex items-center gap-1 mt-0.5">
+                                <Clock className="h-3 w-3" />
+                                {new Date(inv.createdAt).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" })}
+                                {" · "}
+                                {inv.items.length} {inv.items.length === 1 ? 'artículo' : 'artículos'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0 flex flex-col items-end gap-1.5">
+                            <p className="font-bold text-neutral-900">
+                              RD$ {inv.total.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+                            </p>
+                            <Badge variant="secondary" className={cn(
+                              "text-[9px] uppercase font-bold border-none px-2 py-0.5 rounded-full",
+                              inv.status === "paid" ? "bg-emerald-100 text-emerald-700" :
+                              inv.status === "cancelled" ? "bg-rose-100 text-rose-700" :
+                              "bg-amber-100 text-amber-700"
+                            )}>
+                              {inv.status === "paid" ? "Pagada" : inv.status === "cancelled" ? "Anulada" : "Pendiente"}
                             </Badge>
                           </div>
                         </div>

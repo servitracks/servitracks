@@ -3,6 +3,7 @@ import Home from "./app/page";
 import Login from "./app/login/page";
 import Register from "./app/register/page";
 import Recuperar from "./app/recuperar/page";
+import ResetPassword from "./app/reset-password/page";
 import Contacto from "./app/contacto/page";
 import Nosotros from "./app/nosotros/page";
 import NotFound from "./app/not-found";
@@ -48,6 +49,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/recuperar" element={<Recuperar />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/contacto" element={<Contacto />} />
         <Route path="/nosotros" element={<Nosotros />} />
 

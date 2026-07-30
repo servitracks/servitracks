@@ -159,7 +159,11 @@ export default function CajaPage() {
         if (isManoObra) {
           globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
         } else {
-          globalTotal += (item.laborPrice || 0) * (item.quantity || 1);
+          let safeLabor = item.laborPrice || 0;
+          if (item.unitPrice && safeLabor > item.unitPrice) {
+            safeLabor = safeLabor / 100;
+          }
+          globalTotal += safeLabor * (item.quantity || 1);
         }
       });
     });
@@ -187,7 +191,11 @@ export default function CajaPage() {
         if (isManoObra) {
           invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
         } else {
-          invTotal += (item.laborPrice || 0) * (item.quantity || 1);
+          let safeLabor = item.laborPrice || 0;
+          if (item.unitPrice && safeLabor > item.unitPrice) {
+            safeLabor = safeLabor / 100;
+          }
+          invTotal += safeLabor * (item.quantity || 1);
         }
       });
       total += invTotal;
@@ -274,7 +282,11 @@ export default function CajaPage() {
         if (isManoObra) {
           manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
         } else {
-          comisionTotal += (item.laborPrice || 0) * (item.quantity || 1);
+          let safeLabor = item.laborPrice || 0;
+          if (item.unitPrice && safeLabor > item.unitPrice) {
+            safeLabor = safeLabor / 100;
+          }
+          comisionTotal += safeLabor * (item.quantity || 1);
         }
       });
       

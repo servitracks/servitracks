@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -387,6 +387,59 @@ export default function SettingsPage() {
   const [showPw, setShowPw] = useState(false);
   const [adminPinInput, setAdminPinInput] = useState(currentTenant?.adminPin || "");
   const [showPin, setShowPin] = useState(false);
+
+  // ── Delete Account state ──
+  const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== "ELIMINAR") {
+      toast.error("Escribe ELIMINAR para confirmar");
+      return;
+    }
+    if (!currentUser) return;
+
+    setIsDeletingAccount(true);
+    try {
+      // 1. Delete from Supabase Auth
+      const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(currentUser.id);
+      if (authError) {
+        console.error("Error deleting auth user:", authError);
+        // Continue anyway — clean up local data
+      }
+
+      // 2. Delete from tenant_users table
+      await supabaseAdmin
+        .from("tenant_users")
+        .delete()
+        .eq("user_id", currentUser.id);
+
+      // 3. Clean up local store
+      deleteUser(currentUser.id);
+
+      // 4. Clear session and redirect
+      useStore.getState().setCurrentUserId(null);
+      useStore.getState().setAuthenticated(false);
+      localStorage.removeItem("servitracks-session");
+      sessionStorage.removeItem("servitracks-session");
+      localStorage.removeItem("simulated-role");
+
+      toast.success("Tu cuenta ha sido eliminada permanentemente.");
+      
+      // Redirect to login
+      setTimeout(() => {
+        window.location.href = "/login";
+      }, 1500);
+    } catch (err: any) {
+      console.error("Error deleting account:", err);
+      toast.error("Error al eliminar la cuenta: " + (err.message || "Inténtalo de nuevo"));
+    } finally {
+      setIsDeletingAccount(false);
+      setIsDeleteAccountOpen(false);
+      setDeleteConfirmText("");
+    }
+  };
 
   const changePassword = () => {
     if (!pwForm.current) { toast.error("Escribe tu contraseña actual"); return; }
@@ -1243,6 +1296,56 @@ export default function SettingsPage() {
               </Button>
             </CardContent>
           </Card>
+
+          {/* ── ZONA DE PELIGRO: Eliminar Cuenta ── */}
+          <Card className="border-rose-200 shadow-sm bg-rose-50/30 overflow-hidden">
+            <div className="h-1 w-full bg-gradient-to-r from-rose-500 via-red-500 to-rose-600" />
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg font-black text-rose-700 tracking-tight">
+                <AlertTriangle className="h-5 w-5 text-rose-500" />
+                Zona de Peligro
+              </CardTitle>
+              <CardDescription className="text-xs text-rose-600/80">
+                Acciones irreversibles que afectan permanentemente tu cuenta.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 rounded-xl border border-rose-200 bg-white">
+                <div className="flex items-start gap-4">
+                  <div className="h-10 w-10 rounded-xl bg-rose-100 border border-rose-200 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Trash2 className="h-5 w-5 text-rose-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-black text-neutral-900 tracking-tight">Eliminar mi cuenta</h4>
+                    <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                      Al eliminar tu cuenta se borrará permanentemente tu usuario del sistema de autenticación y se eliminará tu acceso a todas las sucursales. <strong className="text-rose-600">Esta acción no se puede deshacer.</strong>
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 bg-neutral-50 px-2 py-1 rounded-md">
+                        <LogOut className="h-3 w-3" /> Se cerrará tu sesión
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 bg-neutral-50 px-2 py-1 rounded-md">
+                        <Trash2 className="h-3 w-3" /> Se eliminará tu usuario
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 bg-neutral-50 px-2 py-1 rounded-md">
+                        <Shield className="h-3 w-3" /> Sin recuperación posible
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 pt-3 border-t border-neutral-100">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsDeleteAccountOpen(true)}
+                    className="rounded-xl border-rose-300 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-400 font-bold h-10 px-5 cursor-pointer transition-all text-xs gap-2"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Eliminar mi cuenta permanentemente
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -1546,6 +1649,90 @@ export default function SettingsPage() {
               <Trash2 className="h-4 w-4 mr-2" /> Eliminar Sucursal
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── DELETE ACCOUNT CONFIRMATION ── */}
+      <Dialog open={isDeleteAccountOpen} onOpenChange={(val) => { if (!isDeletingAccount) { setIsDeleteAccountOpen(val); setDeleteConfirmText(""); } }}>
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white p-0 shadow-2xl border-none overflow-hidden">
+          {/* Danger Header */}
+          <div className="bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 p-6 text-white">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                <AlertTriangle className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black tracking-tight">Eliminar Cuenta</h3>
+                <p className="text-rose-100 text-xs mt-0.5 font-medium">Esta acción es permanente e irreversible</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6 space-y-5">
+            {/* Warning Box */}
+            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-amber-900">¿Qué sucederá al eliminar tu cuenta?</p>
+                  <ul className="text-[11px] text-amber-800 space-y-1 list-disc pl-4">
+                    <li>Tu usuario será eliminado del sistema de autenticación</li>
+                    <li>Perderás acceso a todas las sucursales vinculadas</li>
+                    <li>Tu sesión se cerrará inmediatamente</li>
+                    <li>Los datos del taller (facturas, inventario, clientes) <strong>permanecerán intactos</strong> para otros usuarios</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* User Card */}
+            <div className="flex items-center gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50">
+              <div className="h-10 w-10 rounded-xl bg-neutral-900 text-white text-sm font-bold flex items-center justify-center flex-shrink-0">
+                {currentUser?.name?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "??"}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-neutral-900 truncate">{currentUser?.name || "Usuario"}</p>
+                <p className="text-[10px] text-neutral-400 truncate">{currentUser?.email}</p>
+              </div>
+            </div>
+
+            {/* Confirmation Input */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold text-neutral-700">
+                Para confirmar, escribe <span className="text-rose-600 font-black px-1.5 py-0.5 bg-rose-50 rounded">ELIMINAR</span> a continuación:
+              </Label>
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
+                placeholder="Escribe ELIMINAR"
+                className="h-11 rounded-xl border-neutral-200 font-mono text-center text-lg tracking-widest font-bold focus:border-rose-300 focus:ring-rose-200"
+                disabled={isDeletingAccount}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          <div className="px-6 pb-6 flex gap-3">
+            <Button
+              variant="outline"
+              className="rounded-xl flex-1 cursor-pointer h-11 font-bold"
+              onClick={() => { setIsDeleteAccountOpen(false); setDeleteConfirmText(""); }}
+              disabled={isDeletingAccount}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700 cursor-pointer border-none h-11 font-bold gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleDeleteAccount}
+              disabled={deleteConfirmText !== "ELIMINAR" || isDeletingAccount}
+            >
+              {isDeletingAccount ? (
+                <><RefreshCw className="h-4 w-4 animate-spin" /> Eliminando...</>
+              ) : (
+                <><Trash2 className="h-4 w-4" /> Eliminar mi cuenta</>
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

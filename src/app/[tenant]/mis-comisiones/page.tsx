@@ -56,7 +56,11 @@ export default function MisComisionesPage() {
         if (isManoObra) {
           manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
         } else {
-          comisionTotal += (item.laborPrice || 0) * (item.quantity || 1);
+          let safeLabor = item.laborPrice || 0;
+          if (item.unitPrice && safeLabor > item.unitPrice) {
+            safeLabor = safeLabor / 100;
+          }
+          comisionTotal += safeLabor * (item.quantity || 1);
         }
       });
       
