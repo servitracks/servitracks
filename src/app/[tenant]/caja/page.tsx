@@ -531,7 +531,7 @@ export default function CajaPage() {
       return;
     }
 
-    if (!empleado.pin || cierrePin !== empleado.pin) {
+    if (empleado.pin && cierrePin !== empleado.pin) {
       toast.error("PIN incorrecto. Inténtelo de nuevo.");
       return;
     }
@@ -1262,13 +1262,15 @@ export default function CajaPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="cierre-pin" className="text-xs font-semibold text-neutral-600">PIN de Autorización</Label>
+                <Label htmlFor="cierre-pin" className="text-xs font-semibold text-neutral-600">
+                  PIN de Autorización {tenantUsers.find(emp => emp.id === cierreCajeroId)?.pin ? '' : '(Opcional)'}
+                </Label>
                 <Input 
                   id="cierre-pin"
                   type="password"
                   maxLength={4}
                   placeholder="••••"
-                  required
+                  required={!!tenantUsers.find(emp => emp.id === cierreCajeroId)?.pin}
                   value={cierrePin}
                   onChange={(e) => setCierrePin(e.target.value)}
                   className="h-10 rounded-xl border-neutral-200 text-center font-mono tracking-widest text-sm"
