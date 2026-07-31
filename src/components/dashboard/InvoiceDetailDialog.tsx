@@ -197,7 +197,7 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
                   editForm.status === "pending" ? "bg-amber-100 text-amber-800" :
                   "bg-rose-100 text-rose-800"
                 )}>
-                  {editForm.status === "paid" ? "PAGADA" : editForm.status === "pending" ? "PENDIENTE" : "CANCELADA"}
+                  {editForm.status === "paid" ? "PAGADA" : editForm.status === "pending" ? "PENDIENTE" : "ANULADA"}
                 </Badge>
               </div>
 
@@ -347,7 +347,12 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
                       onValueChange={(val) => setEditForm({ ...editForm, paymentMethod: val as Invoice["paymentMethod"] })}
                     >
                       <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
-                        <SelectValue placeholder="Seleccionar" />
+                        <SelectValue placeholder="Seleccionar">
+                          {editForm.paymentMethod === "cash" && "Efectivo"}
+                          {editForm.paymentMethod === "card" && "Tarjeta"}
+                          {editForm.paymentMethod === "transfer" && "Transferencia"}
+                          {editForm.paymentMethod === "credit" && "Crédito"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
                         <SelectItem value="cash">Efectivo</SelectItem>
@@ -367,12 +372,16 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
                       onValueChange={(val) => setEditForm({ ...editForm, status: val as Invoice["status"] })}
                     >
                       <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm">
-                        <SelectValue placeholder="Seleccionar" />
+                        <SelectValue placeholder="Seleccionar">
+                          {editForm.status === "paid" && "✅ Pagada"}
+                          {editForm.status === "pending" && "⏳ Pendiente"}
+                          {editForm.status === "cancelled" && "🚫 Anulada"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent className="rounded-xl border-neutral-150 shadow-lg">
                         <SelectItem value="paid">✅ Pagada</SelectItem>
                         <SelectItem value="pending">⏳ Pendiente</SelectItem>
-                        <SelectItem value="cancelled">🚫 Cancelada</SelectItem>
+                        <SelectItem value="cancelled">🚫 Anulada</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

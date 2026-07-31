@@ -344,6 +344,8 @@ export default function RegisterPage() {
     try {
       // 1. Crear usuario en Supabase Auth con confirmación automática (sin necesidad de email SMTP)
       setProvisioningStep(0);
+      let userId = "";
+
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: form.admin_email,
         password: form.admin_password,
@@ -355,16 +357,30 @@ export default function RegisterPage() {
         if (authError.message.toLowerCase().includes("already registered") ||
             authError.message.toLowerCase().includes("already exists") ||
             authError.message.toLowerCase().includes("already been registered")) {
-          throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
+          
+          // INTENTO DE RECICLAJE: El usuario existe en auth.users pero posiblemente no tiene taller (fue eliminado)
+          const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
+          const existingUser = usersData?.users?.find(u => u.email === form.admin_email);
+          
+          if (existingUser) {
+            // Actualizamos su contraseña para que pueda iniciar sesión con la que acaba de ingresar
+            await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+              password: form.admin_password,
+              user_metadata: { name: form.admin_nombre }
+            });
+            userId = existingUser.id;
+          } else {
+            throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
+          }
+        } else {
+          throw new Error(`Error de autenticación: ${authError.message}`);
         }
-        throw new Error(`Error de autenticación: ${authError.message}`);
+      } else {
+        if (!authData.user) {
+          throw new Error("No se pudo crear el usuario.");
+        }
+        userId = authData.user.id;
       }
-
-      if (!authData.user) {
-        throw new Error("No se pudo crear el usuario.");
-      }
-
-      const userId = authData.user.id;
 
       // 2. Insertar Tenant usando supabaseAdmin (bypasea RLS con service_role)
       setProvisioningStep(1);
