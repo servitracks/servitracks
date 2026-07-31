@@ -70,7 +70,12 @@ export default function CajaPage() {
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
 
-  const tenantUsers = useMemo(() => users.filter(u => u.tenantId === tenantId && (u.role === 'cashier' || u.role === 'owner')), [users, tenantId]);
+  const tenantUsers = useMemo(() => {
+    const list = users.filter(u => u.tenantId === tenantId && (u.role === 'cashier' || u.role === 'owner'));
+    const uniqueMap = new Map();
+    list.forEach(u => uniqueMap.set(u.id, u));
+    return Array.from(uniqueMap.values());
+  }, [users, tenantId]);
 
   // Active caja shift
   const activeCaja = useMemo(() => {
@@ -272,36 +277,46 @@ export default function CajaPage() {
     if (!tech) return { total: 0, items: [] };
 
     let totalGlobal = 0;
-    const items = pendingTechInvoices.map(inv => {
+    const rawItems = pendingTechInvoices.map(inv => {
       let comisionTotal = 0;
       let manoObraTotal = 0;
+      const nombresAplicables: string[] = [];
 
       (inv.items || []).forEach(item => {
         if (!item) return;
         const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
         if (isManoObra) {
-          manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+          const mTotal = ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+          manoObraTotal += mTotal;
+          if (mTotal > 0) nombresAplicables.push(item.name);
         } else {
           let safeLabor = item.laborPrice || 0;
           if (item.unitPrice && safeLabor > item.unitPrice) {
             safeLabor = safeLabor / 100;
           }
-          comisionTotal += safeLabor * (item.quantity || 1);
+          const cTotal = safeLabor * (item.quantity || 1);
+          comisionTotal += cTotal;
+          if (cTotal > 0) nombresAplicables.push(item.name);
         }
       });
       
       const totalFila = comisionTotal + manoObraTotal;
-      totalGlobal += totalFila;
 
       return {
         inv,
         comisionTotal,
         manoObraTotal,
-        totalFila
+        totalFila,
+        nombresAplicables
       };
     });
 
-    return { total: totalGlobal, items };
+    const filteredItems = rawItems.filter(item => item.totalFila > 0);
+    filteredItems.forEach(item => {
+      totalGlobal += item.totalFila;
+    });
+
+    return { total: totalGlobal, items: filteredItems };
   }, [pendingTechInvoices, technicians, selectedTechToPay]);
 
   const handleLiquidarTecnico = () => {
@@ -1033,6 +1048,7 @@ export default function CajaPage() {
                 <tr className="bg-neutral-50 border-b border-neutral-100 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
                   <th className="p-4">Apertura</th>
                   <th className="p-4">Cierre</th>
+                  <th className="p-4">Encargado</th>
                   <th className="p-4 text-right">Inicial</th>
                   <th className="p-4 text-right">Esperado</th>
                   <th className="p-4 text-right">Contado</th>
@@ -1042,7 +1058,7 @@ export default function CajaPage() {
               <tbody className="divide-y divide-neutral-100">
                 {closedShifts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-10 text-center text-neutral-400 font-semibold">
+                    <td colSpan={7} className="p-10 text-center text-neutral-400 font-semibold">
                       No hay historial de cierres disponible.
                     </td>
                   </tr>
@@ -1054,6 +1070,14 @@ export default function CajaPage() {
                       </td>
                       <td className="p-4 text-neutral-600 font-medium">
                         {formatDateTimeRD(shift.cerrada_en || "")}
+                      </td>
+                      <td className="p-4 font-semibold text-neutral-800">
+                        <div className="flex flex-col">
+                          <span className="text-xs">Abre: {tenantUsers.find((u) => u.id === shift.empleado_id)?.name || "Cajero"}</span>
+                          {shift.empleado_cierre_id && (
+                            <span className="text-[10px] text-neutral-500">Cierra: {tenantUsers.find((u) => u.id === shift.empleado_cierre_id)?.name || "N/A"}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4 text-right font-medium text-neutral-800">
                         {formatRD(shift.monto_inicial)}
@@ -1251,7 +1275,9 @@ export default function CajaPage() {
                 <Label htmlFor="cierre-cajero" className="text-xs font-semibold text-neutral-600">Firma Cajero Autorizante</Label>
                 <Select value={cierreCajeroId} onValueChange={(val) => val && setCierreCajeroId(val)}>
                   <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-xs">
-                    <SelectValue placeholder="Seleccione firma" />
+                    <SelectValue>
+                      {cierreCajeroId ? tenantUsers.find(emp => emp.id === cierreCajeroId)?.name : "Seleccione firma"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
                     {tenantUsers.map(emp => (
@@ -1580,7 +1606,12 @@ export default function CajaPage() {
                     closedShifts.map((shift) => (
                       <tr key={shift.id} className="hover:bg-neutral-50/50 transition-colors">
                         <td className="p-3 font-semibold text-neutral-800">
-                          {tenantUsers.find((u) => u.id === (shift as any).abierta_por)?.name || "Cajero"}
+                          <div className="flex flex-col">
+                            <span className="text-xs">Abre: {tenantUsers.find((u) => u.id === shift.empleado_id)?.name || "Cajero"}</span>
+                            {shift.empleado_cierre_id && (
+                              <span className="text-xs text-neutral-500">Cierra: {tenantUsers.find((u) => u.id === shift.empleado_cierre_id)?.name || "N/A"}</span>
+                            )}
+                          </div>
                         </td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.abierta_en)}</td>
                         <td className="p-3 text-neutral-500 font-mono">{formatDateTimeRD(shift.cerrada_en || "")}</td>
@@ -1701,11 +1732,19 @@ export default function CajaPage() {
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>CAJERO:</span>
-                    <span className="font-bold">
-                      {tenantUsers.find((u) => u.id === (selectedTicketCaja as any).abierta_por)?.name || "Cajero"}
+                    <span>ABIERTO POR:</span>
+                    <span className="font-bold text-right ml-2 line-clamp-1">
+                      {tenantUsers.find((u) => u.id === selectedTicketCaja.empleado_id)?.name || "Cajero"}
                     </span>
                   </div>
+                  {selectedTicketCaja.empleado_cierre_id && (
+                    <div className="flex justify-between">
+                      <span>CERRADO POR:</span>
+                      <span className="font-bold text-right ml-2 line-clamp-1">
+                        {tenantUsers.find((u) => u.id === selectedTicketCaja.empleado_cierre_id)?.name || "Cajero"}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span>APERTURA:</span>
                     <span className="font-mono">{formatDateTimeRD(selectedTicketCaja.abierta_en).split(",")[0]}</span>
@@ -2002,7 +2041,9 @@ export default function CajaPage() {
               <Label className="text-xs font-semibold text-neutral-600">Seleccione el Técnico a Liquidar</Label>
               <Select value={selectedTechToPay} onValueChange={(val) => val && setSelectedTechToPay(val)}>
                 <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-sm">
-                  <SelectValue placeholder="Seleccione Técnico" />
+                  <SelectValue>
+                    {selectedTechToPay ? technicians.find(t => t.id === selectedTechToPay)?.name : "Seleccione Técnico"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="rounded-xl">
                   {technicians.filter(t => t.tenantId === tenantId).map(tech => (
@@ -2038,6 +2079,9 @@ export default function CajaPage() {
                               <td className="p-3">
                                 <div className="font-bold text-neutral-800">#{item.inv.id.slice(-6).toUpperCase()}</div>
                                 <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
+                                <div className="text-[10px] text-blue-600/80 font-medium mt-0.5 line-clamp-1" title={item.nombresAplicables.join(', ')}>
+                                  {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
+                                </div>
                               </td>
                               <td className="p-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
                               <td className="p-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>

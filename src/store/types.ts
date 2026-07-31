@@ -311,6 +311,7 @@ export interface Caja {
   diferencia?: number;
   notas_apertura?: string;
   notas_cierre?: string;
+  empleado_cierre_id?: string;
 }
 
 export type TipoMovimiento = 'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'VENTA' | 'ABONO' | 'PAGO_NOMINA';
