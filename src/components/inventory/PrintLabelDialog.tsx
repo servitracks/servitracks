@@ -48,22 +48,19 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
         padding: 0;
         width: 25mm;
         height: 50mm;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         background: white;
+        position: relative;
       }
       .label-canvas {
         width: 50mm;
         height: 25mm;
-        padding: 2.5mm; /* Margen de seguridad 2-3mm */
+        padding: 2mm;
         box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        transform: rotate(90deg);
-        transform-origin: center center;
+        text-align: center;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(90deg);
       }
     ` : `
       @page {
@@ -75,20 +72,14 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
         padding: 0;
         width: 50mm;
         height: 25mm;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         background: white;
       }
       .label-canvas {
         width: 100%;
         height: 100%;
-        padding: 2.5mm; /* Margen de seguridad 2-3mm */
+        padding: 2mm;
         box-sizing: border-box;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        text-align: center;
       }
     `;
 
@@ -99,40 +90,43 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
           <style>
             ${rotationCss}
             .name {
-              font-size: 8px;
+              font-size: 10px;
               font-weight: bold;
-              text-align: center;
-              margin-bottom: 2px;
-              max-height: 10px;
+              line-height: 1.1;
               overflow: hidden;
               white-space: nowrap;
               text-overflow: ellipsis;
+              margin-bottom: 2px;
+              color: #000;
               width: 100%;
+              display: block;
             }
             .vehicle-info {
               font-size: 8px;
               font-weight: bold;
-              margin-bottom: 2px;
               color: #333;
-              text-align: center;
-              max-height: 10px;
+              line-height: 1.1;
               overflow: hidden;
               white-space: nowrap;
               text-overflow: ellipsis;
+              margin-bottom: 1px;
               width: 100%;
+              display: block;
             }
             .loc {
-              font-size: 7px;
+              font-size: 8px;
               color: #333;
+              margin-top: 1px;
+              display: block;
             }
             .barcode-container {
-              display: flex;
-              justify-content: center;
               width: 100%;
+              text-align: center;
+              display: block;
             }
             .barcode-container svg {
               max-width: 100%;
-              height: auto;
+              height: 11mm !important; /* Forza una altura máxima para evitar que empuje el texto */
             }
           </style>
         </head>
@@ -174,24 +168,31 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
           </DialogTitle>
         </DialogHeader>
 
-        <div className="py-6 flex flex-col items-center justify-center bg-neutral-50 rounded-xl border border-neutral-200 border-dashed">
-          {/* Vista Previa Visual (no es exactamente la de impresión) */}
-          <div className="w-[50mm] h-[25mm] bg-white border border-neutral-300 shadow-sm flex flex-col items-center justify-center p-1 relative overflow-hidden transition-transform duration-300" style={{ transform: rotate ? 'rotate(90deg)' : 'none' }}>
-            <div className="text-[7px] font-bold text-center leading-tight truncate w-full px-1">{product.name}</div>
-            {compatString && (
-              <div className="text-[6.5px] font-bold text-neutral-700 mt-0.5 truncate w-full text-center px-1">
-                {compatString}
+        <div className="py-8 flex flex-col items-center justify-center bg-neutral-50 rounded-xl border border-neutral-200 border-dashed min-h-[220px]">
+          {/* Vista Previa Visual - Contenedor 50x50 para que no desborde al rotar */}
+          <div className="relative flex items-center justify-center w-[50mm] h-[50mm]">
+            <div className="w-[50mm] h-[25mm] bg-white border border-neutral-300 shadow-sm flex flex-col items-center justify-start p-1 absolute transition-transform duration-300" style={{ transform: rotate ? 'rotate(90deg)' : 'none' }}>
+              <div className="text-[9px] font-bold text-center leading-[1.1] truncate w-full px-1 shrink-0 text-black">{product.name}</div>
+              {compatString && (
+                <div className="text-[8px] font-bold text-neutral-700 mt-0.5 truncate w-full text-center px-1 shrink-0">
+                  {compatString}
+                </div>
+              )}
+              <div ref={printRef} className="mt-1 w-full flex flex-col items-center justify-center overflow-hidden flex-1 [&_svg]:max-h-[11mm] [&_svg]:w-auto">
+                <Barcode 
+                  value={codeToPrint} 
+                  width={barcodeSettings?.width ?? 1.5} 
+                  height={barcodeSettings?.height ?? 40} 
+                  fontSize={barcodeSettings?.fontSize ?? 14} 
+                  margin={0} 
+                  displayValue={barcodeSettings?.showText ?? true} 
+                />
               </div>
-            )}
-            <div ref={printRef} className="mt-0.5 w-full flex justify-center overflow-hidden">
-              <Barcode 
-                value={codeToPrint} 
-                width={barcodeSettings?.width ?? 1.5} 
-                height={barcodeSettings?.height ?? 40} 
-                fontSize={barcodeSettings?.fontSize ?? 14} 
-                margin={0} 
-                displayValue={barcodeSettings?.showText ?? true} 
-              />
+              {product.location && (
+                <div className="text-[7px] text-neutral-700 text-center shrink-0 mt-auto">
+                  Ubicación: {product.location}
+                </div>
+              )}
             </div>
           </div>
           
