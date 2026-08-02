@@ -53,6 +53,11 @@ export interface PrintSettings {
   footer: string;
   warrantyText?: string;
   showWarranty?: boolean;
+  physicalPrinter?: {
+    connectionType: 'usb' | 'bluetooth' | 'serial' | null;
+    printProfile: 'basic' | 'standard' | 'complete';
+    isConfigured: boolean;
+  };
 }
 
 export interface BarcodeSettings {

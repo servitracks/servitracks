@@ -243,6 +243,11 @@ export const useStore = create<AppState>()(
         footer: '¡Gracias por su preferencia!',
         warrantyText: 'Garantía: 30 días en mano de obra.',
         showWarranty: true,
+        physicalPrinter: {
+          connectionType: 'usb',
+          printProfile: 'basic',
+          isConfigured: false,
+        },
       },
 
       barcodeSettings: {

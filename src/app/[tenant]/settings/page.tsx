@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useParams, useSearchParams } from "@/lib/next-compat";
 import { EcfSettings } from "@/components/settings/EcfSettings";
+import { PhysicalPrinterSettings } from "@/components/settings/PhysicalPrinterSettings";
 import { getPlans, formatRD } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 
@@ -923,6 +924,12 @@ export default function SettingsPage() {
               Recibos POS
             </button>
             <button
+              onClick={() => setPrintTab("physical")}
+              className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer border-none", printTab === "physical" ? "bg-white text-neutral-900 shadow-sm" : "bg-transparent text-neutral-500 hover:text-neutral-700")}
+            >
+              Impresora Física
+            </button>
+            <button
               onClick={() => setPrintTab("barcode")}
               className={cn("px-4 py-2 rounded-lg text-sm font-bold transition-all cursor-pointer border-none", printTab === "barcode" ? "bg-white text-neutral-900 shadow-sm" : "bg-transparent text-neutral-500 hover:text-neutral-700")}
             >
@@ -1104,6 +1111,10 @@ export default function SettingsPage() {
                 </Button>
               </CardContent>
             </Card>
+          )}
+
+          {printTab === "physical" && (
+            <PhysicalPrinterSettings />
           )}
         </div>
       )}
