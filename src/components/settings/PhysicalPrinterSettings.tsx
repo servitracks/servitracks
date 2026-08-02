@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ArrowRight, Bluetooth, MonitorDot, Usb, AlertTriangle, Printer, Wrench, Download } from "lucide-react";
+import { EscPosEncoder, printViaSerial, printViaBluetooth } from "@/lib/escpos";
 
 export function PhysicalPrinterSettings() {
   const { printSettings, updatePrintSettings } = useStore();
@@ -50,18 +51,95 @@ export function PhysicalPrinterSettings() {
   };
 
   const handleTestBasic = () => {
-    // This will just trigger a print with a basic test layout
     toast.info("Generando prueba de impresión...");
-    // Future implementation: open a hidden iframe or new window with a basic receipt and call print()
+    if (physicalSettings.connectionType === 'usb') {
+      // In USB mode, we just use the browser's native print
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>Prueba de Impresión</title>
+              <style>
+                body { font-family: monospace; padding: 20px; font-size: 14px; text-align: center; }
+                h1 { font-size: 18px; margin-bottom: 10px; }
+                p { margin: 5px 0; }
+                .separator { border-top: 1px dashed #000; margin: 15px 0; }
+              </style>
+            </head>
+            <body>
+              <h1>ServiTracks</h1>
+              <p>Prueba Básica de Impresión (USB)</p>
+              <div class="separator"></div>
+              <p>Perfil: ${physicalSettings.printProfile}</p>
+              <p>Fecha: ${new Date().toLocaleString()}</p>
+              <div class="separator"></div>
+              <p>¡Configuración exitosa!</p>
+              <script>
+                window.onload = () => {
+                  window.print();
+                  setTimeout(() => window.close(), 500);
+                };
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+      }
+    } else {
+      toast.error("Para pruebas directas (Bluetooth/Serial), usa el botón 'Prueba ESC/POS'");
+    }
   };
 
-  const handleTestEscPos = () => {
-    // Esc/Pos test logic will go here
+  const handleTestEscPos = async () => {
     if (physicalSettings.connectionType === 'usb') {
       toast.error("Prueba ESC/POS no está disponible en modo USB. Usa la Prueba básica.");
       return;
     }
+    
     toast.info("Conectando con la impresora para prueba ESC/POS...");
+    
+    try {
+      const encoder = new EscPosEncoder();
+      
+      // Build a test receipt
+      encoder.initialize()
+             .align('center')
+             .bold(true);
+      
+      if (physicalSettings.printProfile === 'complete' || physicalSettings.printProfile === 'standard') {
+        encoder.size(2, 2);
+      }
+      
+      encoder.line('ServiTracks')
+             .size(1, 1)
+             .bold(false)
+             .emptyLines(1)
+             .line('Prueba de Impresion')
+             .line(`Modo: ${physicalSettings.connectionType?.toUpperCase() || 'DESCONOCIDO'}`)
+             .line(`Perfil: ${physicalSettings.printProfile.toUpperCase()}`)
+             .line(`Fecha: ${new Date().toLocaleString()}`)
+             .emptyLines(1)
+             .separator()
+             .emptyLines(1)
+             .bold(true)
+             .line('CONEXION EXITOSA')
+             .bold(false)
+             .emptyLines(1)
+             .cut(true);
+             
+      const data = encoder.encode();
+      
+      if (physicalSettings.connectionType === 'bluetooth') {
+        await printViaBluetooth(data);
+        toast.success("Impresión enviada por Bluetooth.");
+      } else if (physicalSettings.connectionType === 'serial') {
+        await printViaSerial(data);
+        toast.success("Impresión enviada por Puerto Serie.");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "No se pudo completar la impresión.");
+    }
   };
 
   return (
@@ -155,18 +233,23 @@ export function PhysicalPrinterSettings() {
             </div>
           )}
 
-          {/* Bluetooth / Serial Actions (Placeholders based on design) */}
+          {/* Bluetooth / Serial Actions */}
           {(physicalSettings.connectionType === "bluetooth" || physicalSettings.connectionType === "serial") && (
             <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200 pt-4">
-               <Button 
+              <div className="rounded-xl bg-blue-50 border border-blue-100 p-4 flex gap-3">
+                <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-blue-800 leading-relaxed">
+                  <strong>Conexión Directa</strong> — El navegador te pedirá permiso para emparejar la impresora. Asegúrate de que la impresora esté encendida.
+                </p>
+              </div>
+              <Button 
                 className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 h-12 text-base font-bold shadow-sm"
                 onClick={() => {
-                  // Connection logic would go here
                   setPhysicalSettings({ isConfigured: true });
-                  toast.success("Impresora conectada exitosamente.");
+                  toast.success(`Modo ${physicalSettings.connectionType?.toUpperCase()} habilitado. Realiza una prueba ESC/POS abajo para confirmar.`);
                 }}
               >
-                <MonitorDot className="h-5 w-5 mr-2" /> Conectar Impresora
+                <MonitorDot className="h-5 w-5 mr-2" /> Habilitar {physicalSettings.connectionType === 'bluetooth' ? 'Bluetooth' : 'Puerto Serie'}
               </Button>
             </div>
           )}
