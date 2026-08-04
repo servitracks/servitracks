@@ -729,8 +729,10 @@ export const useStore = create<AppState>()(
         set((state) => ({
           maintenanceItems: state.maintenanceItems.map((m) => (m.id === id ? { ...m, ...updates } : m)),
         })),
-      deleteMaintenanceItem: (id) =>
-        set((state) => ({ maintenanceItems: state.maintenanceItems.filter((m) => m.id !== id) })),
+      deleteMaintenanceItem: (id) => {
+        set((state) => ({ maintenanceItems: state.maintenanceItems.filter((m) => m.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('maintenance_items', id));
+      },
       addMaintenanceHistoryItem: (item) =>
         set((state) => ({ maintenanceHistory: [item, ...state.maintenanceHistory] })),
       deleteMaintenanceHistoryItem: (id) =>
@@ -861,6 +863,13 @@ export const useStore = create<AppState>()(
         const appliedProducts = state.products.filter(p => appliedProductIds.includes(p.id));
         appliedProducts.forEach(product => {
           const categoryKey = product.maintenanceCategory || getMaintenanceCategoryFromText(product.category);
+          
+          // Evitar registrar productos al azar (ej. refrescos, bujías sin config) como "Mantenimiento General"
+          const hasExplicitLifespan = (product.lifespanKm && product.lifespanKm > 0) || (product.lifespanDays && product.lifespanDays > 0);
+          if (categoryKey === 'others' && !hasExplicitLifespan) {
+            return; // No rastrear este producto
+          }
+
           if (categoryKey) {
             const existing = categoriesToUpdate.get(categoryKey);
             const fallback = FALLBACK_LIFESPANS[categoryKey] || FALLBACK_LIFESPANS.others;

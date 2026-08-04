@@ -124,111 +124,26 @@ function MaintenanceContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicles]); // Intentionally removed calculateMaintenanceHealth to avoid loops
 
+  // AUTO-CLEANUP: Eliminar items buggeados de Mantenimiento General que se quedaron atrapados en el localStorage del usuario
+  useEffect(() => {
+    const buggedItems = storeMaintenanceItems.filter(
+      item => item.category === 'others' && (item.name.includes(',') || item.name.length > 30)
+    );
+    if (buggedItems.length > 0) {
+      console.log('Limpiando items de mantenimiento buggeados:', buggedItems);
+      buggedItems.forEach(item => deleteMaintenanceItem(item.id));
+    }
+  }, [storeMaintenanceItems, deleteMaintenanceItem]);
+
   const openDetail = (data: any) => {
     setSelectedData(data);
     setIsModalOpen(true);
   };
 
-  /**
-   * Genera items de mantenimiento sintéticos a partir de las órdenes de trabajo entregadas.
-   * Esto garantiza que cada orden entregada aparezca en el módulo de mantenimiento.
-   */
-  const derivedMaintenanceItems = useMemo(() => {
-    // Filtrar solo las órdenes del tenant actual para garantizar aislamiento por taller
-    const deliveredOrders = storeOrders.filter((o) => {
-      const statusOk = o.status === 'delivered' || o.status === 'invoiced';
-      // Verificar que la orden pertenece al tenant actual (por tenantId)
-      const tenantOk = !tenantId || o.tenantId === tenantId;
-      return statusOk && tenantOk;
-    });
-
-    const syntheticItems: any[] = [];
-
-    deliveredOrders.forEach((order) => {
-      const daysSince = Math.floor(
-        (Date.now() - new Date(order.updatedAt || order.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-      );
-
-      // Each service in the order becomes a maintenance item
-      const services = (order.serviceIds || [])
-        .map((sid) => storeServices.find((s) => s.id === sid))
-        .filter(Boolean);
-
-      if (services.length > 0) {
-        services.forEach((svc: any) => {
-          const lifespanDays = svc?.lifespanDays || 90;
-          const lifespanKm = svc?.lifespanKm || 5000;
-
-          const vehicle = vehicles.find(v => v.id === order.vehicleId);
-          const currentKm = vehicle?.km || order.km || 0;
-          const kmPassed = Math.max(0, currentKm - (order.km || 0));
-
-          const timeUsage = (daysSince / lifespanDays) * 100;
-          const kmUsage = (kmPassed / lifespanKm) * 100;
-          const maxUsage = Math.max(timeUsage, kmUsage);
-          const pct = Math.max(0, Math.floor(100 - maxUsage));
-
-          syntheticItems.push({
-            id: `synth_${order.id}_${svc.id}`,
-            vehicleId: order.vehicleId,
-            tenantId: order.tenantId,
-            name: svc.name,
-            category: svc.maintenanceCategory || getMaintenanceCategoryFromText(svc.category),
-            lastServiceDate: order.updatedAt || order.createdAt,
-            lastServiceKm: order.km || 0,
-            lifespanKm,
-            lifespanDays,
-            currentPercentage: pct,
-            _fromOrder: order.id,
-          });
-        });
-      } else {
-        // No services mapped — create a generic maintenance item from the order description
-        const lifespanDays = 90;
-        const lifespanKm = 5000;
-
-        const vehicle = vehicles.find(v => v.id === order.vehicleId);
-        const currentKm = vehicle?.km || order.km || 0;
-        const kmPassed = Math.max(0, currentKm - (order.km || 0));
-
-        const timeUsage = (daysSince / lifespanDays) * 100;
-        const kmUsage = (kmPassed / lifespanKm) * 100;
-        const maxUsage = Math.max(timeUsage, kmUsage);
-        const pct = Math.max(0, Math.floor(100 - maxUsage));
-
-        syntheticItems.push({
-          id: `synth_${order.id}`,
-          vehicleId: order.vehicleId,
-          tenantId: order.tenantId,
-          name: order.description || 'Servicio realizado',
-          category: 'others',
-          lastServiceDate: order.updatedAt || order.createdAt,
-          lastServiceKm: order.km || 0,
-          lifespanKm,
-          lifespanDays,
-          currentPercentage: pct,
-          _fromOrder: order.id,
-        });
-      }
-    });
-
-    // Merge: real items take priority, then synthetics for categories without any real items for that vehicle
-    const allItems = [...maintenanceItems];
-    const realVehicleCategories = new Set(
-      maintenanceItems.map((m) => `${m.vehicleId}_${m.category}`)
-    );
-    syntheticItems.forEach((s) => {
-      if (!realVehicleCategories.has(`${s.vehicleId}_${s.category}`)) {
-        allItems.push(s);
-      }
-    });
-    return allItems;
-  }, [storeOrders, storeServices, maintenanceItems, vehicles]);
-
   const maintenanceData = useMemo(() => {
     return vehicles.map(vehicle => {
       const customer = customers.find(c => c.id === vehicle.customerId);
-      const items = derivedMaintenanceItems.filter(m => m.vehicleId === vehicle.id);
+      const items = maintenanceItems.filter(m => m.vehicleId === vehicle.id);
 
       const minPercentage = items.length > 0
         ? Math.min(...items.map(i => i.currentPercentage))
@@ -252,7 +167,7 @@ function MaintenanceContent() {
       const matchesFilter = filter === 'all' || data.status === filter;
       return matchesSearch && matchesFilter;
     }).sort((a, b) => a.minPercentage - b.minPercentage);
-  }, [vehicles, customers, derivedMaintenanceItems, search, filter, hiddenVehicleIds]);
+  }, [vehicles, customers, maintenanceItems, search, filter, hiddenVehicleIds]);
 
   return (
     <div className="space-y-8 pb-20">
@@ -465,14 +380,15 @@ const MaintenanceCard = memo(function MaintenanceCard({
         <div className="space-y-3">
           {items.slice(0, 3).map((item: any) => (
             <div key={item.id} className="space-y-1.5">
-              <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider">
-                <div className="flex flex-col">
-                  <span className="text-neutral-900">{CATEGORY_LABELS[item.category] || 'Mantenimiento'}</span>
-                  <span className="text-[9.5px] text-neutral-500 font-medium normal-case tracking-normal mt-0.5 leading-tight">
+              <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider gap-2">
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-neutral-900 truncate">{CATEGORY_LABELS[item.category] || 'Mantenimiento'}</span>
+                  <span className="text-[9.5px] text-neutral-500 font-medium normal-case tracking-normal mt-0.5 leading-tight truncate">
                     ↳ {item.name}
                   </span>
                 </div>
                 <span className={cn(
+                  "shrink-0",
                   item.currentPercentage <= 10 ? "text-rose-600" : 
                   item.currentPercentage <= 30 ? "text-amber-600" : "text-emerald-600"
                 )}>{item.currentPercentage}%</span>
