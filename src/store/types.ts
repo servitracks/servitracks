@@ -194,6 +194,7 @@ export interface WorkOrder {
   status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced';
   description: string;
   serviceIds?: string[]; // Multiple services selected
+  customServices?: { name: string; price: number }[]; // Ad-hoc labor imported from quotes
   parts?: { productId: string; quantity: number }[]; // Parts dispatched from warehouse
   estimatedTime?: string;
   notes?: string;
@@ -240,6 +241,35 @@ export interface Invoice {
   notes?: string;
   isCommissionPaid?: boolean;
   createdAt: string;
+}
+
+export interface OpenTabItem {
+  id: string;
+  productId: string;
+  serviceId?: string;
+  name: string;
+  sku: string;
+  category: string;
+  costPrice: number;
+  salePrice: number;
+  laborPrice?: number;
+  tax: number;
+  quantity: number;
+  stock: number;
+  minStock: number;
+  deductedQuantity: number; // The amount already deducted from global inventory
+}
+
+export interface OpenTab {
+  id: string;
+  tenantId: string;
+  tabName: string; // e.g., "Toyota Corolla - Cliente Final"
+  customerId: string;
+  mechanicId: string;
+  orderId: string | null;
+  items: OpenTabItem[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Technician {

@@ -57,9 +57,9 @@ export default function DashboardCharts({ orders, invoices, statusColors, status
           <CardTitle className="text-lg font-bold">Ingresos Semanales</CardTitle>
           <p className="text-xs text-neutral-400">Últimos 7 días</p>
         </CardHeader>
-        <CardContent className="pb-4" style={{ height: 280, minHeight: 0, width: "100%" }}>
+        <CardContent className="pb-4" style={{ height: 280, minHeight: 1, width: "100%" }}>
           {hasRevenue && isMounted ? (
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <BarChart data={weeklyData} barGap={4}>
                 <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />

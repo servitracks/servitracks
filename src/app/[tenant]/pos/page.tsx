@@ -6,7 +6,7 @@ import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X,
   Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
-  Package, AlertTriangle, CheckCircle, UserCog, FileText, User
+  Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -24,6 +24,7 @@ const LazyPrintReceipt = lazy(() => import("./POSDialogs").then(m => ({ default:
 const LazyLaborModal = lazy(() => import("./POSDialogs").then(m => ({ default: m.LaborModal })));
 const LazyLinkOrder = lazy(() => import("./POSDialogs").then(m => ({ default: m.LinkOrderDialog })));
 const LazyWarrantyModal = lazy(() => import("./POSDialogs").then(m => ({ default: m.WarrantyModal })));
+const LazyOpenTabsDialog = lazy(() => import("./POSDialogs").then(m => ({ default: m.OpenTabsDialog })));
 
 interface CartItem extends Product { quantity: number }
 
@@ -34,7 +35,7 @@ export default function POSPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers } = useStore();
+  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab } = useStore();
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
@@ -108,6 +109,7 @@ export default function POSPage() {
   const [lastInvoice, setLastInvoice] = useState<any | null>(null);
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
   const [isLinkOrderOpen, setIsLinkOrderOpen] = useState(false);
+  const [isOpenTabsDialogOpen, setIsOpenTabsDialogOpen] = useState(false);
   const [isWarrantyModalOpen, setIsWarrantyModalOpen] = useState(false);
   // Local warranty text for this session — persisted via printSettings
   const [localWarrantyText, setLocalWarrantyText] = useState<string | undefined>(
@@ -247,7 +249,7 @@ export default function POSPage() {
     setActiveServiceIds(sids);
     setCategory("Todos");
 
-    if (sids.length > 0 || (order.parts && order.parts.length > 0)) {
+    if (sids.length > 0 || (order.parts && order.parts.length > 0) || (order.customServices && order.customServices.length > 0)) {
       setCart(prev => {
         let newCart = [...prev];
         
@@ -283,6 +285,26 @@ export default function POSPage() {
                 newCart.push({ ...product, quantity: part.quantity, laborPrice: calculatedLaborPrice });
               }
             }
+          });
+        }
+
+        // Add custom services (e.g. ad-hoc labor from quotes)
+        if (order.customServices && order.customServices.length > 0) {
+          order.customServices.forEach((cs) => {
+            newCart.push({
+              id: `labor-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              tenantId: tenantId,
+              name: cs.name,
+              sku: "MANO-OBRA",
+              category: "Servicios",
+              costPrice: 0,
+              salePrice: cs.price,
+              laborPrice: cs.price,
+              stock: 9999,
+              minStock: 0,
+              tax: 18,
+              quantity: 1,
+            });
           });
         }
 
@@ -524,6 +546,23 @@ export default function POSPage() {
             
             <div className="flex items-center gap-2 shrink-0">
               <Button 
+                onClick={() => setIsOpenTabsDialogOpen(true)}
+                variant="outline"
+                title="Cuentas Abiertas"
+                className={cn(
+                  "h-9 gap-2 border-neutral-200 text-neutral-700 hover:bg-neutral-50 transition-all font-bold shrink-0",
+                  isFullscreen ? "px-2.5 lg:px-4" : "px-2.5 2xl:px-4",
+                  openTabs.length > 0 && "border-amber-500 text-amber-700 bg-amber-50 hover:bg-amber-100"
+                )}
+              >
+                <FolderOpen className="h-4 w-4" />
+                <span className={isFullscreen ? "hidden lg:inline" : "hidden 2xl:inline"}>Cuentas</span>
+                {openTabs.length > 0 && (
+                  <Badge className="ml-1 bg-amber-500 text-white rounded-full px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center">{openTabs.length}</Badge>
+                )}
+              </Button>
+
+              <Button 
                 onClick={() => setIsLinkOrderOpen(true)}
                 variant="outline"
                 title="Vincular Orden"
@@ -532,7 +571,7 @@ export default function POSPage() {
                   isFullscreen ? "px-2.5 lg:px-4" : "px-2.5 2xl:px-4"
                 )}
               >
-                <FileText className="h-4 w-4 text-neutral-500" />
+                <ClipboardList className="h-4 w-4 text-neutral-500" />
                 <span className={isFullscreen ? "hidden lg:inline" : "hidden 2xl:inline"}>Vincular Orden</span>
               </Button>
 
@@ -817,29 +856,108 @@ export default function POSPage() {
             <div className="flex justify-between text-xl font-black text-neutral-900 pt-2 border-t border-neutral-200">
               <span>TOTAL</span><span>RD$ {total.toLocaleString("en-US")}</span>
             </div>
-            <button
-              disabled={cart.length === 0}
-              onClick={() => {
-                if (!activeCaja) {
-                  toast.error("Debe abrir la caja antes de registrar ventas");
-                  return;
-                }
-                setIsCheckout(true);
-              }}
-              className={cn(
-                "w-full py-4 rounded-xl text-base font-black transition-all mt-1",
-                cart.length === 0
-                  ? "bg-neutral-200 text-neutral-400 cursor-not-allowed"
-                  : "bg-black text-white hover:bg-neutral-800 active:scale-[0.98]"
-              )}>
-              COBRAR <span className="font-light text-neutral-400 text-sm ml-1">(F12)</span>
-            </button>
+            
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <button
+                disabled={cart.length === 0}
+                onClick={() => {
+                  if (cart.length === 0) return;
+                  if (!posCustomerId) {
+                    toast.error("Seleccione un cliente para guardar la cuenta");
+                    return;
+                  }
+                  
+                  // Descontar inventario inmediatamente
+                  const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+                  if (currentTenantConfig?.autoDeductInventory) {
+                    cart.forEach(item => {
+                      if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
+                      updateProduct(item.id, { stock: Math.max(0, item.stock - item.quantity) });
+                      addMovement({
+                        id: `m-pos-tab-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                        tenantId,
+                        productId: item.id,
+                        productName: item.name,
+                        type: "out",
+                        quantity: item.quantity,
+                        reason: `Cuenta en Espera - Cliente: ${tenantCustomers.find(c => c.id === posCustomerId)?.name || 'Consumidor Final'}`,
+                        date: new Date().toISOString(),
+                      });
+                    });
+                  }
+
+                  const newTab = {
+                    id: `tab-${Date.now()}`,
+                    tenantId,
+                    tabName: tenantCustomers.find(c => c.id === posCustomerId)?.name || "Cliente Final",
+                    customerId: posCustomerId || "walk-in",
+                    mechanicId: posMechanicId || "none",
+                    orderId: activeOrderId || null,
+                    items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity })),
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  };
+                  addOpenTab(newTab);
+                  toast.success("Cuenta guardada en espera. Inventario descontado.");
+                  clearSale();
+                }}
+                className={cn(
+                  "py-4 rounded-xl text-xs font-bold transition-all uppercase",
+                  cart.length === 0
+                    ? "bg-neutral-100 text-neutral-400 cursor-not-allowed"
+                    : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                )}>
+                Pausar
+              </button>
+
+              <button
+                disabled={cart.length === 0}
+                onClick={() => {
+                  if (!activeCaja) {
+                    toast.error("Debe abrir la caja antes de registrar ventas");
+                    return;
+                  }
+                  setIsCheckout(true);
+                }}
+                className={cn(
+                  "py-4 rounded-xl text-base font-black transition-all",
+                  cart.length === 0
+                    ? "bg-neutral-200 text-neutral-400 cursor-not-allowed"
+                    : "bg-black text-white hover:bg-neutral-800 active:scale-[0.98]"
+                )}>
+                COBRAR <span className="font-light text-neutral-400 text-[10px] ml-1">(F12)</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Lazy-loaded Dialogs */}
       <Suspense fallback={null}>
+        {isOpenTabsDialogOpen && (
+          <LazyOpenTabsDialog
+            open={isOpenTabsDialogOpen}
+            onOpenChange={setIsOpenTabsDialogOpen}
+            tenantId={tenantId}
+            onLoadTab={(tab) => {
+              // Limpiar la mesa
+              clearSale();
+              
+              // Cargar datos
+              setPosCustomerId(tab.customerId === "walk-in" ? "" : tab.customerId);
+              setPosMechanicId(tab.mechanicId === "none" ? "" : tab.mechanicId);
+              setActiveOrderId(tab.orderId);
+              setCart(tab.items.map(i => ({
+                ...i,
+                // El item ya fue descontado por su cantidad original.
+                _fromTabId: tab.id, 
+              } as any)));
+              
+              setIsOpenTabsDialogOpen(false);
+              toast.info(`Cuenta de ${tab.tabName} recuperada`);
+            }}
+          />
+        )}
         {isCheckout && (
           <LazyCheckout
             open={isCheckout}

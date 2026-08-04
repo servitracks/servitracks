@@ -437,7 +437,13 @@ export default function QuotationCreateDialog({
                 <Label className="text-xs font-bold text-neutral-600">Estado</Label>
                 <Select value={status} onValueChange={(v) => setStatus(v as QuoteStatus)}>
                   <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                    <SelectValue />
+                    <SelectValue placeholder="Seleccionar estado">
+                      {status === 'draft' && 'Borrador'}
+                      {status === 'sent' && 'Enviada'}
+                      {status === 'accepted' && 'Aceptada'}
+                      {status === 'rejected' && 'Rechazada'}
+                      {status === 'expired' && 'Expirada'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-xl z-[250]">
                     <SelectItem value="draft">Borrador</SelectItem>

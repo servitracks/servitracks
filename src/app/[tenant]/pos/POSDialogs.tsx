@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck } from "lucide-react";
+import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck, FolderOpen } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Wrench } from "lucide-react";
@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { User, Truck } from "lucide-react";
 
-import { useStore, WorkOrder, Customer, Vehicle, Invoice } from "@/store/useStore";
+import { useStore, WorkOrder, Customer, Vehicle, Invoice, OpenTab } from "@/store/useStore";
 import { Ticket } from "@/components/pos/Ticket";
+import { toast } from "sonner";
 
 type PayMethod = "cash" | "card" | "transfer";
 
@@ -665,6 +666,106 @@ export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps
                 </div>
               </div>
             ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// OPEN TABS DIALOG (Cuentas Abiertas)
+// ════════════════════════════════════════════════════════════════════════════════
+
+interface OpenTabsDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  tenantId: string;
+  onLoadTab: (tab: OpenTab) => void;
+}
+
+export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: OpenTabsDialogProps) {
+  const { openTabs, deleteOpenTab, updateProduct, addMovement, tenants, products } = useStore();
+  const tabs = openTabs.filter(t => t.tenantId === tenantId);
+  const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl rounded-2xl p-0 overflow-hidden bg-white">
+        <DialogHeader className="px-6 py-4 border-b border-neutral-100 bg-neutral-50/50">
+          <DialogTitle className="text-xl font-bold flex items-center gap-2">
+            <FolderOpen className="h-5 w-5 text-amber-500" />
+            Cuentas en Espera
+          </DialogTitle>
+        </DialogHeader>
+        <div className="p-6 overflow-y-auto max-h-[60vh] bg-neutral-50">
+          {tabs.length === 0 ? (
+            <div className="text-center py-10 text-neutral-400">
+              <FolderOpen className="h-10 w-10 mx-auto mb-3 opacity-20" />
+              <p>No hay cuentas en espera registradas.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {tabs.map((tab) => {
+                const total = tab.items.reduce((acc, i) => acc + (i.salePrice * i.quantity), 0);
+                return (
+                  <div key={tab.id} className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm flex items-center justify-between hover:border-amber-300 transition-colors group">
+                    <div>
+                      <h4 className="font-bold text-neutral-900">{tab.tabName}</h4>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        {tab.items.length} artículos • Creada: {new Date(tab.createdAt).toLocaleString('es-DO')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-sm font-black text-neutral-900">RD$ {total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (currentTenantConfig?.autoDeductInventory) {
+                              tab.items.forEach((item) => {
+                                if (item.id.startsWith('labor-') || item.sku === 'MANO-OBRA' || item.category === 'Servicios') return;
+                                const currentProduct = products.find(p => p.id === item.id);
+                                if (currentProduct) {
+                                  updateProduct(currentProduct.id, { stock: currentProduct.stock + item.deductedQuantity });
+                                  addMovement({
+                                    id: `m-pos-tab-cancel-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                                    tenantId,
+                                    productId: item.id,
+                                    productName: item.name,
+                                    type: 'in',
+                                    quantity: item.deductedQuantity,
+                                    reason: `Anulación Cuenta en Espera - ${tab.tabName}`,
+                                    date: new Date().toISOString(),
+                                  });
+                                }
+                              });
+                            }
+                            deleteOpenTab(tab.id);
+                            toast.success('Cuenta anulada y stock reintegrado');
+                          }}
+                          className="h-8 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                        >
+                          Anular
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            onLoadTab(tab);
+                            deleteOpenTab(tab.id);
+                          }}
+                          className="h-8 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold"
+                        >
+                          Recuperar
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </DialogContent>

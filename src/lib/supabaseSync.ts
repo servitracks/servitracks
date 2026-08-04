@@ -689,8 +689,10 @@ export async function upsertMaintenanceAlerts(items: MaintenanceAlert[]): Promis
   if (error) console.error("[sync] upsert maintenance_alerts:", error);
 }
 export async function upsertMaintenanceHistory(items: MaintenanceHistoryItem[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("maintenance_history").upsert(items.map(maintenanceHistoryItemToDb), { onConflict: "id" });
+  // Ignorar items viejos con IDs cortos (Math.random) para no romper el tipo uuid en postgres
+  const validItems = items.filter(i => i.id && i.id.length === 36);
+  if (validItems.length === 0) return;
+  const { error } = await supabaseAdmin.from("maintenance_history").upsert(validItems.map(maintenanceHistoryItemToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_history:", error);
 }
 export async function upsertSuppliers(items: Supplier[]): Promise<void> {

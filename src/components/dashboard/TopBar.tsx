@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield, Menu, CloudUpload } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield, Menu, CloudUpload, FileText, Package, Car } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -53,6 +53,43 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   
   const pendingAlertsCount = maintenanceAlerts.filter((a: any) => a.status === 'pending').length;
   const pendingMessagesCount = whatsappLogs.filter((l: any) => l.status === 'failed' || l.status === 'pending').length;
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  
+  const allCustomers = useStore((s) => s.customers);
+  const allVehicles = useStore((s) => s.vehicles);
+  const allOrders = useStore((s) => s.orders);
+  const allProducts = useStore((s) => s.products);
+
+  const tenantCustomers = allCustomers.filter(c => c.tenantId === tenantId);
+  const tenantVehicles = allVehicles.filter(v => v.tenantId === tenantId);
+  const tenantOrders = allOrders.filter(o => o.tenantId === tenantId);
+  const tenantProducts = allProducts.filter(p => p.tenantId === tenantId);
+
+  // Close search on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setIsSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const searchResults = (() => {
+    if (searchQuery.length < 2) return null;
+    const q = searchQuery.toLowerCase();
+    
+    return {
+      customers: tenantCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)) || (c.rnc && c.rnc.includes(q))).slice(0, 3),
+      vehicles: tenantVehicles.filter(v => v.plate.toLowerCase().includes(q) || (v.brand && v.brand.toLowerCase().includes(q)) || (v.model && v.model.toLowerCase().includes(q))).slice(0, 3),
+      orders: tenantOrders.filter(o => o.id.toLowerCase().includes(q) || (o.description && o.description.toLowerCase().includes(q))).slice(0, 3),
+      products: tenantProducts.filter(p => p.name.toLowerCase().includes(q) || (p.sku && p.sku.toLowerCase().includes(q)) || (p.barcode && p.barcode.toLowerCase().includes(q))).slice(0, 3),
+    };
+  })();
 
   // Current user (dynamic)
   const currentUser = (() => {
@@ -197,13 +234,93 @@ export function TopBar({ onMenuClick }: TopBarProps) {
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <div className="relative w-full">
+          <div className="relative w-full" ref={searchRef}>
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
             <Input
               type="search"
               placeholder="Buscar órdenes, clientes, vehículos..."
-              className="w-full rounded-full border-neutral-100 bg-neutral-50 pl-10 h-10 text-sm focus:ring-1 focus:ring-black"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setIsSearchFocused(false); searchRef.current?.querySelector('input')?.blur(); } }}
+              className="w-full rounded-full border-neutral-100 bg-neutral-50 pl-10 h-10 text-sm focus:ring-1 focus:ring-black transition-all"
             />
+            
+            {/* Dropdown Resultados */}
+            {isSearchFocused && searchQuery.length >= 2 && searchResults && (
+              <div className="absolute top-full left-0 mt-2 w-full max-h-[70vh] md:w-[450px] bg-white rounded-2xl shadow-2xl border border-neutral-100 overflow-hidden flex flex-col z-[100]">
+                <div className="flex-1 overflow-y-auto p-2 space-y-4">
+                  {Object.values(searchResults).every(arr => arr.length === 0) ? (
+                    <div className="p-4 text-center text-sm text-neutral-500">No se encontraron resultados para "{searchQuery}"</div>
+                  ) : (
+                    <>
+                      {searchResults.customers.length > 0 && (
+                        <div>
+                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Clientes</div>
+                          {searchResults.customers.map(c => (
+                            <button key={c.id} onClick={() => { setIsSearchFocused(false); navigate(`/${tenantSlug}/customers`); }} className="w-full text-left flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-xl transition-colors">
+                              <div className="h-8 w-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0"><User className="h-4 w-4" /></div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-neutral-900 truncate">{c.name}</p>
+                                <p className="text-xs text-neutral-500 truncate">{c.phone || c.rnc || 'Sin datos extra'}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {searchResults.vehicles.length > 0 && (
+                        <div>
+                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Vehículos</div>
+                          {searchResults.vehicles.map(v => (
+                            <button key={v.id} onClick={() => { setIsSearchFocused(false); navigate(`/${tenantSlug}/customers`); }} className="w-full text-left flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-xl transition-colors">
+                              <div className="h-8 w-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0"><Car className="h-4 w-4" /></div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-neutral-900 truncate">{v.brand} {v.model}</p>
+                                <p className="text-xs text-neutral-500 truncate">Placa: {v.plate}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {searchResults.orders.length > 0 && (
+                        <div>
+                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Órdenes de Trabajo</div>
+                          {searchResults.orders.map(o => (
+                            <button key={o.id} onClick={() => { setIsSearchFocused(false); navigate(`/${tenantSlug}/orders`); }} className="w-full text-left flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-xl transition-colors">
+                              <div className="h-8 w-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0"><FileText className="h-4 w-4" /></div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-neutral-900 truncate">{o.id}</p>
+                                <p className="text-xs text-neutral-500 truncate">{o.description}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {searchResults.products.length > 0 && (
+                        <div>
+                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Inventario</div>
+                          {searchResults.products.map(p => (
+                            <button key={p.id} onClick={() => { setIsSearchFocused(false); navigate(`/${tenantSlug}/inventory`); }} className="w-full text-left flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-xl transition-colors">
+                              <div className="h-8 w-8 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0"><Package className="h-4 w-4" /></div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-neutral-900 truncate">{p.name}</p>
+                                <p className="text-xs text-neutral-500 truncate">SKU: {p.sku} • Stock: {p.stock}</p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+                <div className="p-2 border-t border-neutral-100 bg-neutral-50 text-center">
+                  <span className="text-[10px] font-bold text-neutral-400">Presiona ESC para cerrar</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

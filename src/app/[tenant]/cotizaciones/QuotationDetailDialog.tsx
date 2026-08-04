@@ -80,8 +80,12 @@ export default function QuotationDetailDialog({
       
       // Separate service IDs and products
       const serviceIds = quote.items
-        .filter((i) => i.serviceId)
+        .filter((i) => i.serviceId && !i.serviceId.startsWith('custom-'))
         .map((i) => i.serviceId!);
+
+      const customServices = quote.items
+        .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
+        .map((i) => ({ name: i.name, price: i.unitPrice }));
 
       const parts = quote.items
         .filter((i) => i.productId)
@@ -98,6 +102,7 @@ export default function QuotationDetailDialog({
         status: "pending",
         description: `Servicios importados de Cotización ${quote.quoteNumber}`,
         serviceIds: serviceIds.length > 0 ? serviceIds : undefined,
+        customServices: customServices.length > 0 ? customServices : undefined,
         parts: parts.length > 0 ? parts : undefined,
         total: quote.total,
         notes: quote.notes ? `Notas de cotización: ${quote.notes}` : undefined,

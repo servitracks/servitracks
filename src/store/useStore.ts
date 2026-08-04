@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle,
-  Service, Product, InventoryMovement, WorkOrder, Invoice,
+  Service, Product, InventoryMovement, WorkOrder, Invoice, OpenTab,
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
   Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest,
@@ -10,7 +10,7 @@ import type {
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, OpenTab, OpenTabItem } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -32,6 +32,10 @@ interface AppState {
   services: Service[];
   movements: InventoryMovement[];
   invoices: Invoice[];
+  openTabs: OpenTab[];
+  addOpenTab: (tab: OpenTab) => void;
+  updateOpenTab: (id: string, updates: Partial<OpenTab>) => void;
+  deleteOpenTab: (id: string) => void;
   whatsappLogs: WhatsAppLog[];
   users: TenantUser[];
   technicians: Technician[];
@@ -271,6 +275,7 @@ export const useStore = create<AppState>()(
       cajas: [],
       cajaMovements: [],
       invoices: [],
+      openTabs: [],
 
       whatsappLogs: [],
 
@@ -386,6 +391,10 @@ export const useStore = create<AppState>()(
       addMovement: (movement) =>
         set((state) => ({ movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] })),
 
+      addOpenTab: (tab) => set((state) => ({ openTabs: [tab, ...state.openTabs] })),
+      updateOpenTab: (id, updates) => set((state) => ({ openTabs: state.openTabs.map(t => t.id === id ? { ...t, ...updates } : t) })),
+      deleteOpenTab: (id) => set((state) => ({ openTabs: state.openTabs.filter(t => t.id !== id) })),
+
       addInvoice: (invoice) => {
         set((state) => {
           const updatedProducts = [...state.products];
@@ -404,7 +413,7 @@ export const useStore = create<AppState>()(
                         const subProd = updatedProducts[ciIndex];
                         updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock - (ci.quantity * item.quantity) };
                         newMovements.push({
-                          id: Math.random().toString(36).substr(2, 9),
+                          id: crypto.randomUUID(),
                           tenantId: invoice.tenantId,
                           productId: ci.productId,
                           productName: subProd.name,
@@ -419,7 +428,7 @@ export const useStore = create<AppState>()(
                   } else {
                     updatedProducts[productIndex] = { ...product, stock: product.stock - item.quantity };
                     newMovements.push({
-                      id: Math.random().toString(36).substr(2, 9),
+                      id: crypto.randomUUID(),
                       tenantId: invoice.tenantId,
                       productId: item.productId,
                       productName: product.name,
@@ -499,7 +508,7 @@ export const useStore = create<AppState>()(
                         const subProd = updatedProducts[ciIndex];
                         updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock + (ci.quantity * item.quantity) };
                         newMovements.push({
-                          id: Math.random().toString(36).substr(2, 9),
+                          id: crypto.randomUUID(),
                           tenantId: oldInvoice.tenantId,
                           productId: ci.productId,
                           productName: subProd.name,
@@ -513,7 +522,7 @@ export const useStore = create<AppState>()(
                   } else {
                     updatedProducts[productIndex] = { ...product, stock: product.stock + item.quantity };
                     newMovements.push({
-                      id: Math.random().toString(36).substr(2, 9),
+                      id: crypto.randomUUID(),
                       tenantId: oldInvoice.tenantId,
                       productId: item.productId,
                       productName: product.name,
@@ -648,7 +657,7 @@ export const useStore = create<AppState>()(
             const neededQuantity = Math.max(1, (product.minStock * 2) - product.stock);
             
             const newItem: PurchaseOrderItem = {
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               productId: product.id,
               productName: product.name,
               quantity: neededQuantity,
@@ -678,7 +687,7 @@ export const useStore = create<AppState>()(
               }
             } else {
               const newOrder: PurchaseOrder = {
-                id: `po_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                id: `po_${Date.now()}_${crypto.randomUUID()}`,
                 tenantId,
                 supplierId,
                 number: `OC-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
@@ -772,7 +781,7 @@ export const useStore = create<AppState>()(
                 const existingAlert = state.maintenanceAlerts.find(a => a.maintenanceItemId === item.id && a.status === 'pending');
                 if (!existingAlert) {
                   newAlerts.push({
-                    id: Math.random().toString(36).substr(2, 9),
+                    id: crypto.randomUUID(),
                     tenantId: item.tenantId,
                     vehicleId: item.vehicleId,
                     customerId: vehicle.customerId,
@@ -905,7 +914,7 @@ export const useStore = create<AppState>()(
           if (existingItem) {
             // Registrar en historial el servicio anterior antes de reiniciarlo
             newHistoryItems.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               vehicleId,
               tenantId,
               name: existingItem.name,
@@ -955,7 +964,7 @@ export const useStore = create<AppState>()(
                 .join(', ');
 
               newHistoryItems.push({
-                id: Math.random().toString(36).substr(2, 9),
+                id: crypto.randomUUID(),
                 vehicleId,
                 tenantId,
                 name: prevItemNames || 'Servicio anterior',
@@ -968,7 +977,7 @@ export const useStore = create<AppState>()(
 
             // Crear nuevo registro de mantenimiento desde cero
             newMaintenanceItems.push({
-              id: Math.random().toString(36).substr(2, 9),
+              id: crypto.randomUUID(),
               vehicleId,
               tenantId,
               name: data.label,
