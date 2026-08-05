@@ -152,6 +152,16 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
           body > * { display: none !important; }
           #receipt-print-dialog { display: block !important; }
           @page { size: 80mm auto; margin: 4mm; }
+          * {
+            color: black !important;
+            border-color: black !important;
+            -webkit-font-smoothing: none !important;
+            font-smooth: never !important;
+            text-rendering: optimizeSpeed !important;
+          }
+          img {
+            filter: grayscale(100%) contrast(1000%) !important;
+          }
         }
         #receipt-print-dialog { display: none; }
       `}</style>

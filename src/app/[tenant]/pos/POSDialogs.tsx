@@ -253,6 +253,16 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
           <style>
             @media print {
               @page { size: ${formatSize}; margin: 0; }
+              * {
+                color: black !important;
+                border-color: black !important;
+                -webkit-font-smoothing: none !important;
+                font-smooth: never !important;
+                text-rendering: optimizeSpeed !important;
+              }
+              img {
+                filter: grayscale(100%) contrast(1000%) !important;
+              }
             }
             html, body { 
               background: white !important; 

@@ -4,7 +4,7 @@ import type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails } f
 
 export type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails };
 
-export const ADMIN_EMAILS = ["admin@servitracks.com", "admin@klynn.com", "rubenpolanco487@gmail.com", "autocheck.do@gmail.com"];
+export const ADMIN_EMAILS = ["admin@servitracks.com", "admin@klynn.com", "rubenpolanco487@gmail.com"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
