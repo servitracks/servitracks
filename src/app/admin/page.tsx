@@ -161,8 +161,8 @@ export default function AdminPage() {
     }
   }
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     window.location.assign("/login");
   }
 

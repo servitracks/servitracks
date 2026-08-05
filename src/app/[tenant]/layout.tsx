@@ -536,8 +536,8 @@ export default function DashboardLayout() {
   const isOnPlanesTab = location.pathname.includes('/settings') && location.search.includes('tab=planes');
   const showExpiredOverlay = isTrialExpired && !isOnPlanesTab;
 
-  function onLogout() {
-    logout();
+  async function onLogout() {
+    await logout();
     window.location.assign("/login");
   }
 

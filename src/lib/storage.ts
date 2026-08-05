@@ -4,7 +4,7 @@ import type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails } f
 
 export type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails };
 
-export const ADMIN_EMAILS = ["admin@servitracks.com", "admin@klynn.com", "rubenpolanco487@gmail.com"];
+export const ADMIN_EMAILS = ["admin@servitracks.com", "admin@klynn.com", "rubenpolanco487@gmail.com", "autocheck.do@gmail.com"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -213,7 +213,7 @@ export function setSession(session: any) {
   localStorage.setItem("servitracks-session", JSON.stringify(session));
 }
 
-export function logout() {
+export async function logout() {
   localStorage.removeItem("servitracks-session");
   sessionStorage.removeItem("servitracks-session");
   // Limpiar TODO el estado del tenant en el store para evitar que los datos
@@ -223,6 +223,8 @@ export function logout() {
   store.setCurrentUserId?.(null);
   store.setTenants?.([]);
   store.setAuthenticated?.(false);
+  await supabaseAdmin.auth.signOut().catch(() => {});
+  await supabase.auth.signOut().catch(() => {});
 }
 
 export function formatCedulaRD(val: string) {
