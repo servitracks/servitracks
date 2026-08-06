@@ -239,6 +239,14 @@ export default function QuotationDetailDialog({
               <Badge className={cn("text-xs font-bold border rounded-full px-2 py-0.5", statusColors[quote.status])}>
                 {statusLabels[quote.status]}
               </Badge>
+              {customer && (
+                <>
+                  <div className="h-4 w-px bg-neutral-200 mx-1" />
+                  <span className="text-sm font-semibold text-neutral-600 truncate max-w-[200px]" title={customer.name}>
+                    {customer.name}
+                  </span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-2.5">
               {quote.status === "draft" && (
