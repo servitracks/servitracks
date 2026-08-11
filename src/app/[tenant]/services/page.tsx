@@ -48,7 +48,7 @@ const emptyTechnician: Partial<Technician> = {
 export default function ServicesPage() {
   const { tenant } = useParams();
   const { services, addService, updateService, deleteService, tenants, technicians, addTechnician, updateTechnician, deleteTechnician } = useStore();
-  const { empleados } = useNominaStore();
+  const { empleados, addEmpleado } = useNominaStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
   
@@ -144,7 +144,30 @@ export default function ServicesPage() {
         createdAt: new Date().toISOString(),
       };
       addTechnician(newTechnician);
-      toast.success(`Técnico ${techForm.name} registrado con éxito`);
+      
+      // Sincronizar automáticamente con el módulo de nómina
+      const parts = newTechnician.name.split(" ");
+      const nombres = parts[0] || "";
+      const apellidos = parts.slice(1).join(" ") || "";
+      
+      addEmpleado({
+        id: `emp-nom-${Date.now()}`,
+        tenantId: tenantId,
+        cedula: "000-0000000-0", // Faltaría información
+        nombres,
+        apellidos,
+        cargo: "Técnico",
+        departamento: "Taller",
+        salarioBase: newTechnician.tipoPago === "fijo" ? (newTechnician.pagoNomina || 0) : 0,
+        tipoCobro: newTechnician.tipoPago === "fijo" ? "mensual" : "quincenal",
+        fechaIngreso: new Date().toISOString(),
+        estado: newTechnician.status === "active" ? "activo" : "inactivo",
+        dependientes: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      
+      toast.success(`Técnico ${techForm.name} registrado con éxito y sincronizado con Nómina`);
     }
     setIsTechFormOpen(false);
     setEditingTechnician(null);

@@ -272,9 +272,13 @@ export default function NominaPage() {
                             </td>
                           </tr>
                         ))}
-                        {filteredEmpleados.map(emp => (
-                          <tr key={emp.id} className="hover:bg-neutral-50/50 cursor-pointer" onClick={() => openEditEmp(emp)}>
-                            <td className="p-4 font-mono text-xs">{emp.cedula}</td>
+                        {filteredEmpleados.map(emp => {
+                          const isMissingData = emp.cedula === "000-0000000-0" || emp.salarioBase === 0;
+                          return (
+                          <tr key={emp.id} className={cn("hover:bg-neutral-50/50 cursor-pointer", isMissingData && "bg-rose-50/20 hover:bg-rose-50/40")} onClick={() => openEditEmp(emp)}>
+                            <td className={cn("p-4 font-mono text-xs", isMissingData && "text-rose-500 font-bold flex items-center gap-1.5")}>
+                              {isMissingData ? <><AlertCircle className="w-3.5 h-3.5" /> Faltan Datos</> : emp.cedula}
+                            </td>
                             <td className="p-4 font-semibold text-neutral-800">{emp.nombres} {emp.apellidos}</td>
                             <td className="p-4 text-neutral-600">{emp.cargo}</td>
                             <td className="p-4 text-neutral-600 capitalize">{emp.tipoCobro}</td>
@@ -288,7 +292,8 @@ export default function NominaPage() {
                               </Badge>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </>
                     )}
                   </tbody>

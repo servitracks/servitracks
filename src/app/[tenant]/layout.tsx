@@ -8,6 +8,7 @@ import { TourController } from "@/components/dashboard/TourController";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
+import { useNominaStore } from "@/store/useNominaStore";
 import { useHydration } from "@/store/useHydration";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
 import React from "react";
@@ -163,7 +164,7 @@ export default function DashboardLayout() {
 
     // Mapa de permisos por subruta
     const pathPermissions: Record<string, string[]> = {
-      "": ['owner', 'cashier', 'receptionist', 'superadmin'],
+      "": ['owner', 'receptionist', 'superadmin'],
       "/orders": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
       "/cotizaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/pos": ['owner', 'cashier', 'superadmin'],
@@ -195,7 +196,7 @@ export default function DashboardLayout() {
         console.warn("[RBAC] Access denied to path:", subpath, "for role:", userRole);
         // Encontrar la primera página permitida para este rol
         const allowedItems = [
-          { href: "", roles: ['owner', 'cashier', 'receptionist', 'superadmin'] },
+          { href: "", roles: ['owner', 'receptionist', 'superadmin'] },
           { href: "/orders", roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
           { href: "/mis-comisiones", roles: ['mechanic', 'owner', 'superadmin'] },
           { href: "/inventory", roles: ['owner', 'warehouse', 'superadmin'] },
@@ -333,6 +334,16 @@ export default function DashboardLayout() {
           accountsPayable: dbState.accountsPayable,
           quoteRequests: dbState.quoteRequests,
         });
+        
+        // Nomina Remote Sync
+        const { loadEmpleadosFromSupabase, loadNominasFromSupabase } = await import("@/lib/nominaSync");
+        const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
+        const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
+        useNominaStore.setState({
+          empleados: dbEmpleados,
+          nominas: dbNominas
+        });
+        
         setTimeout(() => { syncDisabledRef.current = false; }, 1000);
         console.log("[RT Sync] ✅ Estado remoto aplicado al store");
       } catch (err) {
@@ -358,6 +369,7 @@ export default function DashboardLayout() {
       "movements", "cajas", "quotes", "inspections",
       "maintenance_items", "maintenance_alerts", "technicians",
       "suppliers", "purchase_orders", "goods_receipts", "accounts_payable",
+      "empleados_nomina", "nominas_periodos"
     ];
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
@@ -470,6 +482,22 @@ export default function DashboardLayout() {
               accountsPayable: dbState.accountsPayable,
               quoteRequests: dbState.quoteRequests
             });
+            
+            // Initial Nomina Sync
+            const { loadEmpleadosFromSupabase, loadNominasFromSupabase, syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
+            const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
+            const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
+            const localNominaState = useNominaStore.getState();
+            if (dbEmpleados.length > 0 || dbNominas.length > 0) {
+              // Si la BD tiene datos, descargamos y mergeamos
+              const mergedEmpleados = [...dbEmpleados, ...localNominaState.empleados.filter(le => !dbEmpleados.find(de => de.id === le.id))];
+              const mergedNominas = [...dbNominas, ...localNominaState.nominas.filter(ln => !dbNominas.find(dn => dn.id === ln.id))];
+              useNominaStore.setState({ empleados: mergedEmpleados, nominas: mergedNominas });
+              await syncNominaStoreToSupabase(currentTenant!.id, { empleados: mergedEmpleados, nominas: mergedNominas });
+            } else if (localNominaState.empleados.length > 0 || localNominaState.nominas.length > 0) {
+              await syncNominaStoreToSupabase(currentTenant!.id, { empleados: localNominaState.empleados, nominas: localNominaState.nominas });
+            }
+            
             setTimeout(() => {
               syncDisabledRef.current = false;
             }, 1000);
@@ -499,6 +527,12 @@ export default function DashboardLayout() {
               accountsPayable: localState.accountsPayable,
               quoteRequests: localState.quoteRequests
             });
+            
+            const { syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
+            const localNominaState = useNominaStore.getState();
+            if (localNominaState.empleados.length > 0 || localNominaState.nominas.length > 0) {
+               await syncNominaStoreToSupabase(currentTenant!.id, { empleados: localNominaState.empleados, nominas: localNominaState.nominas });
+            }
           }
         } catch (err) {
           console.error("[Initial Sync Error]:", err);
@@ -567,10 +601,23 @@ export default function DashboardLayout() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
 
+    // 4. Espía de Cambios Locales de Nomina
+    const unsubscribeNomina = useNominaStore.subscribe((state, prevState) => {
+      if (syncDisabledRef.current) return;
+      const changed = state.empleados !== prevState.empleados || state.nominas !== prevState.nominas;
+      if (!changed) return;
+      
+      console.log("[Background Sync] ⬆️ Cambio local de nomina detectado → subiendo a Supabase...");
+      import("@/lib/nominaSync").then(({ syncNominaStoreToSupabase }) => {
+        syncNominaStoreToSupabase(currentTenant.id, state).catch(err => console.error("[Nomina Sync] Error:", err));
+      });
+    });
+
     return () => {
       if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
       if (localUploadTimer) clearTimeout(localUploadTimer);
       unsubscribe();
+      unsubscribeNomina();
       window.removeEventListener("beforeunload", handleBeforeUnload);
       supabase.removeChannel(realtimeChannel);
       supabase.removeChannel(syncChannel);

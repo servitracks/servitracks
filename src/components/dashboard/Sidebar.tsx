@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const navigation = [
-  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'receptionist'] },
   { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
   { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
