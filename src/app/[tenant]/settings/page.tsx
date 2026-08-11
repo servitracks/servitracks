@@ -291,6 +291,51 @@ export default function SettingsPage() {
   const [inviteForm, setInviteForm] = useState({ name: "", email: "", password: "", role: "mechanic" as TenantUser["role"] });
   const [isInviting, setIsInviting] = useState(false);
 
+  const [editUserTarget, setEditUserTarget] = useState<TenantUser | null>(null);
+  const [editUserForm, setEditUserForm] = useState({ name: "", email: "", role: "mechanic" as TenantUser["role"], status: "active" as TenantUser["status"] });
+
+  const handleEditUser = (u: TenantUser) => {
+    setEditUserTarget(u);
+    setEditUserForm({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      status: u.status,
+    });
+  };
+
+  const handleSaveEditUser = async () => {
+    if (!editUserTarget) return;
+    if (!editUserForm.name) { toast.error("El nombre es requerido"); return; }
+    
+    // Update local store
+    updateUser(editUserTarget.id, {
+      name: editUserForm.name,
+      role: editUserForm.role,
+      status: editUserForm.status,
+    });
+
+    // Update in Supabase db
+    const { error } = await supabaseAdmin
+      .from("tenant_users")
+      .update({
+        name: editUserForm.name,
+        role: editUserForm.role,
+        status: editUserForm.status,
+      })
+      .eq("user_id", editUserTarget.id)
+      .eq("tenant_id", taller.id);
+
+    if (error) {
+      console.error("Error updating user in DB:", error);
+      toast.warning("Actualizado localmente. Hubo un error al sincronizar.");
+    } else {
+      toast.success(`Usuario "${editUserForm.name}" actualizado`);
+    }
+
+    setEditUserTarget(null);
+  };
+
   const handleInvite = async () => {
     if (!inviteForm.name || !inviteForm.email || !inviteForm.password) { 
       toast.error("Nombre, correo y contraseña son requeridos"); 
@@ -1160,13 +1205,18 @@ export default function SettingsPage() {
             <CardContent className="p-0">
               <div className="divide-y divide-neutral-50">
                 {users.filter((u) => u.tenantId === taller.id).map(u => (
-                  <div key={u.id} className="flex items-center gap-4 px-5 py-4 hover:bg-neutral-50/50 transition-colors">
-                    <div className="h-9 w-9 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">
-                      {u.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-neutral-900">{u.name}</p>
-                      <p className="text-xs text-neutral-400">{u.email}</p>
+                  <div key={u.id} className="flex items-center gap-4 px-5 py-4 hover:bg-neutral-50/50 transition-colors group">
+                    <div 
+                      className="flex flex-1 items-center gap-4 cursor-pointer"
+                      onClick={() => handleEditUser(u)}
+                    >
+                      <div className="h-9 w-9 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 group-hover:bg-emerald-600 transition-colors">
+                        {u.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-neutral-900 group-hover:text-emerald-600 transition-colors">{u.name}</p>
+                        <p className="text-xs text-neutral-400">{u.email}</p>
+                      </div>
                     </div>
                     <Badge className={cn("border-none rounded-full text-xs", roleBadge(u.role))}>{roleLabel(u.role)}</Badge>
                     <Badge className={cn("border-none rounded-full text-xs",
@@ -1193,6 +1243,66 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Edit User Modal */}
+          <Dialog open={!!editUserTarget} onOpenChange={(val) => !val && setEditUserTarget(null)}>
+            <DialogContent className="sm:max-w-sm rounded-2xl p-6 bg-white border-none shadow-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-black text-neutral-900 tracking-tight">Editar Usuario</DialogTitle>
+                <DialogDescription>Modifica los datos y permisos del empleado.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label>Nombre Completo</Label>
+                  <Input className="h-10 rounded-xl border-neutral-200"
+                    value={editUserForm.name}
+                    onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Correo Electrónico</Label>
+                  <Input type="email" className="h-10 rounded-xl border-neutral-200 bg-neutral-50 text-neutral-500 cursor-not-allowed"
+                    value={editUserForm.email}
+                    disabled
+                    title="El correo no se puede cambiar por motivos de seguridad" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Rol</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ROLES.filter(r => editUserTarget?.role === "owner" ? r.value === "owner" : r.value !== "owner").map(r => (
+                      <button key={r.value} onClick={() => setEditUserForm({ ...editUserForm, role: r.value })}
+                        className={cn("py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer",
+                          editUserForm.role === r.value ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {editUserTarget?.role !== "owner" && (
+                  <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                    <Label>Estado de la Cuenta</Label>
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditUserForm({ ...editUserForm, status: "active" })}
+                        className={cn("flex-1 py-2 rounded-xl border text-sm font-bold transition-all cursor-pointer",
+                          editUserForm.status === "active" ? "bg-emerald-600 text-white border-emerald-600" : "border-neutral-200 text-neutral-600 hover:bg-emerald-50")}>
+                        Activo
+                      </button>
+                      <button onClick={() => setEditUserForm({ ...editUserForm, status: "inactive" })}
+                        className={cn("flex-1 py-2 rounded-xl border text-sm font-bold transition-all cursor-pointer",
+                          editUserForm.status === "inactive" ? "bg-rose-600 text-white border-rose-600" : "border-neutral-200 text-neutral-600 hover:bg-rose-50")}>
+                        Inactivo
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditUserTarget(null)} className="rounded-xl cursor-pointer">Cancelar</Button>
+                <Button onClick={handleSaveEditUser} className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer border-none">
+                  Guardar Cambios
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* User PIN Modal */}
           <Dialog open={!!pinTarget} onOpenChange={(val) => !val && setPinTarget(null)}>

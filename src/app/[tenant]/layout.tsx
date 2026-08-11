@@ -295,53 +295,109 @@ export default function DashboardLayout() {
     };
   }, [currentTenant?.id]);
 
-  // ─── DESCARGA INICIAL DESDE SUPABASE Y SINCRONIZACIÓN EN SEGUNDO PLANO ──────────────────────────────────────
+  // ─── DESCARGA INICIAL DESDE SUPABASE Y SINCRONIZACIÓN EN TIEMPO REAL ──────────────────────────────────────
   useEffect(() => {
     if (!currentTenant?.id) return;
-    
-    let timeoutId: NodeJS.Timeout;
 
-    // 1. Configurar escucha de Broadcast para actualizaciones de otros dispositivos
+    // ── Timers separados para no interferir entre sí ──
+    let remoteRefreshTimer: NodeJS.Timeout | null = null; // Descarga desde DB remota
+    let localUploadTimer: NodeJS.Timeout | null = null;   // Sube cambios locales a DB
+
+    // ── Helper: aplica estado remoto al store local ──
+    async function applyRemoteState() {
+      try {
+        const { downloadFullStateFromSupabase } = await import("@/lib/supabaseSync");
+        const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
+        // Marcar que este setState viene de DB → no relanzar el upload spy
+        syncDisabledRef.current = true;
+        useStore.setState({
+          customers: dbState.customers,
+          vehicles: dbState.vehicles,
+          maintenanceItems: dbState.maintenanceItems,
+          services: dbState.services,
+          products: dbState.products,
+          orders: dbState.orders,
+          quotes: dbState.quotes,
+          invoices: dbState.invoices,
+          cajas: dbState.cajas,
+          cajaMovements: dbState.cajaMovements,
+          technicians: dbState.technicians,
+          movements: dbState.movements,
+          inspections: dbState.inspections,
+          maintenanceAlerts: dbState.maintenanceAlerts,
+          maintenanceHistory: dbState.maintenanceHistory,
+          suppliers: dbState.suppliers,
+          supplierProducts: dbState.supplierProducts,
+          purchaseOrders: dbState.purchaseOrders,
+          goodsReceipts: dbState.goodsReceipts,
+          accountsPayable: dbState.accountsPayable,
+          quoteRequests: dbState.quoteRequests,
+        });
+        setTimeout(() => { syncDisabledRef.current = false; }, 1000);
+        console.log("[RT Sync] ✅ Estado remoto aplicado al store");
+      } catch (err) {
+        console.error("[RT Sync] ❌ Error al descargar estado remoto:", err);
+        syncDisabledRef.current = false;
+      }
+    }
+
+    // ── Debounce para la descarga remota (400ms) ──
+    function scheduleRemoteRefresh() {
+      if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
+      remoteRefreshTimer = setTimeout(() => {
+        remoteRefreshTimer = null;
+        applyRemoteState();
+      }, 400);
+    }
+
+    // 1. Tablas a escuchar en tiempo real
+    //    movimientos_caja aparece solo una vez, sin filtro de tenant_id
+    //    porque su FK es caja_id, no tenant_id
+    const TABLES_WITH_TENANT = [
+      "orders", "invoices", "products", "customers", "vehicles",
+      "movements", "cajas", "quotes", "inspections",
+      "maintenance_items", "maintenance_alerts", "technicians",
+      "suppliers", "purchase_orders", "goods_receipts", "accounts_payable",
+    ];
+
+    const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
+
+    // Tablas con tenant_id → filtradas
+    TABLES_WITH_TENANT.forEach((table) => {
+      realtimeChannel.on(
+        "postgres_changes" as any,
+        { event: "*", schema: "public", table, filter: `tenant_id=eq.${currentTenant.id}` },
+        (payload: any) => {
+          console.log(`[RT Sync] 📡 Cambio remoto en '${table}':`, payload.eventType);
+          scheduleRemoteRefresh();
+        }
+      );
+    });
+
+    // movimientos_caja → sin filtro tenant_id (usa caja_id como FK)
+    realtimeChannel.on(
+      "postgres_changes" as any,
+      { event: "*", schema: "public", table: "movimientos_caja" },
+      (payload: any) => {
+        console.log("[RT Sync] 📡 Cambio remoto en 'movimientos_caja':", payload.eventType);
+        scheduleRemoteRefresh();
+      }
+    );
+
+    realtimeChannel.subscribe((status: string, err?: Error) => {
+      if (status === "SUBSCRIBED") {
+        console.log("[RT Sync] ✅ Suscripción activa - cambios de empleados en tiempo real");
+      } else {
+        console.log("[RT Sync] Estado:", status, err || "");
+      }
+    });
+
+    // 2. Canal Broadcast (fallback + notificación explícita entre dispositivos)
     const syncChannel = supabase
       .channel(`sync_tenant_${currentTenant.id}`)
-      .on("broadcast", { event: "state_updated" }, async (payload) => {
-        console.log("[Broadcast Sync] Cambios detectados en otro dispositivo. Actualizando local...");
-        try {
-          const { downloadFullStateFromSupabase } = await import("@/lib/supabaseSync");
-          const dbState = await downloadFullStateFromSupabase(currentTenant.id);
-          
-          syncDisabledRef.current = true; // Prevenir que el espía re-suba estos datos
-          useStore.setState({
-            customers: dbState.customers,
-            vehicles: dbState.vehicles,
-            maintenanceItems: dbState.maintenanceItems,
-            services: dbState.services,
-            products: dbState.products,
-            orders: dbState.orders,
-            quotes: dbState.quotes,
-            invoices: dbState.invoices,
-            cajas: dbState.cajas,
-            cajaMovements: dbState.cajaMovements,
-            technicians: dbState.technicians,
-            movements: dbState.movements,
-            inspections: dbState.inspections,
-            maintenanceAlerts: dbState.maintenanceAlerts,
-            maintenanceHistory: dbState.maintenanceHistory,
-            suppliers: dbState.suppliers,
-            supplierProducts: dbState.supplierProducts,
-            purchaseOrders: dbState.purchaseOrders,
-            goodsReceipts: dbState.goodsReceipts,
-            accountsPayable: dbState.accountsPayable,
-            quoteRequests: dbState.quoteRequests
-          });
-          
-          setTimeout(() => {
-            syncDisabledRef.current = false;
-          }, 1000);
-          
-        } catch (err) {
-          console.error("[Broadcast Sync Error]:", err);
-        }
+      .on("broadcast", { event: "state_updated" }, () => {
+        console.log("[Broadcast] 📡 Notificación recibida → refrescando");
+        scheduleRemoteRefresh();
       })
       .subscribe();
 
@@ -453,11 +509,11 @@ export default function DashboardLayout() {
       loadData();
     }
     
-    // 3. Espía de Cambios Locales
+    // 3. Espía de Cambios Locales → sube a Supabase y notifica otros dispositivos
     const unsubscribe = useStore.subscribe((state, prevState) => {
-      if (syncDisabledRef.current) return; // Ignorar cambios provocados por descargas remotas
-      
-      if (
+      if (syncDisabledRef.current) return; // Ignorar cambios que vinieron de la DB (evitar loop)
+
+      const changed =
         state.orders !== prevState.orders ||
         state.invoices !== prevState.invoices ||
         state.quotes !== prevState.quotes ||
@@ -478,31 +534,31 @@ export default function DashboardLayout() {
         state.purchaseOrders !== prevState.purchaseOrders ||
         state.goodsReceipts !== prevState.goodsReceipts ||
         state.accountsPayable !== prevState.accountsPayable ||
-        state.quoteRequests !== prevState.quoteRequests
-      ) {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          timeoutId = null as any;
-          console.log("[Background Sync] Espía detectó cambios locales. Sincronizando a Supabase (Instantáneo)...");
-          import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
-            syncStoreToSupabase(currentTenant.id, state).then(() => {
-              // Notificar a otros dispositivos
-              syncChannel.send({
-                type: "broadcast",
-                event: "state_updated",
-                payload: { ts: Date.now() }
-              });
-            }).catch(err => {
-              console.error("[Background Sync Error]:", err);
+        state.quoteRequests !== prevState.quoteRequests;
+
+      if (!changed) return;
+
+      // Debounce de 500ms para el upload local (timer independiente del remoteRefreshTimer)
+      if (localUploadTimer) clearTimeout(localUploadTimer);
+      localUploadTimer = setTimeout(() => {
+        localUploadTimer = null;
+        console.log("[Background Sync] ⬆️ Cambio local detectado → subiendo a Supabase...");
+        import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
+          syncStoreToSupabase(currentTenant.id, state)
+            .then(() => {
+              // Notificar al resto de dispositivos vía Broadcast
+              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now() } });
+            })
+            .catch((err) => {
+              console.error("[Background Sync] ❌ Error al subir:", err);
             });
-          });
-        }, 500); // 500ms (casi instantáneo) en lugar de 5000ms
-      }
+        });
+      }, 500);
     });
 
     const handleBeforeUnload = () => {
-      if (timeoutId) {
-        // Si hay una sincronización pendiente y el usuario intenta cerrar la pestaña, forzarla.
+      // Forzar upload inmediato si hay cambios pendientes al cerrar la pestaña
+      if (localUploadTimer) {
         const state = useStore.getState();
         import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
           syncStoreToSupabase(currentTenant.id, state);
@@ -512,9 +568,11 @@ export default function DashboardLayout() {
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
-      clearTimeout(timeoutId);
+      if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
+      if (localUploadTimer) clearTimeout(localUploadTimer);
       unsubscribe();
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      supabase.removeChannel(realtimeChannel);
       supabase.removeChannel(syncChannel);
     };
   }, [currentTenant?.id, initialSyncDone]);

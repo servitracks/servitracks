@@ -315,7 +315,14 @@ export const useStore = create<AppState>()(
       deleteTenant: (id) =>
         set((state) => ({ tenants: state.tenants.filter((t) => t.id !== id) })),
 
-      addUser: (user) => set((state) => ({ users: [...state.users, user] })),
+      addUser: (user) => set((state) => {
+        const exists = state.users.some((u) => u.id === user.id);
+        if (exists) {
+          // Merge/update rather than duplicate
+          return { users: state.users.map((u) => u.id === user.id ? { ...u, ...user } : u) };
+        }
+        return { users: [...state.users, user] };
+      }),
       updateUser: (id, updates) =>
         set((state) => ({ users: state.users.map((u) => (u.id === id ? { ...u, ...updates } : u)) })),
       deleteUser: (id) => set((state) => ({ users: state.users.filter((u) => u.id !== id) })),
@@ -1060,8 +1067,17 @@ export const useStore = create<AppState>()(
     }),
     { 
       name: 'servitracks-storage',
-      version: 2,
+      version: 3,
       migrate: (_persistedState: any, fromVersion: number) => {
+        // Version 3: deduplicate users array (fixes double "Dueño" bug)
+        if (fromVersion < 3 && _persistedState?.users) {
+          const seen = new Set<string>();
+          _persistedState.users = (_persistedState.users as any[]).filter((u: any) => {
+            if (seen.has(u.id)) return false;
+            seen.add(u.id);
+            return true;
+          });
+        }
         // Version 2: wipe all operational data (orders, customers, etc.) that may have dev/mock data
         // Preserve only printSettings and auth state
         if (fromVersion < 2) {

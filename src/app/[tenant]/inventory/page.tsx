@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useParams } from "@/lib/next-compat";
 import { useStore, Product } from "@/store/useStore";
 import {
@@ -21,6 +21,8 @@ import {
   ArrowUp,
   ArrowDown,
   Layers,
+  ScanLine,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,9 +98,12 @@ interface ProductFieldsProps {
   isEditOpen: boolean;
   services: { id: string; name: string; category?: string }[];
   suppliers: { id: string; commercialName: string }[];
+  onBarcodeLookup?: (code: string) => Promise<void>;
+  isLookingUp?: boolean;
 }
 
-const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: ProductFieldsProps) => {
+const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers, onBarcodeLookup, isLookingUp }: ProductFieldsProps) => {
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
   const serviceCategories = useMemo(() => {
     const cats: Record<string, typeof services> = {};
     services.forEach((s) => {
@@ -203,13 +208,47 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers }: P
         />
       </div>
       <div className="space-y-1.5">
-        <Label>Código de Barras</Label>
-        <Input 
-          placeholder="Automático si se deja vacío" 
-          className="h-10 rounded-xl border-neutral-200"
-          value={form.barcode} 
-          onChange={(e) => setForm((prev) => ({ ...prev, barcode: e.target.value }))} 
-        />
+        <Label className="flex items-center gap-1.5">
+          <ScanLine className="h-3.5 w-3.5 text-neutral-400" />
+          Código de Barras
+          {!isEditOpen && <span className="text-[10px] text-blue-500 font-semibold">(escanea para auto-rellenar)</span>}
+        </Label>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Input
+              ref={barcodeInputRef}
+              placeholder={isEditOpen ? "Código de barras" : "Escanea o escribe y presiona Enter..."}
+              className="h-10 rounded-xl border-neutral-200 pr-10"
+              value={form.barcode}
+              onChange={(e) => setForm((prev) => ({ ...prev, barcode: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && form.barcode.trim() && onBarcodeLookup && !isEditOpen) {
+                  e.preventDefault();
+                  onBarcodeLookup(form.barcode.trim());
+                }
+              }}
+            />
+            {isLookingUp && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-blue-500" />
+            )}
+          </div>
+          {!isEditOpen && onBarcodeLookup && (
+            <button
+              type="button"
+              disabled={!form.barcode.trim() || isLookingUp}
+              onClick={() => form.barcode.trim() && onBarcodeLookup(form.barcode.trim())}
+              className="h-10 px-3 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs font-bold whitespace-nowrap"
+            >
+              <ScanLine className="h-4 w-4" />
+              Buscar
+            </button>
+          )}
+        </div>
+        {!isEditOpen && (
+          <p className="text-[11px] text-neutral-400">
+            Escanea el código de barras del producto o escríbelo y presiona <kbd className="bg-neutral-100 px-1 rounded text-[10px]">Enter</kbd> para buscar su información automáticamente.
+          </p>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label>Categoría *</Label>
@@ -466,6 +505,7 @@ export default function InventoryPage() {
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
+  const [kpiFilter, setKpiFilter] = useState<"all" | "low" | "out">("all");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
@@ -480,6 +520,56 @@ export default function InventoryPage() {
   const [adjustQty, setAdjustQty] = useState("");
   const [adjustType, setAdjustType] = useState<"in" | "out" | "adjustment">("in");
   const [adjustReason, setAdjustReason] = useState("");
+  const [isLookingUp, setIsLookingUp] = useState(false);
+
+  // Mapeo de categorías de UPCitemdb → categorías de ServiTracks
+  const mapCategoryFromBarcode = (category: string): string => {
+    const c = (category || "").toLowerCase();
+    if (c.includes("oil") || c.includes("lubri") || c.includes("aceite")) return "Lubricantes";
+    if (c.includes("filter") || c.includes("filtro")) return "Filtros";
+    if (c.includes("brake") || c.includes("freno")) return "Frenos";
+    if (c.includes("suspens") || c.includes("shock") || c.includes("spring")) return "Suspensión";
+    if (c.includes("tire") || c.includes("tyre") || c.includes("neum")) return "Neumáticos";
+    if (c.includes("electric") || c.includes("batter") || c.includes("eléc")) return "Eléctrico";
+    if (c.includes("transmission") || c.includes("transmis")) return "Transmisión";
+    return "Otros";
+  };
+
+  // Consulta la API gratuita de UPCitemdb para obtener info del producto por código de barras
+  const lookupBarcode = async (code: string) => {
+    setIsLookingUp(true);
+    try {
+      // UPCitemdb trial endpoint — free, no key needed, covers EAN/UPC/ISBN
+      const res = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`);
+      if (!res.ok) throw new Error("No response");
+      const data = await res.json();
+      const item = data?.items?.[0];
+      if (!item) {
+        toast.error(`Código "${code}" no encontrado en la base de datos. Puedes seguir completando el formulario manualmente.`);
+        return;
+      }
+
+      // Pre-rellenar el formulario con los datos encontrados
+      const foundCategory = mapCategoryFromBarcode(item.category || "");
+      setForm((prev) => ({
+        ...prev,
+        name: item.title || prev.name,
+        brand: item.brand || prev.brand,
+        barcode: code,
+        category: foundCategory !== "Otros" ? foundCategory : prev.category || foundCategory,
+        // Si tiene descripción, la guardamos (aunque no hay campo visible, queda en name si está vacío)
+      }));
+
+      toast.success(
+        `✅ Producto encontrado: "${item.title}"${item.brand ? ` — ${item.brand}` : ""}. Verifica y completa los precios.`,
+        { duration: 5000 }
+      );
+    } catch (err) {
+      toast.error("No se pudo consultar la base de datos de códigos de barras. Completa el formulario manualmente.");
+    } finally {
+      setIsLookingUp(false);
+    }
+  };
 
   const filteredProducts = products.filter((p) => {
     const matchSearch =
@@ -491,7 +581,11 @@ export default function InventoryPage() {
       (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
       (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
     const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
-    return matchSearch && matchCat && !p.isCombo;
+    const matchKpi =
+      kpiFilter === "all" ||
+      (kpiFilter === "low" && p.stock > 0 && p.stock <= p.minStock) ||
+      (kpiFilter === "out" && p.stock === 0);
+    return matchSearch && matchCat && matchKpi && !p.isCombo;
   });
 
   const filteredCombos = products.filter((p) => {
@@ -847,26 +941,52 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards — clickeables para filtrar */}
       <div className="grid gap-4 md:grid-cols-4">
-        {[
-          { label: "Total Productos", value: products.length, icon: Package, color: "text-neutral-700", bg: "bg-neutral-50", show: true },
-          { label: "Stock Bajo", value: lowStockCount, icon: AlertTriangle, color: "text-amber-600", bg: "bg-amber-50", show: true },
-          { label: "Sin Stock", value: outOfStockCount, icon: X, color: "text-rose-600", bg: "bg-rose-50", show: true },
-          { label: "Valor Total", value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp, color: "text-emerald-600", bg: "bg-emerald-50", show: isOwner },
-        ].filter(kpi => kpi.show).map((kpi) => (
-          <Card key={kpi.label} className="border-neutral-100 shadow-sm">
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
-                <kpi.icon className={cn("h-5 w-5", kpi.color)} />
+        {([
+          { label: "Total Productos",  value: products.length,                          icon: Package,       color: "text-neutral-700", bg: "bg-neutral-50",  ring: "ring-neutral-400",  filterKey: "all" as const,  show: true },
+          { label: "Stock Bajo",       value: lowStockCount,                             icon: AlertTriangle, color: "text-amber-600",   bg: "bg-amber-50",   ring: "ring-amber-400",    filterKey: "low" as const,  show: true },
+          { label: "Sin Stock",        value: outOfStockCount,                           icon: X,             color: "text-rose-600",   bg: "bg-rose-50",    ring: "ring-rose-400",     filterKey: "out" as const,  show: true },
+          { label: "Valor Total",      value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp,  color: "text-emerald-600", bg: "bg-emerald-50", ring: "ring-emerald-400",  filterKey: null,            show: isOwner },
+        ] as const).filter(kpi => kpi.show).map((kpi) => {
+          const isActive = kpi.filterKey !== null && kpiFilter === kpi.filterKey;
+          const isClickable = kpi.filterKey !== null;
+          return (
+            <button
+              key={kpi.label}
+              type="button"
+              disabled={!isClickable}
+              onClick={() => {
+                if (!isClickable) return;
+                setKpiFilter(isActive ? "all" : kpi.filterKey!);
+              }}
+              className={cn(
+                "text-left rounded-xl border shadow-sm transition-all duration-200 w-full",
+                isClickable
+                  ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]"
+                  : "cursor-default",
+                isActive
+                  ? `border-transparent ring-2 ${kpi.ring} bg-white`
+                  : "border-neutral-100 bg-white"
+              )}
+            >
+              <div className="flex items-center gap-4 p-5">
+                <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0 transition-colors", kpi.bg)}>
+                  <kpi.icon className={cn("h-5 w-5", kpi.color)} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-neutral-500">{kpi.label}</p>
+                  <p className="text-xl font-black text-neutral-900">{kpi.value}</p>
+                </div>
+                {isActive && (
+                  <span className="text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5 whitespace-nowrap">
+                    Filtrando
+                  </span>
+                )}
               </div>
-              <div>
-                <p className="text-xs font-medium text-neutral-500">{kpi.label}</p>
-                <p className="text-xl font-black text-neutral-900">{kpi.value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tabs: Productos / Movimientos */}
@@ -1220,7 +1340,7 @@ export default function InventoryPage() {
             <DialogTitle className="text-xl font-bold">Nuevo Producto</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 py-2">
-            <ProductFormFields form={form} setForm={setForm} isEditOpen={false} services={services} suppliers={suppliers} />
+            <ProductFormFields form={form} setForm={setForm} isEditOpen={false} services={services} suppliers={suppliers} onBarcodeLookup={lookupBarcode} isLookingUp={isLookingUp} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)} className="rounded-xl">Cancelar</Button>
               <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">Crear Producto</Button>
