@@ -210,145 +210,145 @@ export function Ticket({
 
   // --- Diseño Térmico (58mm / 80mm) Moderno ---
   return (
-    <div className={`thermal-ticket mx-auto ${w} ${cols} bg-white p-3 font-sans text-[11px] leading-snug text-neutral-900`} style={{ color: "#171717" }}>
+    <div className={`thermal-ticket mx-auto ${w} ${cols} bg-white p-3 font-sans text-[11px] leading-snug text-black`} style={{ color: "#000000" }}>
       <div className="text-center space-y-1 mb-3">
         {tenant.logo && (
           <div className="flex justify-center mb-2">
-            <img src={tenant.logo} alt="Logo" className="h-14 w-auto max-w-[160px] object-contain filter grayscale contrast-125" />
+            <img src={tenant.logo} alt="Logo" className="h-14 w-auto max-w-[160px] object-contain filter grayscale contrast-[200%] brightness-75" />
           </div>
         )}
-        <div className="text-[14px] font-black uppercase tracking-tight">{tenant.name || tenant.nombre}</div>
-        {tenant.rnc && <div className="text-[10px] text-neutral-600">RNC: {tenant.rnc}</div>}
-        {(tenant.phone || tenant.telefono) && <div className="text-[10px] text-neutral-600">Tel: {tenant.phone || tenant.telefono}</div>}
-        {(tenant.address || tenant.direccion) && <div className="text-[9px] text-neutral-500 leading-tight">{tenant.address || tenant.direccion}</div>}
+        <div className="text-[14px] font-black uppercase tracking-tight text-black">{tenant.name || tenant.nombre}</div>
+        {tenant.rnc && <div className="text-[10px] font-bold text-black">RNC: {tenant.rnc}</div>}
+        {(tenant.phone || tenant.telefono) && <div className="text-[10px] font-bold text-black">Tel: {tenant.phone || tenant.telefono}</div>}
+        {(tenant.address || tenant.direccion) && <div className="text-[9px] font-bold text-black leading-tight">{tenant.address || tenant.direccion}</div>}
       </div>
       
-      <div className="border-t-[1.5px] border-neutral-300 my-2" />
-      <div className="text-center font-black uppercase tracking-wider text-[11px] py-0.5">{tipoDocumento}</div>
-      <div className="border-t-[1.5px] border-neutral-300 my-2" />
+      <div className="border-t-2 border-black my-2" />
+      <div className="text-center font-black uppercase tracking-wider text-[11px] py-0.5 text-black">{tipoDocumento}</div>
+      <div className="border-t-2 border-black my-2" />
       
-      <div className="text-[10px] space-y-0.5">
+      <div className="text-[10px] space-y-0.5 font-bold text-black">
         <div className="flex justify-between">
-          <span className="text-neutral-500">FACTURA:</span>
-          <span className="font-bold">{invoiceId.slice(-6).toUpperCase()}</span>
+          <span>FACTURA:</span>
+          <span className="font-black">{invoiceId.slice(-6).toUpperCase()}</span>
         </div>
         {ncf && (
           <div className="flex justify-between">
-            <span className="text-neutral-500">{isECF ? 'e-NCF' : 'NCF'}:</span>
-            <span className="font-bold">{ncf}</span>
+            <span>{isECF ? 'e-NCF' : 'NCF'}:</span>
+            <span className="font-black">{ncf}</span>
           </div>
         )}
         <div className="flex justify-between">
-          <span className="text-neutral-500">FECHA:</span>
-          <span className="font-bold">{new Date(createdAt).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</span>
+          <span>FECHA:</span>
+          <span className="font-black">{new Date(createdAt).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</span>
         </div>
       </div>
       
       {(!customer || (!customer.name && !customer.rnc) || customer.name === "Consumidor Final" || customer.name === "Walk-in") ? (
-        <div className="border-t border-dashed border-neutral-300 my-2" />
+        <div className="border-t-[1.5px] border-dashed border-black my-2" />
       ) : (
         <>
-          <div className="border-t-[1.5px] border-neutral-300 my-2" />
-          <div className="text-center font-bold uppercase tracking-widest text-[9px] py-0.5 text-neutral-500">CLIENTE</div>
-          <div className="border-t-[1.5px] border-neutral-300 my-2" />
-          <div className="text-[10px] space-y-0.5">
-            {customer.name && <div className="font-bold">{customer.name}</div>}
-            {(customer.rnc || customer.documentId) && <div className="text-neutral-600">RNC: {customer.rnc || customer.documentId}</div>}
-            {customer.phone && <div className="text-neutral-600">Tel: {customer.phone}</div>}
+          <div className="border-t-2 border-black my-2" />
+          <div className="text-center font-black uppercase tracking-widest text-[9px] py-0.5 text-black">CLIENTE</div>
+          <div className="border-t-2 border-black my-2" />
+          <div className="text-[10px] space-y-0.5 font-bold text-black">
+            {customer.name && <div className="font-black">{customer.name}</div>}
+            {(customer.rnc || customer.documentId) && <div>RNC: {customer.rnc || customer.documentId}</div>}
+            {customer.phone && <div>Tel: {customer.phone}</div>}
           </div>
-          <div className="border-t border-dashed border-neutral-300 my-2" />
+          <div className="border-t-[1.5px] border-dashed border-black my-2" />
         </>
       )}
 
-      <div className="flex justify-between font-bold uppercase text-[9px] mb-1.5 text-neutral-500 tracking-wider">
+      <div className="flex justify-between font-black uppercase text-[9px] mb-1.5 text-black tracking-wider">
         <div className="w-[50%]">ARTÍCULO</div>
         <div className="w-[15%] text-right">CT</div>
         <div className="w-[35%] text-right">TOTAL</div>
       </div>
-      <div className="border-t border-neutral-300 my-1" />
+      <div className="border-t-2 border-black my-1" />
 
-      <div className="mt-1.5 mb-2.5 space-y-1.5">
+      <div className="mt-1.5 mb-2.5 space-y-1.5 text-black">
         {items.map((it, i) => {
           let price = it.unitPrice || it.salePrice || 0;
           let qty = it.quantity || 1;
           let valor = qty * price;
           let name = it.name || it.descripcion;
           return (
-            <div key={i} className="flex justify-between items-start">
+            <div key={i} className="flex justify-between items-start font-bold">
               <div className="w-[50%] pr-1">
-                <div className="font-semibold leading-tight text-[10px]">{name}</div>
-                <div className="text-[8px] text-neutral-500 leading-tight">RD$ {price.toLocaleString("es-DO")} c/u</div>
+                <div className="font-black leading-tight text-[10px] text-black">{name}</div>
+                <div className="text-[9px] text-black font-bold leading-tight">RD$ {price.toLocaleString("es-DO")} c/u</div>
               </div>
-              <div className="w-[15%] text-right font-medium text-[10px]">{qty}</div>
-              <div className="w-[35%] text-right font-bold text-[10px]">{valor.toLocaleString("es-DO")}</div>
+              <div className="w-[15%] text-right font-black text-[10px]">{qty}</div>
+              <div className="w-[35%] text-right font-black text-[10px]">{valor.toLocaleString("es-DO")}</div>
             </div>
           )
         })}
       </div>
 
-      <div className="border-t border-neutral-300 my-1" />
-      <div className="space-y-0.5 mt-1">
+      <div className="border-t-2 border-black my-1" />
+      <div className="space-y-0.5 mt-1 text-black">
         <Row k="Subtotal" v={formatRD(subtotal)} />
         {itbis > 0 && <Row k="ITBIS (18%)" v={formatRD(itbis)} />}
-        <div className="my-1 border-t-[1.5px] border-neutral-300" />
-        <div className="flex justify-between items-center">
+        <div className="my-1 border-t-2 border-black" />
+        <div className="flex justify-between items-center text-black">
           <span className="font-black uppercase tracking-wider text-[11px]">TOTAL</span>
           <span className="font-black text-[13px]">{formatRD(total)}</span>
         </div>
       </div>
 
-      <div className="border-t-[1.5px] border-neutral-300 my-2" />
-      <div className="space-y-0.5 text-[10px]">
+      <div className="border-t-2 border-black my-2" />
+      <div className="space-y-0.5 text-[10px] text-black">
         <Row k="Pago" v={{ cash: "Efectivo", card: "Tarjeta", transfer: "Transferencia", credit: "Crédito" }[payMethod] || payMethod} />
         {cashReceived !== undefined && cashReceived > 0 && payMethod === "cash" && <Row k="Recibido" v={formatRD(cashReceived)} />}
         {vuelto > 0 && <Row k="Cambio" v={formatRD(vuelto)} bold />}
       </div>
 
-      <div className="border-t border-dashed border-neutral-300 my-2" />
+      <div className="border-t-[1.5px] border-dashed border-black my-2" />
       {notes && (
-        <div className="text-[9px] mt-1 mb-2 italic leading-tight text-neutral-600">
-          <span className="font-bold not-italic">Nota:</span> {notes}
+        <div className="text-[10px] mt-1 mb-2 font-bold leading-tight text-black">
+          <span className="font-black">Nota:</span> {notes}
         </div>
       )}
       
       {mechanicName && (
         <>
-          <div className="text-center mt-2 text-[10px] text-neutral-600">Atendido por: <b className="text-neutral-900">{mechanicName}</b></div>
-          <div className="border-t border-dashed border-neutral-300 my-2" />
+          <div className="text-center mt-2 text-[10px] font-bold text-black">Atendido por: <b className="font-black">{mechanicName}</b></div>
+          <div className="border-t-[1.5px] border-dashed border-black my-2" />
         </>
       )}
 
       {warrantyText && (
         <>
-          <div className="text-[9px] mt-1.5 mb-1.5 leading-snug text-center px-1 text-neutral-700">
-            <span className="font-bold">&#x1F6E1; </span>
-            <span className="italic">{warrantyText}</span>
+          <div className="text-[10px] mt-1.5 mb-1.5 font-bold leading-snug text-center px-1 text-black">
+            <span className="font-black">&#x1F6E1; </span>
+            <span>{warrantyText}</span>
           </div>
-          <div className="border-t border-dashed border-neutral-300 my-2" />
+          <div className="border-t-[1.5px] border-dashed border-black my-2" />
         </>
       )}
 
-      <div className="text-center mt-3 text-[10px] font-medium tracking-wide">
+      <div className="text-center mt-3 text-[10px] font-black tracking-wide text-black">
         ¡Gracias por su visita!
       </div>
 
       {isECF && qrData && (
-        <div className="mt-4 flex flex-col items-center gap-1 border-t border-dashed border-neutral-300 pt-3">
-          <div className="text-[8px] font-bold uppercase text-center tracking-widest text-neutral-500">
+        <div className="mt-4 flex flex-col items-center gap-1 border-t-[1.5px] border-dashed border-black pt-3">
+          <div className="text-[9px] font-black uppercase text-center tracking-widest text-black">
             Factura de Consumo Electrónica
           </div>
-          <div className="p-1 bg-white my-1 rounded">
-            <QRCodeSVG value={qrData} size={90} level="M" />
+          <div className="p-1 bg-white my-1 rounded border-2 border-black">
+            <QRCodeSVG value={qrData} size={110} level="M" />
           </div>
           {securityCode && (
-            <div className="text-[8px] text-center mt-1 text-neutral-600 font-medium">
-              <div>Cód. Seguridad: <span className="font-bold text-neutral-900">{securityCode}</span></div>
+            <div className="text-[9px] text-center mt-1 text-black font-bold">
+              <div>Cód. Seguridad: <span className="font-black">{securityCode}</span></div>
               {signatureDate && <div>Firma: {new Date(signatureDate).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</div>}
               {!signatureDate && <div>Firma: {new Date(createdAt).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</div>}
             </div>
           )}
-          <div className="text-[8px] text-center mt-1 text-neutral-500">
-            Consulte su factura en:<br /><span className="font-bold text-neutral-900">dgii.gov.do</span>
+          <div className="text-[9px] text-center mt-1 font-bold text-black">
+            Consulte su factura en:<br /><span className="font-black">dgii.gov.do</span>
           </div>
         </div>
       )}
@@ -358,9 +358,9 @@ export function Ticket({
 
 function Row({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
   return (
-    <div className={`flex justify-between items-center ${bold ? "font-bold text-[11px]" : ""}`}>
-      <span className={bold ? "" : "text-neutral-600"}>{k}:</span>
-      <span className={bold ? "text-[12px]" : ""}>{v}</span>
+    <div className={`flex justify-between items-center ${bold ? "font-black text-[11px]" : "font-bold"}`}>
+      <span className="text-black">{k}:</span>
+      <span className="text-black font-black">{v}</span>
     </div>
   );
 }
