@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { useStore } from "@/store/useStore";
 import type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails } from "@/store/types";
 
