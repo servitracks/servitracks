@@ -6,11 +6,11 @@ import type {
   WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician,
   Caja, MovimientoCaja, Empleado, Plan, PlanId, GlobalConfig, LicenciaLocal, Conversation, ChatMessage,
   Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest,
-  Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, InventorySession
+  Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, InventorySession, ActivityLog
 } from './types';
 
 // Re-export types for backward compatibility
-export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, OpenTab, OpenTabItem } from './types';
+export type { Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle, Service, Product, ProductVariant, InventoryMovement, WorkOrder, InvoiceItem, Invoice, WhatsAppLog, MaintenanceItem, MaintenanceHistoryItem, MaintenanceAlert, Technician, Caja, MovimientoCaja, Empleado, Conversation, ChatMessage, Supplier, SupplierProduct, PurchaseOrder, PurchaseOrderItem, GoodsReceipt, AccountPayable, QuoteRequest, Inspection, InspectionItem, Quote, QuoteItem, QuoteStatus, OpenTab, OpenTabItem, ActivityLog } from './types';
 
 export const SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES: Record<string, string[]> = {
   "Motor": ["Lubricantes", "Filtros"],
@@ -46,6 +46,10 @@ interface AppState {
   barcodeSettings: BarcodeSettings;
   conversations: Conversation[];
   chatMessages: ChatMessage[];
+
+  // Activity Logs
+  activityLogs: ActivityLog[];
+  addActivityLog: (log: Omit<ActivityLog, 'id' | 'createdAt' | 'tenantId' | 'userId' | 'userName' | 'userRole'> & { tenantId?: string }) => void;
 
   // Inventory Sessions
   inventorySessions: InventorySession[];
@@ -294,6 +298,41 @@ export const useStore = create<AppState>()(
       inspections: [],
       quotes: [],
 
+      // Activity Logs
+      activityLogs: [],
+      addActivityLog: (log) => set((state) => {
+        const currentUserId = state.currentUserId;
+        const user = state.users.find(u => u.id === currentUserId);
+        const tenantId = log.tenantId || state.currentTenant?.id || user?.tenantId;
+        
+        if (!user || !tenantId) return state;
+
+        const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+        const effectiveRole = simulatedRole || user.role;
+
+        // Limpiar logs existentes del DUEÑO/ADMIN y evitar registrar nuevos si es dueño
+        const cleanLogs = state.activityLogs.filter(
+          l => !['owner', 'admin', 'superadmin'].includes(l.userRole)
+        );
+
+        if (['owner', 'admin', 'superadmin'].includes(effectiveRole)) {
+          // Si es dueño, no registramos la actividad, solo retornamos los logs limpios
+          return { activityLogs: cleanLogs };
+        }
+
+        const newLog: ActivityLog = {
+          ...log,
+          tenantId,
+          id: crypto.randomUUID(),
+          userId: user.id,
+          userName: user.name,
+          userRole: effectiveRole,
+          createdAt: new Date().toISOString()
+        };
+
+        return { activityLogs: [newLog, ...cleanLogs].slice(0, 1000) };
+      }),
+
       // Proveedores
       suppliers: [],
       supplierProducts: [],
@@ -318,14 +357,22 @@ export const useStore = create<AppState>()(
       addUser: (user) => set((state) => {
         const exists = state.users.some((u) => u.id === user.id);
         if (exists) {
-          // Merge/update rather than duplicate
           return { users: state.users.map((u) => u.id === user.id ? { ...u, ...user } : u) };
         }
+        state.addActivityLog({ action: 'created_user', details: `Creó el usuario ${user.name} (${user.role})`, module: 'AJUSTES' });
         return { users: [...state.users, user] };
       }),
       updateUser: (id, updates) =>
-        set((state) => ({ users: state.users.map((u) => (u.id === id ? { ...u, ...updates } : u)) })),
-      deleteUser: (id) => set((state) => ({ users: state.users.filter((u) => u.id !== id) })),
+        set((state) => {
+          const user = state.users.find(u => u.id === id);
+          if (user) state.addActivityLog({ action: 'updated_user', details: `Actualizó el usuario ${user.name}`, module: 'AJUSTES' });
+          return { users: state.users.map((u) => (u.id === id ? { ...u, ...updates } : u)) };
+        }),
+      deleteUser: (id) => set((state) => {
+        const user = state.users.find(u => u.id === id);
+        if (user) state.addActivityLog({ action: 'deleted_user', details: `Eliminó el usuario ${user.name}`, module: 'AJUSTES' });
+        return { users: state.users.filter((u) => u.id !== id) };
+      }),
 
       addTechnician: (tech) => set((state) => ({ technicians: [...state.technicians, tech] })),
       updateTechnician: (id, updates) =>
@@ -363,13 +410,23 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('vehicles', id));
       },
 
-      addOrder: (order) => set((state) => ({ orders: [...state.orders, order] })),
+      addOrder: (order) => set((state) => {
+        state.addActivityLog({ action: 'created_order', details: `Creó la orden de trabajo para el vehículo ${order.vehicleId}`, module: 'ORDENES' });
+        return { orders: [...state.orders, order] };
+      }),
       updateOrder: (id, updates) =>
-        set((state) => ({
-          orders: state.orders.map((o) =>
-            o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
-          ),
-        })),
+        set((state) => {
+          if (updates.status) {
+            state.addActivityLog({ action: 'updated_order_status', details: `Cambió el estado de la orden a ${updates.status}`, module: 'ORDENES' });
+          } else {
+            state.addActivityLog({ action: 'updated_order', details: `Actualizó la orden de trabajo`, module: 'ORDENES' });
+          }
+          return {
+            orders: state.orders.map((o) =>
+              o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
+            ),
+          };
+        }),
       deleteOrder: (id) => {
         set((state) => ({ orders: state.orders.filter((o) => o.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('orders', id));
@@ -396,7 +453,10 @@ export const useStore = create<AppState>()(
       },
 
       addMovement: (movement) =>
-        set((state) => ({ movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] })),
+        set((state) => {
+          state.addActivityLog({ action: 'inventory_movement', details: `Movimiento de inventario: ${movement.type === 'in' ? 'Entrada' : 'Salida'} de ${movement.quantity} ${movement.productName}`, module: 'INVENTARIO' });
+          return { movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] };
+        }),
 
       addOpenTab: (tab) => set((state) => ({ openTabs: [tab, ...state.openTabs] })),
       updateOpenTab: (id, updates) => set((state) => ({ openTabs: state.openTabs.map(t => t.id === id ? { ...t, ...updates } : t) })),
@@ -458,6 +518,8 @@ export const useStore = create<AppState>()(
           };
         });
         
+        get().addActivityLog({ action: 'created_invoice', details: `Creó la factura #${invoice.id.slice(-6).toUpperCase()} por RD$ ${invoice.total}`, module: 'POS' });
+
         // Disparador Automático de Pedidos (Revisar niveles de stock bajos)
         if (invoice.status !== 'cancelled') {
           setTimeout(() => {
@@ -552,15 +614,26 @@ export const useStore = create<AppState>()(
         });
       },
 
-      addCaja: (caja) => set((state) => ({ cajas: [...state.cajas, caja] })),
+      addCaja: (caja) => set((state) => {
+        state.addActivityLog({ action: 'opened_caja', details: `Abrió la caja con RD$ ${caja.monto_inicial}`, module: 'CAJA' });
+        return { cajas: [...state.cajas, caja] };
+      }),
       updateCaja: (id, updates) =>
-        set((state) => ({
-          cajas: state.cajas.map((c) => (c.id === id ? { ...c, ...updates } : c)),
-        })),
+        set((state) => {
+          if (updates.estado === 'CERRADA') {
+            state.addActivityLog({ action: 'closed_caja', details: `Cerró la caja (Diferencia: RD$ ${updates.diferencia || 0})`, module: 'CAJA' });
+          }
+          return {
+            cajas: state.cajas.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+          };
+        }),
       addCajaMovement: (mov) =>
-        set((state) => ({
-          cajaMovements: [...state.cajaMovements, mov],
-        })),
+        set((state) => {
+          state.addActivityLog({ action: 'caja_movement', details: `Movimiento de caja: ${mov.tipo} de RD$ ${mov.monto}`, module: 'CAJA' });
+          return {
+            cajaMovements: [...state.cajaMovements, mov],
+          };
+        }),
 
       addWhatsAppLog: (log) =>
         set((state) => ({ whatsappLogs: [...state.whatsappLogs, log] })),

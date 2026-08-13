@@ -378,26 +378,6 @@ export function TopBar({ onMenuClick }: TopBarProps) {
                 <Headphones className="h-4 w-4 text-neutral-400" /> Soporte
               </DropdownMenuItem>
 
-              {isOwner && !simulatedRole && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="rounded-lg py-2 cursor-pointer gap-2">
-                    <Shield className="h-4 w-4 text-neutral-400" /> Simular Rol
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent className="z-[105]">
-                      <div className="px-2 pb-1 pt-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Modo Prueba</div>
-                      <DropdownMenuItem onClick={() => { localStorage.setItem("simulated-role", "cashier"); toast.success("Simulando vista de Cajera"); window.location.reload(); }} className="cursor-pointer text-xs">Cajera (POS y Caja)</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { localStorage.setItem("simulated-role", "warehouse"); toast.success("Simulando vista de Almacén"); window.location.reload(); }} className="cursor-pointer text-xs">Almacén (Inventario y OT)</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => { localStorage.setItem("simulated-role", "mechanic"); toast.success("Simulando vista de Mecánico"); window.location.reload(); }} className="cursor-pointer text-xs">Mecánico (OT y Comisiones)</DropdownMenuItem>
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-              )}
-              {simulatedRole && (
-                <DropdownMenuItem onClick={() => { localStorage.removeItem("simulated-role"); toast.success("Modo Dueño restaurado"); window.location.reload(); }} className="rounded-lg py-2 cursor-pointer gap-2 text-emerald-600 focus:text-emerald-700 font-bold bg-emerald-50 mt-1">
-                  <Shield className="h-4 w-4" /> Restaurar Acceso Admin
-                </DropdownMenuItem>
-              )}
 
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="rounded-lg py-2 text-red-600 focus:text-red-600 cursor-pointer gap-2">

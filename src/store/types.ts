@@ -24,10 +24,19 @@ export interface Tenant {
       clientSecret?: string;
       environment: 'sandbox' | 'production';
     };
+    sidebarOrder?: Record<string, number>;
+    modulos_override?: {
+      whatsapp?: boolean;
+      facturacion_fiscal?: boolean;
+      multisucursal?: boolean;
+      logistica?: boolean;
+      procesos?: boolean;
+    };
   };
   plan_id?: string;
   estado?: 'ACTIVO' | 'TRIAL' | 'SUSPENDIDO' | 'CANCELADO';
   trial_hasta?: string;
+  max_sucursales?: number;
   color_primario?: string;
   color_secundario?: string;
 }
@@ -393,6 +402,7 @@ export interface Plan {
     facturacion_fiscal: boolean;
     multisucursal: boolean;
     logistica: boolean;
+    procesos?: boolean;
   };
   destacado?: boolean;
   polar_product_monthly_url?: string;
@@ -693,5 +703,21 @@ export interface InventorySession {
   discrepancies: InventorySessionItem[];
   createdAt: string;
   completedAt?: string;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// REGISTRO DE ACTIVIDAD (AUDIT LOG)
+// ════════════════════════════════════════════════════════════════════════════════
+
+export interface ActivityLog {
+  id: string;
+  tenantId: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  action: string;
+  details: string;
+  module: 'POS' | 'CRM' | 'INVENTARIO' | 'ORDENES' | 'AJUSTES' | 'MANTENIMIENTO' | 'CAJA';
+  createdAt: string;
 }
 

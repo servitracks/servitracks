@@ -179,6 +179,7 @@ export default function DashboardLayout() {
       "/mis-comisiones": ['mechanic', 'owner', 'superadmin'],
       "/nomina": ['owner', 'superadmin'],
       "/reports": ['owner', 'superadmin'],
+      "/activity": ['owner', 'superadmin'],
       "/maintenance": ['owner', 'cashier', 'superadmin'],
       "/settings": ['owner', 'superadmin'],
     };
@@ -333,6 +334,7 @@ export default function DashboardLayout() {
           goodsReceipts: dbState.goodsReceipts,
           accountsPayable: dbState.accountsPayable,
           quoteRequests: dbState.quoteRequests,
+          activityLogs: dbState.activityLogs,
         });
         
         // Nomina Remote Sync
@@ -369,7 +371,7 @@ export default function DashboardLayout() {
       "movements", "cajas", "quotes", "inspections",
       "maintenance_items", "maintenance_alerts", "technicians",
       "suppliers", "purchase_orders", "goods_receipts", "accounts_payable",
-      "empleados_nomina", "nominas_periodos"
+      "empleados_nomina", "nominas_periodos", "activity_logs"
     ];
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
@@ -433,7 +435,7 @@ export default function DashboardLayout() {
               "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
               "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
               "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
-              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests"
+              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs"
             ] as const;
 
             for (const key of entitiesToMerge) {
@@ -480,7 +482,8 @@ export default function DashboardLayout() {
               purchaseOrders: dbState.purchaseOrders,
               goodsReceipts: dbState.goodsReceipts,
               accountsPayable: dbState.accountsPayable,
-              quoteRequests: dbState.quoteRequests
+              quoteRequests: dbState.quoteRequests,
+              activityLogs: dbState.activityLogs
             });
             
             // Initial Nomina Sync
@@ -525,7 +528,8 @@ export default function DashboardLayout() {
               purchaseOrders: localState.purchaseOrders,
               goodsReceipts: localState.goodsReceipts,
               accountsPayable: localState.accountsPayable,
-              quoteRequests: localState.quoteRequests
+              quoteRequests: localState.quoteRequests,
+              activityLogs: localState.activityLogs
             });
             
             const { syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
@@ -568,7 +572,8 @@ export default function DashboardLayout() {
         state.purchaseOrders !== prevState.purchaseOrders ||
         state.goodsReceipts !== prevState.goodsReceipts ||
         state.accountsPayable !== prevState.accountsPayable ||
-        state.quoteRequests !== prevState.quoteRequests;
+        state.quoteRequests !== prevState.quoteRequests ||
+        state.activityLogs !== prevState.activityLogs;
 
       if (!changed) return;
 

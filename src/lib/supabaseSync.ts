@@ -3,7 +3,7 @@
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
 import { supabaseAdmin } from "@/lib/supabase";
-import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem } from "@/store/types";
+import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog } from "@/store/types";
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
@@ -233,11 +233,17 @@ export async function loadQuoteRequestsFromSupabase(tenantId: string): Promise<Q
   return (data || []).map(dbToQuoteRequest);
 }
 
+export async function loadActivityLogsFromSupabase(tenantId: string): Promise<ActivityLog[]> {
+  const { data, error } = await supabaseAdmin.from("activity_logs").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000);
+  if (error) { console.error("[sync] activity_logs:", error); return []; }
+  return (data || []).map(dbToActivityLog);
+}
+
 export async function downloadFullStateFromSupabase(tenantId: string) {
   const [
     customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices,
     cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs
   ] = await Promise.all([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
@@ -259,10 +265,11 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadPurchaseOrdersFromSupabase(tenantId),
     loadGoodsReceiptsFromSupabase(tenantId),
     loadAccountsPayableFromSupabase(tenantId),
-    loadQuoteRequestsFromSupabase(tenantId)
+    loadQuoteRequestsFromSupabase(tenantId),
+    loadActivityLogsFromSupabase(tenantId)
   ]);
   
-  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests };
+  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs };
 }
 
 
@@ -356,6 +363,13 @@ function dbToQuoteRequest(row: any): QuoteRequest {
 }
 function quoteRequestToDb(q: QuoteRequest) {
   return { id: q.id, tenant_id: q.tenantId, product_name: q.productName, description: q.description, supplier_ids: q.supplierIds, responses: q.responses, status: q.status, created_at: q.createdAt };
+}
+
+function dbToActivityLog(row: any): ActivityLog {
+  return { id: row.id, tenantId: row.tenant_id, userId: row.user_id, userName: row.user_name, userRole: row.user_role, action: row.action, details: row.details, module: row.module, createdAt: row.created_at };
+}
+function activityLogToDb(log: ActivityLog) {
+  return { id: log.id, tenant_id: log.tenantId, user_id: log.userId, user_name: log.userName, user_role: log.userRole, action: log.action, details: log.details, module: log.module, created_at: log.createdAt };
 }
 
 // ─── NEW MAPPERS ──────────────────────────────────────────────────────────────
@@ -725,6 +739,11 @@ export async function upsertQuoteRequests(items: QuoteRequest[]): Promise<void> 
   const { error } = await supabaseAdmin.from("quote_requests").upsert(items.map(quoteRequestToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert quote_requests:", error);
 }
+export async function upsertActivityLogs(items: ActivityLog[]): Promise<void> {
+  if (items.length === 0) return;
+  const { error } = await supabaseAdmin.from("activity_logs").upsert(items.map(activityLogToDb), { onConflict: "id" });
+  if (error) console.error("[sync] upsert activity_logs:", error);
+}
 
 // ─── Full sync: store → Supabase ──────────────────────────────────────────────
 
@@ -751,7 +770,8 @@ export async function syncStoreToSupabase(
     purchaseOrders?: PurchaseOrder[],
     goodsReceipts?: GoodsReceipt[],
     accountsPayable?: AccountPayable[],
-    quoteRequests?: QuoteRequest[]
+    quoteRequests?: QuoteRequest[],
+    activityLogs?: ActivityLog[]
   }
 ): Promise<void> {
   const tasks = [];
@@ -777,6 +797,7 @@ export async function syncStoreToSupabase(
   if (state.goodsReceipts) tasks.push(upsertGoodsReceipts(state.goodsReceipts.filter(i => i.tenantId === tenantId)));
   if (state.accountsPayable) tasks.push(upsertAccountsPayable(state.accountsPayable.filter(i => i.tenantId === tenantId)));
   if (state.quoteRequests) tasks.push(upsertQuoteRequests(state.quoteRequests.filter(i => i.tenantId === tenantId)));
+  if (state.activityLogs) tasks.push(upsertActivityLogs(state.activityLogs.filter(i => i.tenantId === tenantId)));
 
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);

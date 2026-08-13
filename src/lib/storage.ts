@@ -148,6 +148,32 @@ export async function updateTenantConfig(id: string, config: any): Promise<void>
   useStore.getState().updateTenant?.(id, { config });
 }
 
+export async function updateTenantTrialHasta(id: string, trial_hasta: string): Promise<void> {
+  const { error } = await supabaseAdmin.from("tenants").update({ trial_hasta }).eq("id", id);
+  if (error) console.error("[storage] updateTenantTrialHasta:", error);
+  useStore.getState().updateTenant?.(id, { trial_hasta });
+}
+
+export async function updateTenantMaxSucursales(id: string, max_sucursales: number): Promise<void> {
+  const { error } = await supabaseAdmin.from("tenants").update({ max_sucursales }).eq("id", id);
+  if (error) console.error("[storage] updateTenantMaxSucursales:", error);
+  useStore.getState().updateTenant?.(id, { max_sucursales: max_sucursales as any });
+}
+
+export async function updateTenantModulosOverride(id: string, overrides: any): Promise<void> {
+  const state = useStore.getState();
+  const tenant = state.tenants.find(t => t.id === id);
+  if (!tenant) return;
+  const newConfig = { ...tenant.config, modulos_override: overrides };
+  
+  const { error } = await supabaseAdmin
+    .from("tenants")
+    .update({ config: newConfig })
+    .eq("id", id);
+  if (error) console.error("[storage] updateTenantModulosOverride:", error);
+  state.updateTenant?.(id, { config: newConfig });
+}
+
 // ─── Orders (for admin stats) ─────────────────────────────────────────────────
 
 export async function getOrdenes(tenantId: string) {

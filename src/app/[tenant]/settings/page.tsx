@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,9 +18,12 @@ import { EcfSettings } from "@/components/settings/EcfSettings";
 import { PhysicalPrinterSettings } from "@/components/settings/PhysicalPrinterSettings";
 import { getPlans, formatRD } from "@/lib/storage";
 import type { Plan } from "@/store/types";
+import { navigation } from "@/components/dashboard/Sidebar";
+import { isModuleEnabled } from "@/lib/permissions";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
+  { id: "interface", label: "Interfaz", icon: Sparkles },
   { id: "tenants", label: "Sucursales", icon: Store },
   { id: "ecf", label: "Facturación e-CF", icon: FileCheck2 },
   { id: "whatsapp", label: "WhatsApp", icon: Bell },
@@ -54,7 +57,7 @@ export default function SettingsPage() {
   } = useStore();
 
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
-  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
+  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", slug: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
 
   const currentUserId = useStore((s) => s.currentUserId);
   const currentUser = useMemo(() => {
@@ -120,6 +123,68 @@ export default function SettingsPage() {
   const saveTaller = () => {
     updateTenant(taller.id, tallerForm);
     toast.success("Información del taller guardada");
+  };
+
+  // ── Interface tab state ──
+  const [sidebarOrder, setSidebarOrder] = useState<Record<string, number>>(
+    taller?.config?.sidebarOrder || {}
+  );
+  
+  useEffect(() => {
+    if (tab === "interface") {
+      setSidebarOrder(taller?.config?.sidebarOrder || {});
+    }
+  }, [tab, taller?.config?.sidebarOrder]);
+
+  const orderedNavigation = [...navigation].sort((a, b) => {
+    const orderA = sidebarOrder[a.href] ?? 999;
+    const orderB = sidebarOrder[b.href] ?? 999;
+    if (orderA !== orderB) return orderA - orderB;
+    return navigation.indexOf(a) - navigation.indexOf(b);
+  });
+
+  const handleMoveUp = (index: number) => {
+    if (index === 0) return;
+    const newOrder = { ...sidebarOrder };
+    orderedNavigation.forEach((item, i) => { newOrder[item.href] = i + 1; });
+    const temp = newOrder[orderedNavigation[index].href];
+    newOrder[orderedNavigation[index].href] = newOrder[orderedNavigation[index - 1].href];
+    newOrder[orderedNavigation[index - 1].href] = temp;
+    setSidebarOrder(newOrder);
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (index === orderedNavigation.length - 1) return;
+    const newOrder = { ...sidebarOrder };
+    orderedNavigation.forEach((item, i) => { newOrder[item.href] = i + 1; });
+    const temp = newOrder[orderedNavigation[index].href];
+    newOrder[orderedNavigation[index].href] = newOrder[orderedNavigation[index + 1].href];
+    newOrder[orderedNavigation[index + 1].href] = temp;
+    setSidebarOrder(newOrder);
+  };
+
+  const handleSetNumber = (href: string, numStr: string) => {
+    const num = parseInt(numStr);
+    if (isNaN(num)) return;
+    setSidebarOrder(prev => ({ ...prev, [href]: num }));
+  };
+
+  const saveInterfaceSettings = async () => {
+    const newConfig = { ...taller.config, sidebarOrder };
+    // update local state
+    updateTenant(taller.id, { config: newConfig });
+    
+    // update db
+    const { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ config: newConfig })
+      .eq("id", taller.id);
+      
+    if (error) {
+      toast.warning("Guardado localmente. Error al guardar en base de datos.");
+    } else {
+      toast.success("Menú actualizado correctamente");
+    }
   };
 
   // ── Tenants tab state ──
@@ -529,7 +594,12 @@ export default function SettingsPage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl overflow-x-auto whitespace-nowrap custom-scrollbar">
-        {TABS.map(t => (
+        {TABS.filter(t => {
+          if (t.id === "whatsapp" && !isModuleEnabled(taller, "whatsapp")) return false;
+          if (t.id === "ecf" && !isModuleEnabled(taller, "facturacion_fiscal")) return false;
+          if (t.id === "tenants" && !isModuleEnabled(taller, "multisucursal")) return false;
+          return true;
+        }).map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
               tab === t.id ? "bg-white shadow-sm text-neutral-900" : "text-neutral-500 hover:text-neutral-700")}>
@@ -623,6 +693,59 @@ export default function SettingsPage() {
                     taller.config?.autoDeductInventory ? "left-5" : "left-0.5")} />
                 </button>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── INTERFAZ ── */}
+      {tab === "interface" && (
+        <div className="space-y-6">
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader>
+              <CardTitle>Orden del Menú Lateral</CardTitle>
+              <CardDescription>Reorganiza las opciones del menú a tu gusto. Puedes usar las flechas o escribir el número de posición directamente.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="bg-neutral-50 rounded-xl border border-neutral-200 overflow-hidden mb-4">
+                {orderedNavigation.map((item, idx) => {
+                  const currentOrderNum = sidebarOrder[item.href] ?? (idx + 1);
+                  return (
+                    <div key={item.href} className="flex items-center gap-3 p-3 border-b border-neutral-100 last:border-b-0 bg-white hover:bg-neutral-50 transition-colors">
+                      <div className="flex flex-col gap-1 pr-2 border-r border-neutral-100">
+                        <button onClick={() => handleMoveUp(idx)} disabled={idx === 0} className="text-neutral-400 hover:text-neutral-800 disabled:opacity-30 cursor-pointer p-0.5 rounded hover:bg-neutral-200">
+                          <ArrowUp className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => handleMoveDown(idx)} disabled={idx === orderedNavigation.length - 1} className="text-neutral-400 hover:text-neutral-800 disabled:opacity-30 cursor-pointer p-0.5 rounded hover:bg-neutral-200">
+                          <ArrowDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                      
+                      <Input 
+                        type="number" 
+                        min={1} 
+                        value={currentOrderNum} 
+                        onChange={(e) => handleSetNumber(item.href, e.target.value)} 
+                        className="w-16 h-9 text-center font-bold text-neutral-900 border-neutral-200"
+                      />
+                      
+                      <div className="flex items-center gap-3 flex-1 ml-2">
+                        <div className="h-8 w-8 rounded-lg bg-neutral-100 flex items-center justify-center">
+                          <item.icon className="h-4 w-4 text-neutral-500" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-neutral-900">{item.name}</p>
+                          <p className="text-[10px] text-neutral-400 font-medium">Link: {item.href || '/'}</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer w-full sm:w-auto" onClick={saveInterfaceSettings}>
+                <Check className="h-4 w-4 mr-2" /> Guardar Nuevo Orden
+              </Button>
             </CardContent>
           </Card>
         </div>

@@ -4,7 +4,9 @@ import { useMemo, useEffect, useRef } from "react";
 import { Link, usePathname, useParams, useRouter } from "@/lib/next-compat";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/store/useStore";
+import { isModuleEnabled } from "@/lib/permissions";
 import {
+  History,
   LayoutDashboard,
   Wrench,
   Car,
@@ -31,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const navigation = [
+export const navigation = [
   { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'receptionist'] },
   { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
   { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist'] },
@@ -47,6 +49,7 @@ const navigation = [
   { name: "Mis Comisiones", href: "/mis-comisiones", icon: Wallet, roles: ['mechanic'] },
   { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
   { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner'] },
+  { name: "Registro de Actividad", href: "/activity", icon: History, roles: ['owner'] },
   { name: "Mantenimiento", href: "/maintenance", icon: Activity, roles: ['owner', 'cashier'] },
 ];
 
@@ -99,8 +102,20 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'owner';
 
-  const filteredNavigation = navigation.filter((item) => {
-    return item.roles.includes(activeRole);
+  const filteredNavigation = [...navigation].filter((item) => {
+    if (!item.roles.includes(activeRole)) return false;
+
+    // Filtros de SaaS por plan/override
+    if (item.href === "/conversaciones" && !isModuleEnabled(currentTenant, "whatsapp")) return false;
+
+    return true;
+  }).sort((a, b) => {
+    const orderA = currentTenant?.config?.sidebarOrder?.[a.href] ?? 999;
+    const orderB = currentTenant?.config?.sidebarOrder?.[b.href] ?? 999;
+    
+    if (orderA !== orderB) return orderA - orderB;
+    // Fallback to original order
+    return navigation.indexOf(a) - navigation.indexOf(b);
   });
 
   // Auto-scroll sidebar to active element

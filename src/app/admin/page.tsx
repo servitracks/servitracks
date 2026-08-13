@@ -30,16 +30,13 @@ import {
   updateTenantAdmin,
   updateTenantPlan,
   updateTenantStatus,
+  updateTenantModulosOverride,
   getGlobalConfig,
   saveGlobalConfig,
   ADMIN_EMAILS,
   formatCedulaRD,
-  getLicenciasLocales,
-  createLicenciaLocal,
-  updateLicenciaLocal,
-  deleteLicenciaLocal,
 
-  type Plan, type PlanId, type Tenant, type GlobalConfig, type LicenciaLocal, type BankDetails
+  type Plan, type PlanId, type Tenant, type GlobalConfig, type BankDetails
 } from "@/lib/storage";
 import { 
   DropdownMenu,
@@ -117,18 +114,14 @@ export default function AdminPage() {
   const [newPassword, setNewPassword] = useState("");
   const [selectedPlanId, setSelectedPlanId] = useState<PlanId>("basico");
   const [newStatus, setNewStatus] = useState<any>("ACTIVO");
-
-  const [licencias, setLicencias] = useState<LicenciaLocal[]>([]);
-  const [openLicenciaModal, setOpenLicenciaModal] = useState(false);
-  const [editingLicencia, setEditingLicencia] = useState<LicenciaLocal | null>(null);
+  const [overrides, setOverrides] = useState<any>({});
 
   useEffect(() => {
     async function load() {
-      const [t, p, cfg, lics] = await Promise.all([getTenants(), getPlans(), getGlobalConfig(), getLicenciasLocales()]);
+      const [t, p, cfg] = await Promise.all([getTenants(), getPlans(), getGlobalConfig()]);
       setTenants(t);
       setPlans(p);
       setGlobalConfig(cfg);
-      setLicencias(lics);
       const ordsMap: Record<string, { count: number; total: number }> = {};
       let grandTotal = 0;
       for (const tenant of t) {
@@ -152,6 +145,7 @@ export default function AdminPage() {
       await updateTenantAdmin(editingTenant.id, newEmail, newPassword || undefined);
       await updateTenantPlan(editingTenant.id, selectedPlanId);
       await updateTenantStatus(editingTenant.id, newStatus);
+      await updateTenantModulosOverride(editingTenant.id, overrides);
       toast.success("Información de taller actualizada");
       setOpenEditModal(false);
       setTick(t => t + 1);
@@ -202,7 +196,6 @@ export default function AdminPage() {
           <TabsList className="bg-neutral-200/60 p-1 rounded-xl">
             <TabsTrigger value="tenants" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">Talleres</TabsTrigger>
             <TabsTrigger value="plans" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">Planes SaaS</TabsTrigger>
-            <TabsTrigger value="licencias" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">Licencias Local</TabsTrigger>
           </TabsList>
 
           <TabsContent value="tenants">
@@ -272,6 +265,7 @@ export default function AdminPage() {
                                         setNewPassword("");
                                         setSelectedPlanId(t.plan_id || "basico");
                                         setNewStatus(t.estado || "ACTIVO");
+                                        setOverrides(t.config?.modulos_override || {});
                                         setOpenEditModal(true);
                                       }}
                                     >
@@ -412,88 +406,6 @@ export default function AdminPage() {
               ))}
             </div>
           </TabsContent>
-
-          <TabsContent value="licencias">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h2 className="font-display text-xl font-bold text-neutral-900">Licencias de Software Offline</h2>
-                <p className="text-sm text-neutral-500 font-medium">Genera y controla el acceso a las instalaciones de ServiTracks Local.</p>
-              </div>
-              <Button onClick={() => { setEditingLicencia(null); setOpenLicenciaModal(true); }} className="bg-black text-white hover:bg-neutral-800 rounded-lg shadow-md h-9 px-5 font-bold cursor-pointer">
-                <Plus className="mr-1.5 h-4 w-4" /> Nueva Licencia
-              </Button>
-            </div>
-
-            <Card className="overflow-hidden border border-neutral-200/80 bg-white shadow-sm rounded-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-neutral-50 text-xs uppercase text-neutral-500 border-b border-neutral-100">
-                    <tr>
-                      <th className="px-6 py-4 text-left font-bold">Código / Taller</th>
-                      <th className="px-6 py-4 text-center font-bold">Estado</th>
-                      <th className="px-6 py-4 text-center font-bold">WhatsApp</th>
-                      <th className="px-6 py-4 text-center font-bold">Facturación</th>
-                      <th className="px-6 py-4 text-center font-bold">Vencimiento</th>
-                      <th className="px-6 py-4 text-center font-bold">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {licencias.map((l) => (
-                      <tr key={l.id} className="border-b border-neutral-100/60 hover:bg-neutral-50/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-mono text-sm font-bold text-neutral-900 tracking-wider">{l.codigo}</div>
-                          <div className="text-xs font-semibold text-neutral-500 mt-0.5">{l.nombre_lavanderia}</div>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <Badge className={l.estado === "ACTIVO" ? "bg-green-100 border border-green-200 text-green-700 font-bold" : "bg-neutral-100 text-neutral-500"}>
-                            {l.estado}
-                          </Badge>
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <Switch 
-                            checked={l.whatsapp_activo} 
-                            onCheckedChange={async (v) => {
-                              await updateLicenciaLocal(l.id, { whatsapp_activo: v });
-                              setTick(t => t + 1);
-                              toast.success("WhatsApp actualizado");
-                            }}
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-center">
-                          <Switch 
-                            checked={l.facturacion_activa} 
-                            onCheckedChange={async (v) => {
-                              await updateLicenciaLocal(l.id, { facturacion_activa: v });
-                              setTick(t => t + 1);
-                              toast.success("Facturación actualizada");
-                            }}
-                          />
-                        </td>
-                        <td className="px-6 py-4 text-center text-xs text-neutral-600 font-semibold">
-                          {l.es_anual && l.expira_en ? new Date(l.expira_en).toLocaleDateString("es-DO") : "Permanente"}
-                        </td>
-                        <td className="px-6 py-4 text-center flex justify-center gap-2">
-                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-neutral-100 rounded-lg cursor-pointer" onClick={() => { setEditingLicencia(l); setOpenLicenciaModal(true); }}>
-                            <Pencil className="h-4 w-4 text-neutral-600" />
-                          </Button>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-red-50 rounded-lg cursor-pointer" onClick={async () => {
-                            if(confirm("¿Eliminar licencia? Este taller dejará de funcionar la próxima vez que se conecte a internet.")) {
-                              await deleteLicenciaLocal(l.id);
-                              setTick(t => t + 1);
-                              toast.success("Licencia eliminada");
-                            }
-                          }}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                    {licencias.length === 0 && <tr><td colSpan={6} className="py-12 text-center text-neutral-400 font-medium">No se encontraron licencias creadas</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </TabsContent>
         </Tabs>
       </main>
 
@@ -572,6 +484,29 @@ export default function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2 pt-2 border-t border-neutral-100">
+                <Label className="font-semibold text-neutral-700">Forzar Módulos (Overrides)</Label>
+                <p className="text-[10px] text-neutral-500 mb-2">Activa o desactiva módulos de forma individual para este taller, sin importar su plan base.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["whatsapp", "facturacion_fiscal", "multisucursal", "logistica", "procesos"] as const).map((m) => (
+                    <label key={m} className="flex items-center gap-2 text-xs font-semibold text-neutral-700 cursor-pointer p-2 rounded-lg border border-neutral-100 hover:bg-neutral-50">
+                      <Switch 
+                        checked={overrides[m] === true}
+                        onCheckedChange={(v) => setOverrides((prev: any) => ({ ...prev, [m]: v }))}
+                      />
+                      <span className="capitalize">{m.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                  <Button 
+                    variant="ghost" 
+                    className="col-span-2 text-xs h-8 text-neutral-500 hover:text-rose-600"
+                    onClick={() => setOverrides({})}
+                  >
+                    Restablecer y usar plan original
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <DialogFooter className="gap-2 sm:gap-0 mt-2">
@@ -585,7 +520,6 @@ export default function AdminPage() {
 
         <PlanDialog open={openPlan} onOpenChange={setOpenPlan} initial={editingPlan} onSaved={() => { setTick((r) => r + 1); setOpenPlan(false); }} />
         <BankDetailsDialog open={openBank} onOpenChange={setOpenBank} config={globalConfig} onSaved={() => { setTick((r) => r + 1); setOpenBank(false); }} />
-        <LicenciaDialog open={openLicenciaModal} onOpenChange={setOpenLicenciaModal} initial={editingLicencia} onSaved={() => { setTick(r => r + 1); setOpenLicenciaModal(false); }} />
     </div>
   );
 }
