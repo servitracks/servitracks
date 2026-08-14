@@ -239,11 +239,25 @@ export async function loadActivityLogsFromSupabase(tenantId: string): Promise<Ac
   return (data || []).map(dbToActivityLog);
 }
 
+export async function loadUsersFromSupabase(tenantId: string) {
+  const { data, error } = await supabaseAdmin.from("tenant_users").select("*").eq("tenant_id", tenantId);
+  if (error) { console.error("[sync] users:", error); return []; }
+  return (data || []).map((row: any) => ({
+    id: row.user_id || row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    createdAt: row.created_at
+  }));
+}
+
 export async function downloadFullStateFromSupabase(tenantId: string) {
   const [
     customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices,
     cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users
   ] = await Promise.all([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
@@ -266,10 +280,11 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadGoodsReceiptsFromSupabase(tenantId),
     loadAccountsPayableFromSupabase(tenantId),
     loadQuoteRequestsFromSupabase(tenantId),
-    loadActivityLogsFromSupabase(tenantId)
+    loadActivityLogsFromSupabase(tenantId),
+    loadUsersFromSupabase(tenantId)
   ]);
   
-  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs };
+  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users };
 }
 
 

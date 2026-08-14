@@ -335,6 +335,7 @@ export default function DashboardLayout() {
           accountsPayable: dbState.accountsPayable,
           quoteRequests: dbState.quoteRequests,
           activityLogs: dbState.activityLogs,
+          users: dbState.users,
         });
         
         // Nomina Remote Sync
@@ -371,7 +372,7 @@ export default function DashboardLayout() {
       "movements", "cajas", "quotes", "inspections",
       "maintenance_items", "maintenance_alerts", "technicians",
       "suppliers", "purchase_orders", "goods_receipts", "accounts_payable",
-      "empleados_nomina", "nominas_periodos", "activity_logs"
+      "empleados_nomina", "nominas_periodos", "activity_logs", "tenant_users"
     ];
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);

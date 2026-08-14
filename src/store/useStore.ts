@@ -1204,6 +1204,7 @@ export const useStore = create<AppState>()(
         licencias: state.licencias,
         currentUserId: state.currentUserId,
         isAuthenticated: state.isAuthenticated,
+        openTabs: state.openTabs,
         // Proveedores
         suppliers: state.suppliers,
         supplierProducts: state.supplierProducts,
