@@ -253,11 +253,27 @@ export async function loadUsersFromSupabase(tenantId: string) {
   }));
 }
 
+export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTab[]> {
+  const { data, error } = await supabaseAdmin.from("open_tabs").select("*").eq("tenant_id", tenantId);
+  if (error) { console.error("[sync] open_tabs:", error); return []; }
+  return (data || []).map((row: any) => ({
+    id: row.id,
+    tenantId: row.tenant_id,
+    tabName: row.tab_name,
+    customerId: row.customer_id,
+    mechanicId: row.mechanic_id,
+    orderId: row.order_id,
+    items: row.items,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }));
+}
+
 export async function downloadFullStateFromSupabase(tenantId: string) {
   const [
     customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices,
     cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs
   ] = await Promise.all([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
@@ -281,10 +297,11 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadAccountsPayableFromSupabase(tenantId),
     loadQuoteRequestsFromSupabase(tenantId),
     loadActivityLogsFromSupabase(tenantId),
-    loadUsersFromSupabase(tenantId)
+    loadUsersFromSupabase(tenantId),
+    loadOpenTabsFromSupabase(tenantId)
   ]);
   
-  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users };
+  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs };
 }
 
 
@@ -759,6 +776,22 @@ export async function upsertActivityLogs(items: ActivityLog[]): Promise<void> {
   const { error } = await supabaseAdmin.from("activity_logs").upsert(items.map(activityLogToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert activity_logs:", error);
 }
+export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
+  if (items.length === 0) return;
+  const dbItems = items.map(t => ({
+    id: t.id,
+    tenant_id: t.tenantId,
+    tab_name: t.tabName,
+    customer_id: t.customerId,
+    mechanic_id: t.mechanicId,
+    order_id: t.orderId || null,
+    items: t.items,
+    created_at: t.createdAt,
+    updated_at: t.updatedAt
+  }));
+  const { error } = await supabaseAdmin.from("open_tabs").upsert(dbItems, { onConflict: "id" });
+  if (error) console.error("[sync] upsert open_tabs:", error);
+}
 
 // ─── Full sync: store → Supabase ──────────────────────────────────────────────
 
@@ -786,7 +819,8 @@ export async function syncStoreToSupabase(
     goodsReceipts?: GoodsReceipt[],
     accountsPayable?: AccountPayable[],
     quoteRequests?: QuoteRequest[],
-    activityLogs?: ActivityLog[]
+    activityLogs?: ActivityLog[],
+    openTabs?: OpenTab[]
   }
 ): Promise<void> {
   const tasks = [];
@@ -813,6 +847,7 @@ export async function syncStoreToSupabase(
   if (state.accountsPayable) tasks.push(upsertAccountsPayable(state.accountsPayable.filter(i => i.tenantId === tenantId)));
   if (state.quoteRequests) tasks.push(upsertQuoteRequests(state.quoteRequests.filter(i => i.tenantId === tenantId)));
   if (state.activityLogs) tasks.push(upsertActivityLogs(state.activityLogs.filter(i => i.tenantId === tenantId)));
+  if (state.openTabs) tasks.push(upsertOpenTabs(state.openTabs.filter(i => i.tenantId === tenantId)));
 
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);

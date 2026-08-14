@@ -336,6 +336,7 @@ export default function DashboardLayout() {
           quoteRequests: dbState.quoteRequests,
           activityLogs: dbState.activityLogs,
           users: dbState.users,
+          openTabs: dbState.openTabs,
         });
         
         // Nomina Remote Sync
@@ -370,9 +371,9 @@ export default function DashboardLayout() {
     const TABLES_WITH_TENANT = [
       "orders", "invoices", "products", "customers", "vehicles",
       "movements", "cajas", "quotes", "inspections",
-      "maintenance_items", "maintenance_alerts", "technicians",
-      "suppliers", "purchase_orders", "goods_receipts", "accounts_payable",
-      "empleados_nomina", "nominas_periodos", "activity_logs", "tenant_users"
+      "maintenance_items", "maintenance_alerts", "maintenance_history", "technicians",
+      "suppliers", "purchase_orders", "goods_receipts", "accounts_payable", "quote_requests",
+      "empleados_nomina", "nominas_periodos", "activity_logs", "tenant_users", "open_tabs"
     ];
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
@@ -438,7 +439,7 @@ export default function DashboardLayout() {
               "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
               "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
               "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
-              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs"
+              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "openTabs", "users"
             ] as const;
 
             for (const key of entitiesToMerge) {
@@ -576,7 +577,9 @@ export default function DashboardLayout() {
         state.goodsReceipts !== prevState.goodsReceipts ||
         state.accountsPayable !== prevState.accountsPayable ||
         state.quoteRequests !== prevState.quoteRequests ||
-        state.activityLogs !== prevState.activityLogs;
+        state.activityLogs !== prevState.activityLogs ||
+        state.users !== prevState.users ||
+        state.openTabs !== prevState.openTabs;
 
       if (!changed) return;
 
