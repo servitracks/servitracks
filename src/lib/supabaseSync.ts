@@ -249,6 +249,7 @@ export async function loadUsersFromSupabase(tenantId: string) {
     email: row.email,
     role: row.role,
     status: row.status,
+    pin: row.pin || undefined,
     createdAt: row.created_at
   }));
 }

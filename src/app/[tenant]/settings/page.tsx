@@ -481,12 +481,25 @@ export default function SettingsPage() {
     setDeleteTarget(null);
   };
 
-  const handleSavePin = () => {
+  const handleSavePin = async () => {
     if (!pinTarget) return;
     if (pinForm && pinForm.length !== 4) {
       toast.error("El PIN debe tener exactamente 4 dígitos");
       return;
     }
+    
+    // Guardar en DB
+    const { error } = await supabaseAdmin
+      .from("tenant_users")
+      .update({ pin: pinForm || null })
+      .eq("user_id", pinTarget.id)
+      .eq("tenant_id", taller.id);
+      
+    if (error) {
+      console.error("Error saving pin to DB:", error);
+    }
+    
+    // Guardar local
     updateUser(pinTarget.id, { pin: pinForm });
     toast.success(`PIN asignado correctamente a ${pinTarget.name}`);
     setPinTarget(null);
