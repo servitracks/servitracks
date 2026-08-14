@@ -408,7 +408,9 @@ export default function DashboardLayout() {
 
     // 2. Canal Broadcast (fallback + notificación explícita entre dispositivos)
     const syncChannel = supabase
-      .channel(`sync_tenant_${currentTenant.id}`)
+      .channel(`sync_tenant_${currentTenant.id}`, {
+        config: { broadcast: { ack: true } }
+      })
       .on("broadcast", { event: "state_updated" }, () => {
         console.log("[Broadcast] 📡 Notificación recibida → refrescando");
         scheduleRemoteRefresh();
@@ -586,7 +588,9 @@ export default function DashboardLayout() {
           syncStoreToSupabase(currentTenant.id, state)
             .then(() => {
               // Notificar al resto de dispositivos vía Broadcast
-              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now() } });
+              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now() } })
+                .then(resp => console.log("[Broadcast] Envío ack:", resp))
+                .catch(err => console.error("[Broadcast] Error al enviar:", err));
             })
             .catch((err) => {
               console.error("[Background Sync] ❌ Error al subir:", err);
