@@ -8,7 +8,7 @@ import {
   CreditCard, Smartphone
 } from "lucide-react";
 import { useStore, Caja, MovimientoCaja, Empleado, Tenant, Invoice } from "@/store/useStore";
-import { useParams } from "@/lib/next-compat";
+import { useParams, useRouter } from "@/lib/next-compat";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,7 @@ const CATEGORIAS_GASTOS = [
 ];
 
 export default function CajaPage() {
+  const router = useRouter();
   const { tenant } = useParams();
   
   const { 
@@ -203,6 +204,16 @@ export default function CajaPage() {
           invTotal += safeLabor * (item.quantity || 1);
         }
       });
+
+      // Fallback si la factura no tiene laborPrice individual por item
+      if (invTotal === 0 && tech.pagoNomina) {
+        if (tech.tipoPago === "fijo") {
+          invTotal = tech.pagoNomina;
+        } else {
+          invTotal = (inv.subtotal * tech.pagoNomina) / 100;
+        }
+      }
+
       total += invTotal;
     });
     return { total, pendingIds: pending.map(i => i.id) };
@@ -261,6 +272,7 @@ export default function CajaPage() {
   // -- PAGO TECNICO LIQUIDACION --
   const [isPagoTecnicoOpen, setIsPagoTecnicoOpen] = useState(false);
   const [selectedTechToPay, setSelectedTechToPay] = useState("");
+  const [pagoTecnicoTab, setPagoTecnicoTab] = useState<'pending' | 'history'>('pending');
 
   const pendingTechInvoices = useMemo(() => {
     if (!selectedTechToPay) return [];
@@ -319,6 +331,156 @@ export default function CajaPage() {
     return { total: totalGlobal, items: filteredItems };
   }, [pendingTechInvoices, technicians, selectedTechToPay]);
 
+  // Histórico de liquidaciones de caja
+  const historicalLiquidaciones = useMemo(() => {
+    return cajaMovements.filter(m => 
+      m.tenant_id === tenantId && 
+      (m.tipo === 'PAGO_NOMINA' || (m.concepto && m.concepto.includes('[Pago Técnico]')))
+    ).sort((a, b) => new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime());
+  }, [cajaMovements, tenantId]);
+
+  const filteredHistoricalLiquidaciones = useMemo(() => {
+    if (!selectedTechToPay || selectedTechToPay === 'all') return historicalLiquidaciones;
+    return historicalLiquidaciones.filter(m => m.tecnico_id === selectedTechToPay);
+  }, [historicalLiquidaciones, selectedTechToPay]);
+
+  const handlePrintLiquidacion = (
+    customTechId?: string,
+    customItems?: any[],
+    customTotal?: number,
+    isHistorical: boolean = false,
+    historicalDate?: string
+  ) => {
+    const techId = customTechId || selectedTechToPay;
+    const tech = technicians.find(t => t.id === techId);
+    
+    const items = customItems || techCommissionInfo.items;
+    const total = customTotal !== undefined ? customTotal : techCommissionInfo.total;
+
+    const techName = tech ? tech.name : (customTechId ? "Técnico" : "Todos los Técnicos");
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const tallerName = currentTenant?.name || "SERVITRACKS";
+    const tallerRnc = currentTenant?.rnc || "";
+    const dateStr = historicalDate || new Date().toLocaleString("es-DO");
+    const statusText = isHistorical ? "RECIBO HISTÓRICO DE LIQUIDACIÓN" : "DESGLOSE DE LIQUIDACIÓN PENDIENTE";
+
+    const rowsHtml = items.length > 0 ? items.map((item: any) => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">
+          <b style="font-size: 12px; color: #111;">#${(item.inv?.id || item.id || '').slice(-6).toUpperCase()}</b><br/>
+          <span style="font-size: 10px; color: #666;">${item.inv?.createdAt ? new Date(item.inv.createdAt).toLocaleDateString("es-DO") : ''}</span>
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; font-size: 11px;">
+          ${(item.nombresAplicables || []).join(', ') || 'Comisión por servicios'}
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-size: 11px; font-weight: bold; color: #6b21a8;">
+          RD$ ${(item.comisionTotal || item.comision || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-size: 11px; font-weight: bold; color: #1d4ed8;">
+          RD$ ${(item.manoObraTotal || item.manoObra || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-size: 11px; font-weight: 900;">
+          RD$ ${(item.totalFila || item.total || ((item.comisionTotal || 0) + (item.manoObraTotal || 0)) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </td>
+      </tr>
+    `).join('') : `
+      <tr>
+        <td colspan="5" style="padding: 16px; text-align: center; color: #444; font-size: 12px;">
+          Liquidación de técnico procesada en caja por un total de <b>RD$ ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+        </td>
+      </tr>
+    `;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Liquidación - ${techName}</title>
+          <style>
+            @page { margin: 10mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 15px; color: #111; font-size: 12px; }
+            .header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 15px; }
+            .header h1 { margin: 0 0 4px 0; font-size: 20px; font-weight: 900; }
+            .header p { margin: 2px 0; color: #555; font-size: 11px; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; background: #2563eb; color: white; font-weight: bold; font-size: 10px; margin-top: 6px; text-transform: uppercase; }
+            .info-grid { display: flex; justify-content: space-between; background: #f8fafc; padding: 12px 16px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
+            .info-item label { font-size: 9px; color: #64748b; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 2px; }
+            .info-item span { font-size: 13px; font-weight: 800; color: #0f172a; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th { background: #f1f5f9; padding: 8px; text-align: left; font-size: 10px; font-weight: 800; text-transform: uppercase; border-bottom: 1px solid #cbd5e1; color: #475569; }
+            .totals-box { text-align: right; background: #eff6ff; border: 1.5px solid #bfdbfe; padding: 14px 18px; border-radius: 12px; margin-bottom: 40px; }
+            .totals-box .label { font-size: 11px; font-weight: 800; color: #1e40af; text-transform: uppercase; }
+            .totals-box .value { font-size: 22px; font-weight: 900; color: #1e3a8a; margin-top: 2px; }
+            .signatures { display: flex; justify-content: space-between; margin-top: 60px; }
+            .sig-line { width: 40%; text-align: center; border-top: 1px dashed #64748b; padding-top: 8px; font-size: 11px; font-weight: bold; color: #334155; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${tallerName}</h1>
+            ${tallerRnc ? `<p>RNC: ${tallerRnc}</p>` : ''}
+            <p style="font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px;">COMPROBANTE DE LIQUIDACIÓN DE TÉCNICO</p>
+            <div class="badge">${statusText}</div>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-item">
+              <label>Técnico</label>
+              <span>${techName}</span>
+            </div>
+            <div class="info-item">
+              <label>Especialidad</label>
+              <span>${(tech as any)?.specialty || 'Servicios Generales'}</span>
+            </div>
+            <div class="info-item" style="text-align: right;">
+              <label>Fecha & Hora</label>
+              <span>${dateStr}</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Factura / Fecha</th>
+                <th>Concepto / Mano de Obra</th>
+                <th style="text-align: right;">Comisión</th>
+                <th style="text-align: right;">Mano de Obra</th>
+                <th style="text-align: right;">Total Fila</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals-box">
+            <span class="label">TOTAL ${isHistorical ? 'LIQUIDADO' : 'A LIQUIDAR'}:</span>
+            <div class="value">RD$ ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+
+          <div class="signatures">
+            <div class="sig-line">
+              Firma del Técnico (${techName})
+            </div>
+            <div class="sig-line">
+              Recibido / Entregado en Caja
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+
   const handleLiquidarTecnico = () => {
     if (!activeCaja) return;
     if (!selectedTechToPay || techCommissionInfo.total <= 0) return;
@@ -346,9 +508,12 @@ export default function CajaPage() {
       updateInvoice(inv.id, { isCommissionPaid: true });
     });
 
+    // Imprimir comprobante de liquidación inmediatamente
+    handlePrintLiquidacion(selectedTechToPay, techCommissionInfo.items, techCommissionInfo.total, true);
+
     setIsPagoTecnicoOpen(false);
     setSelectedTechToPay("");
-    toast.success("Liquidación a técnico registrada con éxito");
+    toast.success("Liquidación a técnico registrada con éxito e impresa");
   };
   
   const cxcInvoices = useMemo(() => {
@@ -468,7 +633,13 @@ export default function CajaPage() {
     setIsAperturaOpen(false);
     setAperturaMonto("");
     setAperturaNotas("");
-    toast.success("¡Caja abierta exitosamente!");
+    toast.success("¡Caja abierta exitosamente!", {
+      action: {
+        label: "Ir a Facturación",
+        onClick: () => router.push(`/${tenant}/pos`),
+      },
+      duration: 8000,
+    });
   };
 
   // Submit quick cash movement
@@ -707,6 +878,12 @@ export default function CajaPage() {
           <p className="text-neutral-500">Apertura, movimientos del turno y cierre con cuadre.</p>
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-shrink-0">
+          <Button 
+            className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2 h-11"
+            onClick={() => router.push(`/${tenant}/pos`)}
+          >
+            <Receipt className="h-4 w-4" /> Ir a Facturación
+          </Button>
           <Button 
             className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-bold gap-2 h-11"
             onClick={() => setIsCxcOpen(true)}
@@ -2026,84 +2203,217 @@ export default function CajaPage() {
       
       {/* DIALOG 8: Liquidación de Técnicos (Pago Técnico Detallado) */}
       <Dialog open={isPagoTecnicoOpen} onOpenChange={setIsPagoTecnicoOpen}>
-        <DialogContent className="sm:max-w-[700px] rounded-2xl p-0 overflow-hidden bg-white">
-          <DialogHeader className="p-6 pb-4 border-b border-neutral-100">
-            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
-              <Users className="h-5 w-5 text-blue-600" /> Liquidación por Técnico
-            </DialogTitle>
-            <DialogDescription className="text-xs text-neutral-500">
-              Desglose detallado de comisiones por mano de obra pendientes de pago.
-            </DialogDescription>
+        <DialogContent className="sm:max-w-[750px] rounded-2xl p-0 overflow-hidden bg-white">
+          <DialogHeader className="p-6 pb-4 border-b border-neutral-100 flex flex-row items-center justify-between">
+            <div>
+              <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+                <Users className="h-5 w-5 text-blue-600" /> Liquidación por Técnico
+              </DialogTitle>
+              <DialogDescription className="text-xs text-neutral-500 mt-0.5">
+                Desglose detallado de comisiones por mano de obra pendientes y registro de pagos históricos.
+              </DialogDescription>
+            </div>
+            {/* Selector de Pestañas Pendientes vs Historial */}
+            <div className="flex items-center bg-neutral-100 p-1 rounded-xl border border-neutral-200">
+              <button
+                type="button"
+                onClick={() => setPagoTecnicoTab('pending')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                  pagoTecnicoTab === 'pending'
+                    ? "bg-white text-blue-600 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                )}
+              >
+                <Users className="h-3.5 w-3.5" /> Pendientes
+              </button>
+              <button
+                type="button"
+                onClick={() => setPagoTecnicoTab('history')}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5",
+                  pagoTecnicoTab === 'history'
+                    ? "bg-white text-purple-600 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                )}
+              >
+                <History className="h-3.5 w-3.5" /> Historial
+              </button>
+            </div>
           </DialogHeader>
 
           <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
-            <div className="space-y-1.5 max-w-sm">
-              <Label className="text-xs font-semibold text-neutral-600">Seleccione el Técnico a Liquidar</Label>
-              <Select value={selectedTechToPay} onValueChange={(val) => val && setSelectedTechToPay(val)}>
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-sm">
-                  <SelectValue>
-                    {selectedTechToPay ? technicians.find(t => t.id === selectedTechToPay)?.name : "Seleccione Técnico"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {technicians.filter(t => t.tenantId === tenantId).map(tech => (
-                    <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Controles de Selección e Impresión/Historial */}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+              <div className="space-y-1.5 flex-1 max-w-xs">
+                <Label className="text-xs font-bold text-neutral-700">Seleccione el Técnico a Liquidar</Label>
+                <Select value={selectedTechToPay} onValueChange={(val) => val && setSelectedTechToPay(val)}>
+                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white text-sm font-semibold">
+                    <SelectValue placeholder={pagoTecnicoTab === 'history' ? "Todos los Técnicos" : "Seleccione Técnico"}>
+                      {selectedTechToPay && selectedTechToPay !== 'all' 
+                        ? technicians.find(t => t.id === selectedTechToPay)?.name 
+                        : (pagoTecnicoTab === 'history' ? "Todos los Técnicos" : "Seleccione Técnico")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {pagoTecnicoTab === 'history' && (
+                      <SelectItem value="all">Todos los Técnicos</SelectItem>
+                    )}
+                    {technicians.filter(t => t.tenantId === tenantId).map(tech => (
+                      <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* BOTONES ACCION: IMPRIMIR Y HISTORIAL (Resaltados en la solicitud) */}
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => handlePrintLiquidacion()}
+                  disabled={!selectedTechToPay || (pagoTecnicoTab === 'pending' && techCommissionInfo.items.length === 0)}
+                  className="h-10 rounded-xl border-neutral-200 bg-white hover:bg-neutral-100 font-bold gap-2 text-xs text-neutral-800 shadow-sm"
+                >
+                  <Printer className="h-4 w-4 text-blue-600" />
+                  Imprimir
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPagoTecnicoTab(prev => prev === 'pending' ? 'history' : 'pending')}
+                  className={cn(
+                    "h-10 rounded-xl font-bold gap-2 text-xs transition-all shadow-sm",
+                    pagoTecnicoTab === 'history'
+                      ? "bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                      : "bg-white border-neutral-200 hover:bg-neutral-100 text-neutral-700"
+                  )}
+                >
+                  <History className="h-4 w-4 text-amber-500" />
+                  {pagoTecnicoTab === 'history' ? "Ver Pendientes" : "Historial"}
+                </Button>
+              </div>
             </div>
 
-            {selectedTechToPay && (
+            {pagoTecnicoTab === 'pending' ? (
               <>
-                {techCommissionInfo.items.length === 0 ? (
-                  <div className="bg-neutral-50 p-6 rounded-xl border border-neutral-200 text-center">
-                    <CheckCircle2 className="h-8 w-8 text-neutral-300 mx-auto mb-2" />
-                    <p className="text-sm font-semibold text-neutral-700">El técnico está al día</p>
-                    <p className="text-xs text-neutral-500">No hay facturas pendientes de comisión.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="border border-neutral-200 rounded-xl overflow-hidden">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase">
-                          <tr>
-                            <th className="p-3 font-bold">Factura / Fecha</th>
-                            <th className="p-3 font-bold text-right text-purple-700">Comisión</th>
-                            <th className="p-3 font-bold text-right text-blue-700">Mano de Obra</th>
-                            <th className="p-3 font-bold text-right text-neutral-900">Total Fila</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-neutral-100">
-                          {techCommissionInfo.items.map((item, idx) => (
-                            <tr key={idx} className="hover:bg-neutral-50 transition-colors">
-                              <td className="p-3">
-                                <div className="font-bold text-neutral-800">#{item.inv.id.slice(-6).toUpperCase()}</div>
-                                <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
-                                <div className="text-[10px] text-blue-600/80 font-medium mt-0.5 line-clamp-1" title={item.nombresAplicables.join(', ')}>
-                                  {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
-                                </div>
-                              </td>
-                              <td className="p-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
-                              <td className="p-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>
-                              <td className="p-3 text-right font-black text-neutral-900">{formatRD(item.totalFila)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="bg-blue-50 border-t border-blue-100">
-                          <tr>
-                            <td colSpan={3} className="p-3 text-right font-bold text-blue-800 uppercase text-xs">
-                              Total a Liquidar:
-                            </td>
-                            <td className="p-3 text-right font-black text-blue-900 text-sm">
-                              {formatRD(techCommissionInfo.total)}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
+                {selectedTechToPay && (
+                  <>
+                    {techCommissionInfo.items.length === 0 ? (
+                      <div className="bg-neutral-50 p-6 rounded-xl border border-neutral-200 text-center">
+                        <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+                        <p className="text-sm font-semibold text-neutral-700">El técnico está al día</p>
+                        <p className="text-xs text-neutral-500 mt-0.5">No hay facturas pendientes de comisión.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase">
+                              <tr>
+                                <th className="p-3 font-bold">Factura / Fecha</th>
+                                <th className="p-3 font-bold text-right text-purple-700">Comisión</th>
+                                <th className="p-3 font-bold text-right text-blue-700">Mano de Obra</th>
+                                <th className="p-3 font-bold text-right text-neutral-900">Total Fila</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-neutral-100">
+                              {techCommissionInfo.items.map((item, idx) => (
+                                <tr key={idx} className="hover:bg-neutral-50 transition-colors">
+                                  <td className="p-3">
+                                    <div className="font-bold text-neutral-800">#{item.inv.id.slice(-6).toUpperCase()}</div>
+                                    <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
+                                    <div className="text-[10px] text-blue-600/80 font-medium mt-0.5 line-clamp-1" title={item.nombresAplicables.join(', ')}>
+                                      {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
+                                  <td className="p-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>
+                                  <td className="p-3 text-right font-black text-neutral-900">{formatRD(item.totalFila)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-blue-50 border-t border-blue-100">
+                              <tr>
+                                <td colSpan={3} className="p-3 text-right font-bold text-blue-800 uppercase text-xs">
+                                  Total a Liquidar:
+                                </td>
+                                <td className="p-3 text-right font-black text-blue-900 text-sm">
+                                  {formatRD(techCommissionInfo.total)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
+            ) : (
+              /* TAB HISTORIAL DE LIQUIDACIONES REALIZADAS */
+              <div className="space-y-4">
+                {filteredHistoricalLiquidaciones.length === 0 ? (
+                  <div className="bg-neutral-50 p-6 rounded-xl border border-neutral-200 text-center">
+                    <History className="h-8 w-8 text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm font-semibold text-neutral-700">Sin historial registrado</p>
+                    <p className="text-xs text-neutral-500 mt-0.5">No hay pagos de liquidación registrados para este criterio.</p>
+                  </div>
+                ) : (
+                  <div className="border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase">
+                        <tr>
+                          <th className="p-3 font-bold">Fecha / Hora</th>
+                          <th className="p-3 font-bold">Técnico</th>
+                          <th className="p-3 font-bold">Concepto</th>
+                          <th className="p-3 font-bold text-right">Monto Liquidado</th>
+                          <th className="p-3 font-bold text-center">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {filteredHistoricalLiquidaciones.map((mov) => {
+                          const techName = technicians.find(t => t.id === mov.tecnico_id)?.name || "Técnico";
+                          return (
+                            <tr key={mov.id} className="hover:bg-neutral-50 transition-colors">
+                              <td className="p-3 font-medium text-neutral-600 whitespace-nowrap">
+                                {new Date(mov.creado_en).toLocaleString('es-DO', { dateStyle: 'short', timeStyle: 'short' })}
+                              </td>
+                              <td className="p-3 font-bold text-neutral-900">
+                                {techName}
+                              </td>
+                              <td className="p-3 text-neutral-600">
+                                <span className="line-clamp-1">{mov.concepto}</span>
+                              </td>
+                              <td className="p-3 text-right font-black text-emerald-600 whitespace-nowrap">
+                                {formatRD(mov.monto)}
+                              </td>
+                              <td className="p-3 text-center">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handlePrintLiquidacion(
+                                    mov.tecnico_id,
+                                    [],
+                                    mov.monto,
+                                    true,
+                                    new Date(mov.creado_en).toLocaleString('es-DO')
+                                  )}
+                                  className="h-7 px-2.5 text-xs font-bold text-blue-600 hover:bg-blue-50 hover:text-blue-700 gap-1 rounded-lg border border-blue-100"
+                                >
+                                  <Printer className="h-3.5 w-3.5" /> Re-imprimir
+                                </Button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -2112,17 +2422,19 @@ export default function CajaPage() {
               type="button" 
               variant="outline" 
               onClick={() => setIsPagoTecnicoOpen(false)}
-              className="rounded-xl border-neutral-200 h-10"
+              className="rounded-xl border-neutral-200 h-10 font-bold"
             >
-              Cancelar
+              Cerrar
             </Button>
-            <Button 
-              onClick={handleLiquidarTecnico}
-              disabled={!selectedTechToPay || techCommissionInfo.total <= 0}
-              className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-bold h-10 shadow-lg shadow-blue-600/20"
-            >
-              Liquidar Técnico ({formatRD(techCommissionInfo.total)})
-            </Button>
+            {pagoTecnicoTab === 'pending' && (
+              <Button 
+                onClick={handleLiquidarTecnico}
+                disabled={!selectedTechToPay || techCommissionInfo.total <= 0}
+                className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 font-bold h-10 shadow-lg shadow-blue-600/20"
+              >
+                Liquidar Técnico ({formatRD(techCommissionInfo.total)})
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

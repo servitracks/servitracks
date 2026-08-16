@@ -339,6 +339,7 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
               cashReceived={cashNum}
               mechanicName={techName}
               warrantyText={warrantyText}
+              discount={lastInvoice?.discount}
               formato={printSettings.paperSize as any}
             />
           </div>

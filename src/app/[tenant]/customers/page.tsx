@@ -151,7 +151,7 @@ export default function CustomersPage() {
     }
     
     // Step 2 submit
-    const newCustomerId = `c${Date.now()}`;
+    const newCustomerId = crypto.randomUUID();
     const newCustomer: Customer = {
       id: newCustomerId,
       tenantId: tenantId,
@@ -173,7 +173,7 @@ export default function CustomersPage() {
         return;
       }
       const newVehicle: Vehicle = {
-        id: `v${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId: tenantId,
         customerId: newCustomerId,
         brand: vehForm.brand,
@@ -196,7 +196,7 @@ export default function CustomersPage() {
   };
 
   const skipVehicleRegistration = () => {
-    const newCustomerId = `c${Date.now()}`;
+    const newCustomerId = crypto.randomUUID();
     addCustomer({
       id: newCustomerId,
       tenantId,

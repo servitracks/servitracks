@@ -608,9 +608,8 @@ export default function SettingsPage() {
       {/* Tab bar */}
       <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl overflow-x-auto whitespace-nowrap custom-scrollbar">
         {TABS.filter(t => {
-          if (t.id === "whatsapp" && !isModuleEnabled(taller, "whatsapp")) return false;
-          if (t.id === "ecf" && !isModuleEnabled(taller, "facturacion_fiscal")) return false;
-          if (t.id === "tenants" && !isModuleEnabled(taller, "multisucursal")) return false;
+          if (t.id === "whatsapp" && !isModuleEnabled(taller, "whatsapp", currentPlan)) return false;
+          if (t.id === "tenants" && !isModuleEnabled(taller, "multisucursal", currentPlan)) return false;
           return true;
         }).map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}

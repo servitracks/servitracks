@@ -31,7 +31,6 @@ const emptyService: Partial<Service> = {
   name: "",
   category: "Otros",
   price: 0,
-  laborPrice: 0,
   duration: "1h",
   description: "",
   tax: 0,
@@ -269,11 +268,6 @@ export default function ServicesPage() {
                         +ITBIS
                       </span>
                     )}
-                    {service.laborPrice ? (
-                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                        Comisión: {service.laborPrice}%
-                      </span>
-                    ) : null}
                   </div>
                 </div>
                 <DropdownMenu>
@@ -326,27 +320,15 @@ export default function ServicesPage() {
                 onChange={(e) => setForm({ ...form, name: e.target.value })} 
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Precio al Cliente (RD$)</Label>
-                <Input 
-                  type="number"
-                  placeholder="Ej: 1500" 
-                  className="h-10 rounded-xl font-bold"
-                  value={form.price || ""} 
-                  onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} 
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Comisión Técnico (%)</Label>
-                <Input 
-                  type="number"
-                  placeholder="Ej: 25" 
-                  className="h-10 rounded-xl text-blue-600 font-bold bg-blue-50/50"
-                  value={form.laborPrice || ""} 
-                  onChange={(e) => setForm({ ...form, laborPrice: Number(e.target.value) })} 
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Precio al Cliente (RD$)</Label>
+              <Input 
+                type="number"
+                placeholder="Ej: 1500" 
+                className="h-10 rounded-xl font-bold"
+                value={form.price || ""} 
+                onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} 
+              />
             </div>
             
             <div className="flex items-center justify-between p-3 border border-neutral-100 rounded-xl bg-neutral-50/50">

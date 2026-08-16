@@ -19,10 +19,16 @@ export interface Tenant {
     formato_ticket_default?: '57mm' | '80mm';
     autoDeductInventory?: boolean;
     ecfConfig?: {
-      useOwnCredentials: boolean;
+      useOwnCredentials?: boolean;
       clientId?: string;
       clientSecret?: string;
       environment: 'sandbox' | 'production';
+      rnc?: string;
+      businessName?: string;
+      certFileName?: string;
+      certPassword?: string;
+      certUploaded?: boolean;
+      updatedAt?: string;
     };
     sidebarOrder?: Record<string, number>;
     modulos_override?: {

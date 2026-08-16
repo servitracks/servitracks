@@ -137,7 +137,7 @@ export default function BulkCustomerImportModal({ open, onClose, tenantId }: Pro
 
       parsedRows.forEach(row => {
         // Create Customer
-        const customerId = `c_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const customerId = crypto.randomUUID();
         const customer: Customer = {
           id: customerId,
           tenantId,
@@ -153,7 +153,7 @@ export default function BulkCustomerImportModal({ open, onClose, tenantId }: Pro
 
         // Create Vehicle if plate or make/model is present
         if (row.placaVehiculo || row.marcaVehiculo || row.modeloVehiculo) {
-          const vehicleId = `v_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          const vehicleId = crypto.randomUUID();
           const vehicle: Vehicle = {
             id: vehicleId,
             tenantId,

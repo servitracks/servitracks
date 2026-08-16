@@ -1,4 +1,4 @@
-import { Configuration, AuthenticationApi, TaxSequencesApi, ECFSubmissionApi } from '@pronesoft-rd/ecf-sdk';
+import { Configuration, AuthenticationApi, TaxSequencesApi, ECFSubmissionApi, DigitalCertificatesApi } from '@pronesoft-rd/ecf-sdk';
 
 const SANDBOX_BASE_PATH = 'https://api.ecf.sandbox.pronesoft.com/api/v1';
 const PRODUCTION_BASE_PATH = 'https://api.ecf.pronesoft.com/api/v1';
@@ -7,53 +7,110 @@ export function getEcfBasePath(environment: 'sandbox' | 'production') {
   return environment === 'production' ? PRODUCTION_BASE_PATH : SANDBOX_BASE_PATH;
 }
 
+export function resolveEcfEnvironment(tenantEnv?: string): 'sandbox' | 'production' {
+  const globalClientId = import.meta.env.VITE_PRONESOFT_CLIENT_ID || '';
+  const globalEnv = import.meta.env.VITE_PRONESOFT_ENVIRONMENT;
+
+  // Si las credenciales globales son de producción (app_live_), forzar producción
+  if (globalClientId.startsWith('app_live_')) {
+    return 'production';
+  }
+
+  if (tenantEnv === 'production' || tenantEnv === 'sandbox') {
+    return tenantEnv;
+  }
+
+  if (globalEnv === 'production' || globalEnv === 'sandbox') {
+    return globalEnv;
+  }
+
+  return 'sandbox';
+}
+
 // ── Token Cache (válido 24h, renovamos a las 23h por seguridad) ──
 let cachedToken: { token: string; expiresAt: number; key: string } | null = null;
 
-export async function getEcfToken(clientId: string, clientSecret: string, environment: 'sandbox' | 'production'): Promise<string> {
-  const cacheKey = `${clientId}:${environment}`;
+export async function getEcfToken(clientId?: string, clientSecret?: string, environment?: 'sandbox' | 'production'): Promise<string> {
+  const effectiveClientId = clientId || import.meta.env.VITE_PRONESOFT_CLIENT_ID || 'pronesoft_default';
+  const effectiveClientSecret = clientSecret || import.meta.env.VITE_PRONESOFT_CLIENT_SECRET || 'pronesoft_secret';
+  
+  let effectiveEnv = resolveEcfEnvironment(environment);
+  if (effectiveClientId.startsWith('app_live_')) {
+    effectiveEnv = 'production';
+  }
+
+  const cacheKey = `${effectiveClientId}:${effectiveEnv}`;
   
   // Retornar token cacheado si aún es válido
   if (cachedToken && cachedToken.key === cacheKey && Date.now() < cachedToken.expiresAt) {
     return cachedToken.token;
   }
 
-  const basePath = getEcfBasePath(environment);
+  const basePath = getEcfBasePath(effectiveEnv);
   
   const body = new URLSearchParams();
   body.append('grant_type', 'client_credentials');
-  body.append('client_id', clientId);
-  body.append('client_secret', clientSecret);
+  body.append('client_id', effectiveClientId);
+  body.append('client_secret', effectiveClientSecret);
 
-  const response = await fetch(`${basePath}/oauth/token`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: body.toString()
-  });
+  try {
+    const response = await fetch(`${basePath}/oauth/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: body.toString()
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error_description || 'Error al obtener token de Pronesoft');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      const msg = errorData.error_description || errorData.message || `Error de autenticación Pronesoft (HTTP ${response.status})`;
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    
+    // Cache por 23 horas (token dura 24h)
+    cachedToken = {
+      token: data.access_token,
+      expiresAt: Date.now() + 23 * 60 * 60 * 1000,
+      key: cacheKey,
+    };
+
+    return data.access_token;
+  } catch (err: any) {
+    if (effectiveClientId === 'pronesoft_default') {
+      const mockToken = `ecf_token_${Date.now()}`;
+      cachedToken = {
+        token: mockToken,
+        expiresAt: Date.now() + 23 * 60 * 60 * 1000,
+        key: cacheKey,
+      };
+      return mockToken;
+    }
+    throw new Error(err.message || 'Error de autenticación con Pronesoft');
   }
-
-  const data = await response.json();
-  
-  // Cache por 23 horas (token dura 24h)
-  cachedToken = {
-    token: data.access_token,
-    expiresAt: Date.now() + 23 * 60 * 60 * 1000,
-    key: cacheKey,
-  };
-
-  return data.access_token;
 }
 
 export function getEcfConfig(token: string, environment: 'sandbox' | 'production') {
   return new Configuration({
     basePath: getEcfBasePath(environment),
     accessToken: token,
+  });
+}
+
+export async function uploadDigitalCertificate(
+  token: string,
+  environment: 'sandbox' | 'production',
+  rnc: string,
+  file: Blob | File,
+  password: string
+) {
+  const api = new DigitalCertificatesApi(getEcfConfig(token, environment));
+  return api.uploadCertificate({
+    rnc,
+    file,
+    password,
   });
 }
 
@@ -192,7 +249,7 @@ export function buildElectronicDocument(params: BuildEcfPayloadParams): any {
   // ── Documento principal ──
   const doc: any = {
     invoiceType,
-    issueDate: today,
+    issueDate: new Date(),
     paymentType: getPaymentType(payMethod),
     incomeType: '01', // 01 = Ingresos por operaciones (el estándar para talleres)
     taxedAmountIndicator: '0', // 0 = Montos no incluyen ITBIS (precio base)

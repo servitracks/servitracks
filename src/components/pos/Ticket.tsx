@@ -23,12 +23,13 @@ interface TicketProps {
   qrUrl?: string;
   securityCode?: string;
   signatureDate?: string;
+  discount?: number;
 }
 
 export function Ticket({ 
   invoiceId, ncf, createdAt, tenant, customer, items, 
   subtotal, itbis, total, payMethod, cashReceived, mechanicName, 
-  formato = "80mm", notes, warrantyText, qrUrl, securityCode, signatureDate
+  formato = "80mm", notes, warrantyText, qrUrl, securityCode, signatureDate, discount
 }: TicketProps) {
   // Manejar 57mm y 58mm como el mismo formato
   const formatKey = formato === "57mm" ? "58mm" : formato;
@@ -179,6 +180,12 @@ export function Ticket({
                 <span>Subtotal</span>
                 <span className="font-medium text-black">{formatRD(subtotal)}</span>
               </div>
+              {discount !== undefined && discount > 0 && (
+                <div className="flex justify-between text-rose-600 font-semibold">
+                  <span>Descuento</span>
+                  <span>-{formatRD(discount)}</span>
+                </div>
+              )}
               {itbis > 0 && (
                 <div className="flex justify-between text-neutral-600">
                   <span>ITBIS (18%)</span>
@@ -289,6 +296,7 @@ export function Ticket({
       <div className="border-t-2 border-black my-1" />
       <div className="space-y-0.5 mt-1 text-black">
         <Row k="Subtotal" v={formatRD(subtotal)} />
+        {discount !== undefined && discount > 0 && <Row k="Descuento" v={`-${formatRD(discount)}`} />}
         {itbis > 0 && <Row k="ITBIS (18%)" v={formatRD(itbis)} />}
         <div className="my-1 border-t-2 border-black" />
         <div className="flex justify-between items-center text-black">

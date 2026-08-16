@@ -6,7 +6,7 @@ import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X,
   Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
-  Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList
+  Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList, Wallet
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { useParams, useSearchParams } from "@/lib/next-compat";
+import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
 import { SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES, Service } from "@/store/useStore";
 import { Ticket } from "@/components/pos/Ticket";
 
@@ -31,6 +31,7 @@ interface CartItem extends Product { quantity: number }
 type PayMethod = "cash" | "card" | "transfer";
 
 export default function POSPage() {
+  const router = useRouter();
   const { tenant } = useParams();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
@@ -60,6 +61,7 @@ export default function POSPage() {
   const [posCustomerId, setPosCustomerId] = useState<string>("");
   const [posCustomerSearch, setPosCustomerSearch] = useState<string>("");
   const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false);
+  const [technicianPopoverOpen, setTechnicianPopoverOpen] = useState(false);
   const tenantCustomers = tenantId ? customers.filter((c) => c.tenantId === tenantId) : [];
 
   const serviceToProduct = (s: Service): Product => ({
@@ -70,7 +72,6 @@ export default function POSPage() {
     category: "Servicios",
     costPrice: 0,
     salePrice: s.price,
-    laborPrice: s.price === 0 ? s.laborPrice : (s.laborPrice ? (s.price * s.laborPrice) / 100 : undefined),
     stock: 9999,
     minStock: 0,
     tax: s.tax || 0,
@@ -107,6 +108,8 @@ export default function POSPage() {
   const [isFullscreen, setIsFullscreen] = useState(true);
   const [showMobileCart, setShowMobileCart] = useState(false);
   const [lastInvoice, setLastInvoice] = useState<any | null>(null);
+  const [discount, setDiscount] = useState<number>(0);
+  const [discountType, setDiscountType] = useState<"fixed" | "percent">("fixed");
   const [isLaborModalOpen, setIsLaborModalOpen] = useState(false);
   const [isLinkOrderOpen, setIsLinkOrderOpen] = useState(false);
   const [isOpenTabsDialogOpen, setIsOpenTabsDialogOpen] = useState(false);
@@ -156,20 +159,32 @@ export default function POSPage() {
     return matchCat && matchSearch;
   });
 
-  const total    = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
-  const subtotal = cart.reduce((acc, i) => acc + (i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity, 0);
-  const itbis    = total - subtotal;
-  const cashNum  = parseFloat(cashReceived.replace(/,/g, "")) || 0;
-  const change   = Math.max(0, cashNum - total);
+  const rawTotal       = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
+  const discountAmount = discountType === "percent" 
+    ? (rawTotal * (discount || 0)) / 100 
+    : Math.min(rawTotal, Math.max(0, discount || 0));
+  const total          = Math.max(0, rawTotal - discountAmount);
+  const rawSubtotal    = cart.reduce((acc, i) => acc + (i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity, 0);
+  const subtotal       = rawTotal > 0 ? (rawSubtotal * (total / rawTotal)) : 0;
+  const itbis          = Math.max(0, total - subtotal);
+  const cashNum        = parseFloat(cashReceived.replace(/,/g, "")) || 0;
+  const change         = Math.max(0, cashNum - total);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "F1") { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === "F4") { e.preventDefault(); router.push(`/${tenant}/caja`); }
       if (e.key === "F12") { 
         e.preventDefault(); 
         if (cart.length > 0) {
           if (!activeCaja) {
-            toast.error("Debe abrir la caja antes de registrar ventas");
+            toast.error("Debe abrir la caja antes de registrar ventas", {
+              action: {
+                label: "Abrir Caja (F4)",
+                onClick: () => router.push(`/${tenant}/caja`),
+              },
+              duration: 6000,
+            });
             return;
           }
           setIsCheckout(true);
@@ -179,25 +194,43 @@ export default function POSPage() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [cart, activeCaja]);
+  }, [cart, activeCaja, tenant, router]);
 
   const addToCart = (product: Product) => {
-    if (product.stock <= 0) { toast.error("Sin stock disponible"); return; }
+    const isService = product.sku?.startsWith('SRV-') || product.category === 'Servicios' || product.id.startsWith('labor-');
+    if (!isService && product.stock <= 0) { 
+      toast.error("Producto sin stock disponible"); 
+      return; 
+    }
     setCart((prev) => {
-      // Servicios (sku empieza con SRV-) ya tienen laborPrice calculado en serviceToProduct().
-      // Solo los productos de inventario necesitan convertir de porcentaje a monto.
-      const isService = product.sku?.startsWith('SRV-') || product.category === 'Servicios';
       const calculatedLaborPrice = isService
-        ? product.laborPrice  // Ya es monto calculado (ej: RD$240)
-        : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined); // Porcentaje → monto
+        ? product.laborPrice
+        : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined);
       const ex = prev.find((i) => i.id === product.id);
-      if (ex) return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      if (ex) {
+        if (!isService && ex.quantity >= product.stock) {
+          toast.error(`No puedes agregar más. Solo quedan ${product.stock} unidades en existencia.`);
+          return prev;
+        }
+        return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
       return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice }];
     });
   };
 
   const updateQty = (id: string, delta: number) =>
-    setCart((prev) => prev.map((i) => i.id === id ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i));
+    setCart((prev) => prev.map((i) => {
+      if (i.id !== id) return i;
+      const isService = i.sku?.startsWith('SRV-') || i.category === 'Servicios' || i.id.startsWith('labor-');
+      if (delta > 0 && !isService) {
+        const availableStock = i.stock ?? 0;
+        if (i.quantity + delta > availableStock) {
+          toast.error(`No puedes agregar más. Solo quedan ${availableStock} en existencia.`);
+          return { ...i, quantity: availableStock };
+        }
+      }
+      return { ...i, quantity: Math.max(1, i.quantity + delta) };
+    }));
 
   const removeItem = (id: string) => setCart((prev) => prev.filter((i) => i.id !== id));
 
@@ -326,7 +359,7 @@ export default function POSPage() {
 
     const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
     const ecfConfig = currentTenantConfig?.ecfConfig;
-    const isEcfEnabled = ecfConfig?.useOwnCredentials && ecfConfig?.clientId && ecfConfig?.clientSecret;
+    const isEcfEnabled = Boolean(ecfConfig?.rnc && (ecfConfig?.certUploaded || ecfConfig?.environment === 'sandbox' || true));
     
     let finalNcf = `B02-${String(Date.now()).slice(-8)}`;
     let securityCode = undefined;
@@ -342,7 +375,7 @@ export default function POSPage() {
       try {
         toast.info("Firmando y enviando factura electrónica a la DGII...", { id: "ecf-submit" });
         
-        const { getEcfToken, submitInvoiceToDGII, buildElectronicDocument } = await import('@/lib/ecf');
+        const { getEcfToken, submitInvoiceToDGII, buildElectronicDocument, resolveEcfEnvironment } = await import('@/lib/ecf');
 
         // Construir payload con la estructura exacta que el SDK de Pronesoft espera
         const docPayload = buildElectronicDocument({
@@ -359,8 +392,8 @@ export default function POSPage() {
           total,
           payMethod,
           issuer: {
-            rnc: taller.rnc,
-            businessName: taller.name,
+            rnc: ecfConfig?.rnc || taller.rnc,
+            businessName: ecfConfig?.businessName || taller.name,
             address: taller.address,
             phone: taller.phone,
           },
@@ -370,10 +403,11 @@ export default function POSPage() {
           } : undefined,
         });
 
-        const token = await getEcfToken(ecfConfig!.clientId!, ecfConfig!.clientSecret!, ecfConfig!.environment!);
+        const env = resolveEcfEnvironment(ecfConfig?.environment);
+        const token = await getEcfToken(undefined, undefined, env);
         
         // Llamada real al API de Pronesoft
-        const result = await submitInvoiceToDGII(token, ecfConfig!.environment!, docPayload);
+        const result = await submitInvoiceToDGII(token, env, docPayload);
         
         if (result && result.encf) {
            finalNcf = result.encf;
@@ -404,6 +438,7 @@ export default function POSPage() {
     }
 
     const finalCustomerId = currentOrder?.customerId || posCustomerId || "walk-in";
+    const selectedTech = posMechanicId ? technicians.find(t => t.id === posMechanicId) : null;
 
     const inv = {
       id: `inv-${Date.now()}`,
@@ -414,16 +449,30 @@ export default function POSPage() {
       vehicleId: currentOrder?.vehicleId || undefined,
       orderId: activeOrderId || undefined,
       mechanicId: posMechanicId || undefined,
-      items: cart.map((i) => ({ 
-        id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        productId: i.id, 
-        name: i.name, 
-        quantity: i.quantity, 
-        unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
-        tax: (i.salePrice * i.quantity) - ((i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity),
-        laborPrice: (i.salePrice === 0 && i.laborPrice && i.laborPrice <= 100) ? (total * i.laborPrice) / 100 : i.laborPrice,
-      })),
-      subtotal, tax: itbis, total,
+      items: cart.map((i) => {
+        let itemCommission = 0;
+        if (selectedTech && selectedTech.pagoNomina) {
+          if (selectedTech.tipoPago === "fijo") {
+            itemCommission = selectedTech.pagoNomina;
+          } else {
+            // Porcentaje del técnico seleccionado (ej: 30%)
+            itemCommission = (i.salePrice * selectedTech.pagoNomina) / 100;
+          }
+        } else if (i.id.startsWith("labor-") || i.sku === "MANO-OBRA") {
+          itemCommission = i.salePrice;
+        }
+
+        return { 
+          id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          productId: i.id, 
+          name: i.name, 
+          quantity: i.quantity, 
+          unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
+          tax: (i.salePrice * i.quantity) - ((i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity),
+          laborPrice: itemCommission,
+        };
+      }),
+      subtotal, tax: itbis, total, discount: discountAmount,
       paymentMethod: payMethod,
       status: "paid" as const,
       ncf: finalNcf,
@@ -495,6 +544,7 @@ export default function POSPage() {
   const clearSale = () => {
     setCart([]); setIsPrint(false); setLastInvoice(null);
     setCashReceived(""); setPayMethod("cash");
+    setDiscount(0); setDiscountType("fixed");
     setActiveOrderId(null);
     setActiveServiceIds([]);
     setPosCustomerId("");
@@ -533,10 +583,6 @@ export default function POSPage() {
 
           {/* Top bar */}
           <div id="tour-pos-search" className="flex items-center gap-3 bg-white border-b border-neutral-200 px-4 py-3 overflow-hidden">
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="font-black text-lg tracking-tight hidden sm:block">ServiTracks <span className="font-light text-neutral-400">POS</span></div>
-              <Badge className="bg-black text-white text-[10px] rounded-full px-2">ACTIVO</Badge>
-            </div>
             <div className="relative flex-1 min-w-[150px] max-w-md">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
               <Input ref={searchRef} placeholder="Buscar producto (F1)..."
@@ -545,6 +591,7 @@ export default function POSPage() {
             </div>
             
             <div className="flex items-center gap-2 shrink-0">
+
               <Button 
                 onClick={() => setIsOpenTabsDialogOpen(true)}
                 variant="outline"
@@ -725,76 +772,40 @@ export default function POSPage() {
           "fixed lg:relative inset-0 lg:inset-auto z-[200] lg:z-auto transition-transform duration-300",
           showMobileCart ? "translate-y-0" : "translate-y-full lg:translate-y-0"
         )}>
-          <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 shrink-0">
-            <div className="flex items-center gap-2">
-              <ShoppingCart className="h-5 w-5" />
-              <span className="font-bold text-lg">Venta</span>
-            </div>
-            <div className="flex items-center gap-4">
-              {cart.length > 0 && (
-                <button onClick={() => setCart([])} className="text-xs text-neutral-400 hover:text-rose-500 transition-colors">
-                  Vaciar
+          <div className="border-b border-neutral-100 bg-white p-3.5 shrink-0 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="h-5 w-5 text-neutral-800" />
+                <span className="font-bold text-lg">Venta</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {cart.length > 0 && (
+                  <button onClick={() => setCart([])} className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors">
+                    Vaciar
+                  </button>
+                )}
+                <button className="lg:hidden p-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-full transition-colors" onClick={() => setShowMobileCart(false)}>
+                  <X className="h-5 w-5" />
                 </button>
-              )}
-              <button className="lg:hidden p-1.5 bg-neutral-100 hover:bg-neutral-200 rounded-full transition-colors" onClick={() => setShowMobileCart(false)}>
-                <X className="h-5 w-5" />
-              </button>
+              </div>
             </div>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {cart.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <ShoppingCart className="h-10 w-10 text-neutral-200 mb-3" />
-                <p className="text-sm text-neutral-400">Selecciona productos</p>
-                <p className="text-xs text-neutral-300 mt-1">F1 para buscar, F12 para cobrar</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-neutral-50">
-                {cart.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 px-5 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
-                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u (Inc. ITBIS)</p>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name === "Mano de obra" ? null : (
-                        <>
-                          <button onClick={() => updateQty(item.id, -1)}
-                            className="h-6 w-6 rounded-md border border-neutral-200 text-neutral-500 hover:border-black hover:text-black transition-colors flex items-center justify-center text-sm font-bold">
-                            −
-                          </button>
-                          <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
-                          <button onClick={() => updateQty(item.id, 1)}
-                            className="h-6 w-6 rounded-md border border-neutral-200 text-neutral-500 hover:border-black hover:text-black transition-colors flex items-center justify-center text-sm font-bold">
-                            +
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-right min-w-[60px]">
-                      <p className="text-sm font-black">RD$ {(item.salePrice * item.quantity).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <button onClick={() => removeItem(item.id)}
-                      className="text-neutral-300 hover:text-rose-500 transition-colors ml-1">
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="border-t border-neutral-100 bg-neutral-50 px-5 py-4 space-y-2">
-            <div className="flex justify-between items-center text-sm text-neutral-500 py-1.5 border-b border-dashed border-neutral-200">
-              <span className="font-semibold text-xs flex items-center gap-1"><User className="h-3.5 w-3.5 text-neutral-400" /> Cliente:</span>
+
+            {/* ── Barra Superior de Opciones Rápidas: Cliente, Técnico y Descuento ── */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar">
+              {/* Cliente */}
               <Popover open={customerPopoverOpen} onOpenChange={setCustomerPopoverOpen}>
-                <PopoverTrigger className="flex items-center justify-between px-3 h-8 w-48 rounded-lg border border-neutral-200 bg-white text-[11px] font-bold hover:border-neutral-300 transition-colors focus:outline-none">
-                  <span className="truncate">
-                    {posCustomerId
-                      ? tenantCustomers.find((c) => c.id === posCustomerId)?.name ?? "Consumidor Final"
-                      : "Consumidor Final"}
+                <PopoverTrigger className={cn(
+                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
+                  posCustomerId 
+                    ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
+                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                )}>
+                  <User className={cn("h-3.5 w-3.5", posCustomerId ? "text-neutral-300" : "text-neutral-400")} />
+                  <span className="max-w-[95px] truncate">
+                    {posCustomerId ? tenantCustomers.find((c) => c.id === posCustomerId)?.name ?? "Cliente" : "Cliente"}
                   </span>
                 </PopoverTrigger>
-                <PopoverContent className="w-[300px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="end">
+                <PopoverContent className="w-[280px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
                   <Input 
                     placeholder="Buscar por nombre, teléfono o RNC..." 
                     value={posCustomerSearch}
@@ -828,33 +839,181 @@ export default function POSPage() {
                   </div>
                 </PopoverContent>
               </Popover>
-            </div>
-            <div className="flex justify-between items-center text-sm text-neutral-500 py-1.5 border-b border-dashed border-neutral-200">
-              <span className="font-semibold text-xs flex items-center gap-1"><UserCog className="h-3.5 w-3.5 text-neutral-400" /> Técnico:</span>
-              <Select value={posMechanicId || "none"} onValueChange={(v) => setPosMechanicId(!v || v === "none" ? "" : v)}>
-                <SelectTrigger className="h-8 w-40 rounded-lg border-neutral-200 bg-white text-[11px] font-bold">
-                  <span>
-                    {posMechanicId
-                      ? technicians.find((t) => t.id === posMechanicId)?.name ?? "Técnico"
-                      : "Sin asignar"}
+
+              {/* Técnico */}
+              <Popover open={technicianPopoverOpen} onOpenChange={setTechnicianPopoverOpen}>
+                <PopoverTrigger className={cn(
+                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
+                  posMechanicId 
+                    ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
+                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                )}>
+                  <UserCog className={cn("h-3.5 w-3.5", posMechanicId ? "text-neutral-300" : "text-neutral-400")} />
+                  <span className="max-w-[95px] truncate">
+                    {posMechanicId ? technicians.find((t) => t.id === posMechanicId)?.name ?? "Técnico" : "Técnico"}
                   </span>
-                </SelectTrigger>
-                <SelectContent className="rounded-xl z-[200]">
-                  <SelectItem value="none">Sin asignar</SelectItem>
-                  {tenantTechnicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                </PopoverTrigger>
+                <PopoverContent className="w-[220px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
+                  <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
+                    <button 
+                      onClick={() => { setPosMechanicId(""); setTechnicianPopoverOpen(false); }}
+                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posMechanicId ? "bg-black text-white" : "hover:bg-neutral-100")}
+                    >
+                      Sin asignar
+                    </button>
+                    {tenantTechnicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
+                      <button 
+                        key={t.id}
+                        onClick={() => { setPosMechanicId(t.id); setTechnicianPopoverOpen(false); }}
+                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors font-bold", posMechanicId === t.id ? "bg-black text-white text-left" : "hover:bg-neutral-100 text-left")}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Descuento */}
+              <Popover>
+                <PopoverTrigger className={cn(
+                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
+                  discount > 0
+                    ? discountType === "fixed"
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm"
+                      : "bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm"
+                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                )}>
+                  <Tag className={cn("h-3.5 w-3.5", discount > 0 ? (discountType === "fixed" ? "text-emerald-600" : "text-indigo-600") : "text-neutral-400")} />
+                  <span>{discount > 0 ? (discountType === "fixed" ? `RD$${discount}` : `${discount}%`) : "Descuento"}</span>
+                </PopoverTrigger>
+                <PopoverContent className="w-[250px] p-3 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="end">
+                  <div className="space-y-2.5">
+                    <div className="flex justify-between items-center text-xs font-bold text-neutral-700">
+                      <span>Aplicar Descuento</span>
+                      {discount > 0 && (
+                        <button type="button" onClick={() => setDiscount(0)} className="text-[10px] text-rose-600 font-bold hover:underline">
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* Segmented control con colores distintivos */}
+                      <div className="flex bg-neutral-100 p-0.5 rounded-lg text-xs font-bold border border-neutral-200 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType("fixed")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md transition-all text-[11px]",
+                            discountType === "fixed"
+                              ? "bg-emerald-600 text-white shadow-sm font-black"
+                              : "text-neutral-500 hover:text-neutral-900"
+                          )}
+                        >
+                          RD$
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDiscountType("percent")}
+                          className={cn(
+                            "px-2.5 py-1 rounded-md transition-all text-[11px]",
+                            discountType === "percent"
+                              ? "bg-indigo-600 text-white shadow-sm font-black"
+                              : "text-neutral-500 hover:text-neutral-900"
+                          )}
+                        >
+                          %
+                        </button>
+                      </div>
+
+                      {/* Input de descuento con símbolo dinámico prefijado */}
+                      <div className="relative flex-1 flex items-center">
+                        <span className={cn(
+                          "absolute left-2.5 text-[11px] font-black pointer-events-none select-none transition-colors",
+                          discountType === "fixed" ? "text-emerald-600" : "text-indigo-600"
+                        )}>
+                          {discountType === "fixed" ? "RD$" : "%"}
+                        </span>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={discountType === "percent" ? "100" : undefined}
+                          placeholder="0"
+                          value={discount || ""}
+                          onChange={(e) => setDiscount(Math.max(0, parseFloat(e.target.value) || 0))}
+                          className={cn(
+                            "h-8 w-full text-right font-bold text-xs rounded-lg transition-colors border",
+                            discountType === "fixed"
+                              ? "pl-9 pr-2.5 border-emerald-200 focus-visible:ring-emerald-500 text-emerald-900"
+                              : "pl-7 pr-2.5 border-indigo-200 focus-visible:ring-indigo-500 text-indigo-900"
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            {cart.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                <ShoppingCart className="h-10 w-10 text-neutral-200 mb-3" />
+                <p className="text-sm text-neutral-400">Selecciona productos</p>
+                <p className="text-xs text-neutral-300 mt-1">F1 buscar • F4 caja • F12 cobrar</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-neutral-50">
+                {cart.map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
+                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u (Inc. ITBIS)</p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name === "Mano de obra" ? null : (
+                        <>
+                          <button onClick={() => updateQty(item.id, -1)}
+                            className="h-6 w-6 rounded-md border border-neutral-200 text-neutral-500 hover:border-black hover:text-black transition-colors flex items-center justify-center text-sm font-bold">
+                            −
+                          </button>
+                          <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
+                          <button onClick={() => updateQty(item.id, 1)}
+                            disabled={!item.sku?.startsWith('SRV-') && item.category !== 'Servicios' && !item.id.startsWith('labor-') && item.quantity >= (item.stock ?? 0)}
+                            className="h-6 w-6 rounded-md border border-neutral-200 text-neutral-500 hover:border-black hover:text-black transition-colors flex items-center justify-center text-sm font-bold disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:border-neutral-200 disabled:hover:text-neutral-500">
+                            +
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <div className="text-right min-w-[60px]">
+                      <p className="text-sm font-black">RD$ {(item.salePrice * item.quantity).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                    </div>
+                    <button onClick={() => removeItem(item.id)}
+                      className="text-neutral-300 hover:text-rose-500 transition-colors ml-1">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="border-t border-neutral-100 bg-neutral-50 px-5 py-4 space-y-2">
             <div className="flex justify-between text-sm text-neutral-500">
-              <span>Subtotal</span><span>RD$ {subtotal.toLocaleString("en-US")}</span>
+              <span>Subtotal</span><span>RD$ {subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-sm text-rose-600 font-semibold">
+                <span>Descuento {discountType === "percent" ? `(${discount}%)` : ''}</span>
+                <span>- RD$ {discountAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm text-neutral-500">
               <span>ITBIS</span><span>RD$ {itbis.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             <div className="flex justify-between text-xl font-black text-neutral-900 pt-2 border-t border-neutral-200">
-              <span>TOTAL</span><span>RD$ {total.toLocaleString("en-US")}</span>
+              <span>TOTAL</span><span>RD$ {total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             </div>
             
             <div className="grid grid-cols-2 gap-2 mt-1">
@@ -914,7 +1073,13 @@ export default function POSPage() {
                 disabled={cart.length === 0}
                 onClick={() => {
                   if (!activeCaja) {
-                    toast.error("Debe abrir la caja antes de registrar ventas");
+                    toast.error("Debe abrir la caja antes de registrar ventas", {
+                      action: {
+                        label: "Abrir Caja (F4)",
+                        onClick: () => router.push(`/${tenant}/caja`),
+                      },
+                      duration: 6000,
+                    });
                     return;
                   }
                   setIsCheckout(true);

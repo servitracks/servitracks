@@ -338,9 +338,27 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               </div>
             </div>
 
-            <DialogFooter className="gap-2 pt-2 border-t border-neutral-100 flex justify-end">
+            <DialogFooter className="gap-2 pt-2 border-t border-neutral-100 flex items-center justify-between flex-wrap">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl h-10 px-4 font-bold text-neutral-700">Cancelar</Button>
-              <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800 h-10 px-5 font-bold">Crear Orden</Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  type="button" 
+                  onClick={(e) => {
+                    handleCreate(e);
+                    // Redirect to POS with latest created order
+                    setTimeout(() => {
+                      const latestOrder = useStore.getState().orders.find(o => o.customerId === form.customerId && o.vehicleId === form.vehicleId);
+                      if (latestOrder) {
+                        window.location.href = `/${tenant}/pos?orderId=${latestOrder.id}`;
+                      }
+                    }, 100);
+                  }} 
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white h-10 px-4 font-bold"
+                >
+                  ⚡ Crear y Facturar (e-CF)
+                </Button>
+                <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800 h-10 px-5 font-bold">Crear Orden</Button>
+              </div>
             </DialogFooter>
           </form>
         </DialogContent>
