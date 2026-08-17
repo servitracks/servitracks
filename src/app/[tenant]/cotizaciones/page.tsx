@@ -16,7 +16,8 @@ import {
   Calendar,
   DollarSign,
   CheckCircle2,
-  FileCheck
+  FileCheck,
+  Archive
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -56,6 +65,7 @@ const statusColors: Record<QuoteStatus, string> = {
   accepted: "bg-emerald-50 text-emerald-700 border-emerald-100",
   rejected: "bg-rose-50 text-rose-700 border-rose-100",
   expired: "bg-amber-50 text-amber-700 border-amber-100",
+  archived: "bg-purple-50 text-purple-700 border-purple-100",
 };
 
 const statusLabels: Record<QuoteStatus, string> = {
@@ -64,6 +74,7 @@ const statusLabels: Record<QuoteStatus, string> = {
   accepted: "Aceptada",
   rejected: "Rechazada",
   expired: "Expirada",
+  archived: "Archivada",
 };
 
 export default function CotizacionesPage() {
@@ -77,6 +88,17 @@ export default function CotizacionesPage() {
   const allCustomers = useStore((s) => s.customers);
   const allVehicles = useStore((s) => s.vehicles);
   const deleteQuote = useStore((s) => s.deleteQuote);
+  const updateQuote = useStore((s) => s.updateQuote);
+
+  // Custom Dialog States
+  const [quoteToDelete, setQuoteToDelete] = useState<{ id: string; num: string } | null>(null);
+  const [quoteToArchive, setQuoteToArchive] = useState<Quote | null>(null);
+  const [archiveObsInput, setArchiveObsInput] = useState<string>("");
+
+  const handleOpenArchive = (quote: Quote) => {
+    setQuoteToArchive(quote);
+    setArchiveObsInput(quote.observation || "");
+  };
 
   const quotes = useMemo(() => 
     tenantId ? allQuotes.filter((q) => q.tenantId === tenantId) : [],
@@ -113,12 +135,16 @@ export default function CotizacionesPage() {
       const customerName = customer?.name?.toLowerCase() || "";
       const quoteNo = q.quoteNumber?.toLowerCase() || "";
       const plate = vehicle?.plate?.toLowerCase() || "";
+      const obs = q.observation?.toLowerCase() || "";
+      const notes = q.notes?.toLowerCase() || "";
 
       const query = search.toLowerCase();
       const matchSearch =
         customerName.includes(query) ||
         quoteNo.includes(query) ||
-        plate.includes(query);
+        plate.includes(query) ||
+        obs.includes(query) ||
+        notes.includes(query);
 
       const matchStatus =
         statusFilter === "Todos" || q.status === statusFilter;
@@ -145,12 +171,10 @@ export default function CotizacionesPage() {
     };
   }, [quotes]);
 
-  const handleDelete = (id: string, num: string) => {
-    if (confirm(`¿Está seguro de que desea eliminar la cotización ${num}?`)) {
-      deleteQuote(id);
-      toast.success(`Cotización ${num} eliminada`);
-    }
+  const handleDeletePrompt = (id: string, num: string) => {
+    setQuoteToDelete({ id, num });
   };
+  const handleDelete = handleDeletePrompt;
 
   const handleEdit = (quote: Quote) => {
     setSelectedQuoteIdToEdit(quote.id);
@@ -232,7 +256,7 @@ export default function CotizacionesPage() {
         <div className="relative flex-1 w-full sm:max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
           <Input
-            placeholder="Buscar por cotización, cliente o placa..."
+            placeholder="Buscar por cotización, cliente, placa u observación..."
             className="rounded-full border-neutral-200 bg-neutral-50/30 pl-10 h-10 text-sm focus-visible:ring-black"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -251,6 +275,7 @@ export default function CotizacionesPage() {
               <SelectItem value="accepted">Aceptada</SelectItem>
               <SelectItem value="rejected">Rechazada</SelectItem>
               <SelectItem value="expired">Expirada</SelectItem>
+              <SelectItem value="archived">Archivada</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -261,11 +286,12 @@ export default function CotizacionesPage() {
         <Table>
           <TableHeader className="bg-neutral-50/50">
             <TableRow>
-              <TableHead className="w-[140px]">Cotización</TableHead>
+              <TableHead className="w-[130px]">Cotización</TableHead>
               <TableHead>Cliente</TableHead>
               <TableHead>Vehículo</TableHead>
               <TableHead>Fecha Emisión</TableHead>
               <TableHead>Vence en</TableHead>
+              <TableHead className="max-w-[200px]">Observación</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead className="w-[100px] text-center">Estado</TableHead>
               <TableHead className="w-[50px]" />
@@ -274,7 +300,7 @@ export default function CotizacionesPage() {
           <TableBody>
             {filteredQuotes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-32 text-center text-neutral-400">
+                <TableCell colSpan={9} className="h-32 text-center text-neutral-400">
                   No se encontraron cotizaciones registradas.
                 </TableCell>
               </TableRow>
@@ -317,6 +343,15 @@ export default function CotizacionesPage() {
                     <TableCell className="text-neutral-600 text-xs">
                       {quote.validUntil ? new Date(quote.validUntil).toLocaleDateString("es-DO") : <span className="text-neutral-450">—</span>}
                     </TableCell>
+                    <TableCell className="text-xs max-w-[200px]" title={quote.observation || ""}>
+                      {quote.observation ? (
+                        <span className="text-purple-950 font-semibold bg-purple-50 px-2.5 py-1 rounded-md border border-purple-200/60 block truncate">
+                          {quote.observation}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="font-bold text-sm text-right">
                       RD$ {quote.total.toLocaleString("es-DO")}
                     </TableCell>
@@ -347,11 +382,18 @@ export default function CotizacionesPage() {
                               <Edit className="h-4 w-4 text-neutral-500" /> Editar
                             </DropdownMenuItem>
                           )}
+
+                          <DropdownMenuItem
+                            className="rounded-lg py-2 text-purple-700 focus:text-purple-700 cursor-pointer gap-2"
+                            onClick={() => handleOpenArchive(quote)}
+                          >
+                            <Archive className="h-4 w-4" /> {quote.status === "archived" ? "Editar Archivo" : "Archivar"}
+                          </DropdownMenuItem>
                           
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
-                            onClick={() => handleDelete(quote.id, quote.quoteNumber)}
+                            onClick={() => handleDeletePrompt(quote.id, quote.quoteNumber)}
                           >
                             <Trash2 className="h-4 w-4" /> Eliminar
                           </DropdownMenuItem>
@@ -381,6 +423,98 @@ export default function CotizacionesPage() {
         quote={selectedQuoteDetail}
         tenantId={tenantId}
       />
+
+      {/* Custom Delete Confirmation Modal */}
+      <Dialog open={!!quoteToDelete} onOpenChange={(o) => !o && setQuoteToDelete(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6 bg-white z-[300]">
+          <DialogHeader className="flex flex-col items-center text-center gap-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-lg font-bold text-neutral-900">
+              ¿Eliminar Cotización?
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              ¿Está seguro de que desea eliminar la cotización <strong className="text-neutral-800">{quoteToDelete?.num}</strong>? Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex gap-2 sm:justify-end mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setQuoteToDelete(null)}
+              className="rounded-xl h-10 px-4 font-bold text-xs cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (quoteToDelete) {
+                  deleteQuote(quoteToDelete.id);
+                  toast.success(`Cotización ${quoteToDelete.num} eliminada`);
+                  setQuoteToDelete(null);
+                }
+              }}
+              className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold h-10 px-4 text-xs cursor-pointer"
+            >
+              Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Archive Dialog */}
+      <Dialog open={!!quoteToArchive} onOpenChange={(o) => !o && setQuoteToArchive(null)}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6 bg-white z-[300]">
+          <DialogHeader className="gap-1">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-purple-700">
+                <Archive className="h-4 w-4" />
+              </div>
+              <DialogTitle className="text-base font-bold text-neutral-900">
+                Archivar Cotización {quoteToArchive?.quoteNumber}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-neutral-500 pt-1">
+              Ingrese el motivo u observación por el cual se archiva esta cotización.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            <textarea
+              placeholder="Ej: Cliente canceló por costo de repuestos, vehículo vendido..."
+              value={archiveObsInput}
+              onChange={(e) => setArchiveObsInput(e.target.value)}
+              className="w-full min-h-[90px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
+            />
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setQuoteToArchive(null)}
+              className="rounded-xl h-10 px-4 font-bold text-xs cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (quoteToArchive) {
+                  updateQuote(quoteToArchive.id, {
+                    status: "archived",
+                    observation: archiveObsInput.trim() || undefined,
+                  });
+                  toast.success(`Cotización ${quoteToArchive.quoteNumber} archivada correctamente`);
+                  setQuoteToArchive(null);
+                }
+              }}
+              className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold h-10 px-4 text-xs cursor-pointer"
+            >
+              Archivar Cotización
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

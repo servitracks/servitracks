@@ -343,17 +343,17 @@ function inspectionToDb(i: Inspection) {
 }
 
 function dbToMaintenanceAlert(row: any): MaintenanceAlert {
-  return { id: row.id, tenantId: row.tenant_id, vehicleId: row.vehicle_id, customerId: row.customer_id, maintenanceItemId: row.maintenance_item_id, type: row.type, percentage: row.percentage, createdAt: row.created_at, status: row.status };
+  return { id: row.id, tenantId: row.tenant_id, vehicleId: row.vehicle_id || "", customerId: row.customer_id || "", maintenanceItemId: row.maintenance_item_id || "", type: row.type, percentage: row.percentage, createdAt: row.created_at, status: row.status };
 }
 function maintenanceAlertToDb(a: MaintenanceAlert) {
-  return { id: a.id, tenant_id: a.tenantId, vehicle_id: a.vehicleId, customer_id: a.customerId, maintenance_item_id: a.maintenanceItemId, type: a.type, percentage: a.percentage, created_at: a.createdAt, status: a.status };
+  return { id: a.id, tenant_id: a.tenantId, vehicle_id: a.vehicleId || "", customer_id: a.customerId || "", maintenance_item_id: a.maintenanceItemId || "", type: a.type, percentage: a.percentage, created_at: a.createdAt, status: a.status };
 }
 
 function dbToMaintenanceHistoryItem(row: any): MaintenanceHistoryItem {
-  return { id: row.id, vehicleId: row.vehicle_id, tenantId: row.tenant_id, name: row.name, serviceDate: row.service_date, serviceKm: row.service_km, completedAt: row.completed_at, notes: row.notes };
+  return { id: row.id, vehicleId: row.vehicle_id || "", tenantId: row.tenant_id, name: row.name, serviceDate: row.service_date, serviceKm: row.service_km, completedAt: row.completed_at, notes: row.notes };
 }
 function maintenanceHistoryItemToDb(h: MaintenanceHistoryItem) {
-  return { id: h.id, vehicle_id: h.vehicleId, tenant_id: h.tenantId, name: h.name, service_date: h.serviceDate, service_km: h.serviceKm, completed_at: h.completedAt, notes: h.notes };
+  return { id: h.id, vehicle_id: h.vehicleId || "", tenant_id: h.tenantId, name: h.name, service_date: h.serviceDate, service_km: h.serviceKm, completed_at: h.completedAt, notes: h.notes };
 }
 
 function dbToSupplier(row: any): Supplier {
@@ -551,11 +551,20 @@ function workOrderToDb(o: WorkOrder) {
 }
 
 function dbToQuote(row: any): Quote {
+  let notes: string | undefined = row.notes || undefined;
+  let observation: string | undefined = undefined;
+
+  if (notes && notes.includes("[OBS]:")) {
+    const parts = notes.split("[OBS]:");
+    notes = parts[0].trim() || undefined;
+    observation = parts[1].trim() || undefined;
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    customerId: row.customer_id,
-    vehicleId: row.vehicle_id,
+    customerId: row.customer_id || "",
+    vehicleId: row.vehicle_id || "",
     quoteNumber: row.quote_number,
     status: row.status,
     validUntil: row.valid_until || undefined,
@@ -563,19 +572,25 @@ function dbToQuote(row: any): Quote {
     tax: row.tax,
     discount: row.discount || undefined,
     total: row.total,
-    notes: row.notes || undefined,
+    notes,
+    observation,
     items: row.items || [],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
   };
 }
 
 function quoteToDb(q: Quote) {
+  let combinedNotes = q.notes || "";
+  if (q.observation) {
+    combinedNotes = combinedNotes ? `${combinedNotes}\n[OBS]: ${q.observation}` : `[OBS]: ${q.observation}`;
+  }
+
   return {
     id: q.id,
     tenant_id: q.tenantId,
-    customer_id: q.customerId,
-    vehicle_id: q.vehicleId,
+    customer_id: q.customerId || "",
+    vehicle_id: q.vehicleId || "",
     quote_number: q.quoteNumber,
     status: q.status,
     valid_until: q.validUntil || null,
@@ -583,10 +598,10 @@ function quoteToDb(q: Quote) {
     tax: q.tax,
     discount: q.discount || null,
     total: q.total,
-    notes: q.notes || null,
+    notes: combinedNotes || null,
     items: q.items || [],
-    created_at: q.createdAt,
-    updated_at: q.updatedAt,
+    created_at: q.createdAt || new Date().toISOString(),
+    updated_at: q.updatedAt || new Date().toISOString(),
   };
 }
 

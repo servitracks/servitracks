@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore, Customer, Vehicle, Product, Service } from "@/store/useStore";
-import { X, Send, Printer, FileText, Check, Ban, ShoppingCart, RefreshCw, MessageSquare } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { X, Send, Printer, FileText, Check, Ban, ShoppingCart, RefreshCw, MessageSquare, Archive } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ const statusColors: Record<QuoteStatus, string> = {
   accepted: "bg-emerald-50 text-emerald-700 border-emerald-100",
   rejected: "bg-rose-50 text-rose-700 border-rose-100",
   expired: "bg-amber-50 text-amber-700 border-amber-100",
+  archived: "bg-purple-50 text-purple-700 border-purple-100",
 };
 
 const statusLabels: Record<QuoteStatus, string> = {
@@ -32,6 +33,7 @@ const statusLabels: Record<QuoteStatus, string> = {
   accepted: "Aceptada",
   rejected: "Rechazada",
   expired: "Expirada",
+  archived: "Archivada",
 };
 
 export default function QuotationDetailDialog({
@@ -73,6 +75,14 @@ export default function QuotationDetailDialog({
     toast.success(`Estado de cotización actualizado a ${statusLabels[status]}`);
   };
 
+  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
+  const [archiveObsInput, setArchiveObsInput] = useState("");
+
+  const handleOpenArchiveModal = () => {
+    setArchiveObsInput(quote?.observation || "");
+    setIsArchiveDialogOpen(true);
+  };
+
   // Convert Quote to Work Order
   const handleConvertToOrder = (shouldRedirectToPos = false) => {
     try {
@@ -86,6 +96,10 @@ export default function QuotationDetailDialog({
       const customServices = quote.items
         .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
         .map((i) => ({ name: i.name, price: i.unitPrice }));
+
+      const customParts = quote.items
+        .filter((i) => !i.productId && (!i.serviceId || !i.serviceId.startsWith('custom-')))
+        .map((i) => ({ name: i.name, price: i.unitPrice, quantity: i.quantity }));
 
       const parts = quote.items
         .filter((i) => i.productId)
@@ -103,6 +117,7 @@ export default function QuotationDetailDialog({
         description: `Servicios importados de Cotización ${quote.quoteNumber}`,
         serviceIds: serviceIds.length > 0 ? serviceIds : undefined,
         customServices: customServices.length > 0 ? customServices : undefined,
+        customParts: customParts.length > 0 ? customParts : undefined,
         parts: parts.length > 0 ? parts : undefined,
         total: quote.total,
         notes: quote.notes ? `Notas de cotización: ${quote.notes}` : undefined,
@@ -279,14 +294,24 @@ export default function QuotationDetailDialog({
                   <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Facturar / Orden
                 </Button>
               )}
-              {quote.status === "rejected" && (
+              {quote.status !== "archived" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 font-bold cursor-pointer"
+                  onClick={handleOpenArchiveModal}
+                >
+                  <Archive className="h-3.5 w-3.5 mr-1" /> Archivar
+                </Button>
+              )}
+              {quote.status === "archived" && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs text-neutral-600 border-neutral-200 hover:bg-neutral-100 font-bold cursor-pointer"
                   onClick={() => handleUpdateStatus("draft")}
                 >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Volver a Borrador
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Desarchivar
                 </Button>
               )}
               
@@ -402,13 +427,13 @@ export default function QuotationDetailDialog({
                         {item.serviceId ? <span className="text-neutral-400 font-bold">—</span> : item.quantity}
                       </td>
                       <td className="py-3 px-3 text-right text-neutral-600 font-mono">
-                        RD$ {item.unitPrice.toLocaleString("es-DO")}
+                        RD$ {Number(item.unitPrice.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
                       <td className="py-3 px-3 text-right text-neutral-600 font-mono">
                         {item.discountPercentage ? `${item.discountPercentage}%` : "—"}
                       </td>
                       <td className="py-3 px-3 text-right font-black text-neutral-900 font-mono">
-                        RD$ {item.total.toLocaleString("es-DO")}
+                        RD$ {Number(item.total.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
                   ))}
@@ -418,7 +443,7 @@ export default function QuotationDetailDialog({
 
             {/* Financial Summary & Notes */}
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 pt-6 border-t-2 border-neutral-800">
-              <div className="md:col-span-7 text-xs text-neutral-500">
+              <div className="md:col-span-7 text-xs text-neutral-500 space-y-3">
                 {quote.notes && (
                   <div className="space-y-1">
                     <h4 className="font-bold text-[9px] uppercase tracking-wider text-neutral-400">Notas y Condiciones:</h4>
@@ -427,26 +452,39 @@ export default function QuotationDetailDialog({
                     </p>
                   </div>
                 )}
+
+                <div className="space-y-1">
+                  <h4 className="font-bold text-[9px] uppercase tracking-wider text-neutral-400">Observación:</h4>
+                  {quote.observation ? (
+                    <p className="bg-neutral-50/50 p-3 rounded-xl border border-neutral-100 text-neutral-800 font-medium whitespace-pre-line leading-relaxed text-[11px]">
+                      {quote.observation}
+                    </p>
+                  ) : (
+                    <p className="bg-neutral-50/30 p-3 rounded-xl border border-dashed border-neutral-200 text-neutral-400 italic text-[11px]">
+                      Sin observación registrada.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="md:col-span-5 text-xs text-neutral-600 space-y-2 font-medium ml-auto w-full max-w-[280px]">
                 <div className="flex justify-between">
                   <span>Subtotal:</span>
-                  <span className="font-semibold text-neutral-900 font-mono">RD$ {quote.subtotal.toLocaleString("es-DO")}</span>
+                  <span className="font-semibold text-neutral-900 font-mono">RD$ {Number(quote.subtotal.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                 </div>
                 {quote.discount && quote.discount > 0 ? (
                   <div className="flex justify-between text-rose-600">
                     <span>Descuento:</span>
-                    <span className="font-semibold font-mono">- RD$ {quote.discount.toLocaleString("es-DO")}</span>
+                    <span className="font-semibold font-mono">- RD$ {Number(quote.discount.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                   </div>
                 ) : null}
                 <div className="flex justify-between">
                   <span>ITBIS (18%):</span>
-                  <span className="font-semibold text-neutral-900 font-mono">RD$ {quote.tax.toLocaleString("es-DO")}</span>
+                  <span className="font-semibold text-neutral-900 font-mono">RD$ {Number(quote.tax.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-sm font-black text-neutral-900 pt-2.5 border-t-2 border-neutral-800">
                   <span>TOTAL ESTIMADO:</span>
-                  <span className="font-mono">RD$ {quote.total.toLocaleString("es-DO")}</span>
+                  <span className="font-mono">RD$ {Number(quote.total.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
@@ -481,6 +519,59 @@ export default function QuotationDetailDialog({
             </Button>
           </DialogFooter>
           
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Archive Dialog inside Detail View */}
+      <Dialog open={isArchiveDialogOpen} onOpenChange={setIsArchiveDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6 bg-white z-[350]">
+          <DialogHeader className="gap-1">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-50 text-purple-700">
+                <Archive className="h-4 w-4" />
+              </div>
+              <DialogTitle className="text-base font-bold text-neutral-900">
+                Archivar Cotización {quote?.quoteNumber}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-neutral-500 pt-1">
+              Ingrese el motivo u observación por el cual se archiva esta cotización.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            <textarea
+              placeholder="Ej: Cliente canceló por costo de repuestos, vehículo vendido..."
+              value={archiveObsInput}
+              onChange={(e) => setArchiveObsInput(e.target.value)}
+              className="w-full min-h-[90px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
+            />
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setIsArchiveDialogOpen(false)}
+              className="rounded-xl h-10 px-4 font-bold text-xs cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (quote) {
+                  updateQuote(quote.id, {
+                    status: "archived",
+                    observation: archiveObsInput.trim() || undefined,
+                  });
+                  toast.success(`Cotización ${quote.quoteNumber} archivada correctamente`);
+                  setIsArchiveDialogOpen(false);
+                }
+              }}
+              className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold h-10 px-4 text-xs cursor-pointer"
+            >
+              Archivar Cotización
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

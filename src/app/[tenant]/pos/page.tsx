@@ -282,7 +282,7 @@ export default function POSPage() {
     setActiveServiceIds(sids);
     setCategory("Todos");
 
-    if (sids.length > 0 || (order.parts && order.parts.length > 0) || (order.customServices && order.customServices.length > 0)) {
+    if (sids.length > 0 || (order.parts && order.parts.length > 0) || (order.customServices && order.customServices.length > 0) || (order.customParts && order.customParts.length > 0)) {
       setCart(prev => {
         let newCart = [...prev];
         
@@ -341,6 +341,25 @@ export default function POSPage() {
           });
         }
 
+        // Add custom/external parts (repuestos libres/externos sin afectar catálogo de inventario)
+        if (order.customParts && order.customParts.length > 0) {
+          order.customParts.forEach((cp) => {
+            newCart.push({
+              id: `ext-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+              tenantId: tenantId,
+              name: cp.name,
+              sku: "EXTERNO",
+              category: "Repuestos Externos",
+              costPrice: 0,
+              salePrice: cp.price,
+              stock: 9999,
+              minStock: 0,
+              tax: 18,
+              quantity: cp.quantity || 1,
+            });
+          });
+        }
+
         return newCart;
       });
       toast.success(`Orden vinculada — Servicios y repuestos agregados al carrito`);
@@ -348,6 +367,18 @@ export default function POSPage() {
       toast.info("La orden no tiene servicios ni repuestos asociados");
     }
   };
+
+  const autoLoadedOrderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (orderId && autoLoadedOrderIdRef.current !== orderId && tenantOrders.length > 0) {
+      const targetOrder = tenantOrders.find((o) => o.id === orderId);
+      if (targetOrder) {
+        autoLoadedOrderIdRef.current = orderId;
+        handleSelectOrder(targetOrder);
+      }
+    }
+  }, [orderId, tenantOrders]);
 
   const handleCheckout = async (customerData: { type: 'consumo' | 'credito_fiscal'; rnc?: string; name?: string }) => {
     if (!posMechanicId || posMechanicId === "none") {
@@ -470,6 +501,7 @@ export default function POSPage() {
           unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
           tax: (i.salePrice * i.quantity) - ((i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity),
           laborPrice: itemCommission,
+          alreadyDeducted: (i as any).alreadyDeducted || false,
         };
       }),
       subtotal, tax: itbis, total, discount: discountAmount,
@@ -482,31 +514,6 @@ export default function POSPage() {
       createdAt: new Date().toISOString(),
     };
     addInvoice(inv);
-
-    // ── INVENTARIO INTELIGENTE: Descuento Automático (Modo Seguro) ──
-    if (currentTenantConfig?.autoDeductInventory) {
-      cart.forEach(item => {
-        // Ignorar items de mano de obra
-        if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
-        
-        // 1. Actualizar stock
-        const newStock = Math.max(0, item.stock - item.quantity);
-        updateProduct(item.id, { stock: newStock });
-        
-        // 2. Registrar movimiento en el historial
-        addMovement({
-          id: `m-pos-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          tenantId: tenantId,
-          productId: item.id,
-          productName: item.name,
-          type: "out",
-          quantity: item.quantity,
-          reason: `Venta POS - Factura ${inv.ncf}`,
-          date: new Date().toISOString(),
-        });
-      });
-      toast.success("Inventario descontado automáticamente");
-    }
 
     if (activeCaja) {
       let laborTotal = 0;
@@ -1114,7 +1121,8 @@ export default function POSPage() {
               setActiveOrderId(tab.orderId);
               setCart(tab.items.map(i => ({
                 ...i,
-                // El item ya fue descontado por su cantidad original.
+                // El item ya fue descontado por su cantidad original al pausar.
+                alreadyDeducted: true,
                 _fromTabId: tab.id, 
               } as any)));
               

@@ -303,19 +303,19 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
     });
   };
 
-  const modalWidth = printSettings.paperSize === "A4" ? "sm:max-w-3xl" : "sm:max-w-xs";
+  const modalWidth = printSettings.paperSize === "A4" ? "sm:max-w-3xl" : "sm:max-w-md";
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className={`${modalWidth} rounded-2xl`}>
+      <DialogContent className={`${modalWidth} rounded-2xl p-6`}>
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg font-black">
+          <DialogTitle className="flex items-center gap-2 text-lg font-black text-neutral-900">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             ¡Venta completada!
           </DialogTitle>
         </DialogHeader>
-        <div className="bg-neutral-50 rounded-xl border border-neutral-200 overflow-hidden flex justify-center py-4 px-2 max-h-[60vh] overflow-y-auto">
-          <div ref={componentRef} className="print-container">
+        <div className="bg-neutral-100/80 rounded-2xl border border-neutral-200/80 overflow-hidden flex justify-center py-6 px-3 max-h-[65vh] overflow-y-auto">
+          <div ref={componentRef} className="print-container bg-white shadow-lg rounded-sm my-1">
             <Ticket 
               invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
               ncf={lastInvoice?.ncf}

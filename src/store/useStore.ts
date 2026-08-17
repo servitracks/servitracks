@@ -458,9 +458,24 @@ export const useStore = create<AppState>()(
           return { movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] };
         }),
 
-      addOpenTab: (tab) => set((state) => ({ openTabs: [tab, ...state.openTabs] })),
-      updateOpenTab: (id, updates) => set((state) => ({ openTabs: state.openTabs.map(t => t.id === id ? { ...t, ...updates } : t) })),
-      deleteOpenTab: (id) => set((state) => ({ openTabs: state.openTabs.filter(t => t.id !== id) })),
+      addOpenTab: (tab) => {
+        set((state) => ({ openTabs: [tab, ...state.openTabs] }));
+        import("@/lib/supabaseSync").then(m => m.upsertOpenTabs([tab]));
+      },
+      updateOpenTab: (id, updates) => {
+        set((state) => {
+          const updated = state.openTabs.map(t => t.id === id ? { ...t, ...updates } : t);
+          const tabToSync = updated.find(t => t.id === id);
+          if (tabToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertOpenTabs([tabToSync]));
+          }
+          return { openTabs: updated };
+        });
+      },
+      deleteOpenTab: (id) => {
+        set((state) => ({ openTabs: state.openTabs.filter(t => t.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('open_tabs', id));
+      },
 
       addInvoice: (invoice) => {
         set((state) => {
@@ -469,6 +484,7 @@ export const useStore = create<AppState>()(
           
           if (invoice.status !== 'cancelled') {
             invoice.items.forEach(item => {
+              if (item.alreadyDeducted) return;
               if (item.productId) {
                 const productIndex = updatedProducts.findIndex(p => p.id === item.productId);
                 if (productIndex !== -1) {
@@ -478,7 +494,8 @@ export const useStore = create<AppState>()(
                       const ciIndex = updatedProducts.findIndex(p => p.id === ci.productId);
                       if (ciIndex !== -1) {
                         const subProd = updatedProducts[ciIndex];
-                        updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock - (ci.quantity * item.quantity) };
+                        const newStock = Math.max(0, subProd.stock - (ci.quantity * item.quantity));
+                        updatedProducts[ciIndex] = { ...subProd, stock: newStock };
                         newMovements.push({
                           id: crypto.randomUUID(),
                           tenantId: invoice.tenantId,
@@ -493,7 +510,8 @@ export const useStore = create<AppState>()(
                       }
                     });
                   } else {
-                    updatedProducts[productIndex] = { ...product, stock: product.stock - item.quantity };
+                    const newStock = Math.max(0, product.stock - item.quantity);
+                    updatedProducts[productIndex] = { ...product, stock: newStock };
                     newMovements.push({
                       id: crypto.randomUUID(),
                       tenantId: invoice.tenantId,
@@ -677,16 +695,25 @@ export const useStore = create<AppState>()(
           inspections: state.inspections.filter((i) => i.id !== id),
         })),
 
-      addQuote: (quote) =>
-        set((state) => ({ quotes: [quote, ...state.quotes] })),
+      addQuote: (quote) => {
+        set((state) => ({ quotes: [quote, ...state.quotes] }));
+        import("@/lib/supabaseSync").then(m => m.upsertQuotes([quote]));
+      },
       updateQuote: (id, updates) =>
-        set((state) => ({
-          quotes: state.quotes.map((q) =>
+        set((state) => {
+          const updated = state.quotes.map((q) =>
             q.id === id ? { ...q, ...updates, updatedAt: new Date().toISOString() } : q
-          ),
-        })),
-      deleteQuote: (id) =>
-        set((state) => ({ quotes: state.quotes.filter((q) => q.id !== id) })),
+          );
+          const quoteToSync = updated.find((q) => q.id === id);
+          if (quoteToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertQuotes([quoteToSync]));
+          }
+          return { quotes: updated };
+        }),
+      deleteQuote: (id) => {
+        set((state) => ({ quotes: state.quotes.filter((q) => q.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('quotes', id));
+      },
 
       // ──── PROVEEDORES ────────────────────────────────────────────────────────
       addSupplier: (supplier) =>

@@ -210,6 +210,7 @@ export interface WorkOrder {
   description: string;
   serviceIds?: string[]; // Multiple services selected
   customServices?: { name: string; price: number }[]; // Ad-hoc labor imported from quotes
+  customParts?: { name: string; price: number; quantity: number }[]; // External/custom parts imported from quotes
   parts?: { productId: string; quantity: number }[]; // Parts dispatched from warehouse
   estimatedTime?: string;
   notes?: string;
@@ -229,6 +230,7 @@ export interface InvoiceItem {
   laborPrice?: number; // Comisión del técnico extraída en el momento de la venta
   discount?: number;
   tax: number;
+  alreadyDeducted?: boolean;
 }
 
 export interface Invoice {
@@ -655,7 +657,7 @@ export interface Inspection {
 // MÓDULO DE COTIZACIONES (CLIENTES)
 // ════════════════════════════════════════════════════════════════════════════════
 
-export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'archived';
 
 export interface QuoteItem {
   id: string;
@@ -682,6 +684,7 @@ export interface Quote {
   discount?: number;
   total: number;
   notes?: string;
+  observation?: string; // Observaciones internas o motivo al archivar
   items: QuoteItem[];
   createdAt: string;
   updatedAt: string;

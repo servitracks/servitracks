@@ -1317,7 +1317,7 @@ export default function InventoryPage() {
                   <div>
                     <p className="text-[10px] text-neutral-500 font-medium">Total Estimado</p>
                     <p className="text-sm font-black text-neutral-900">
-                      RD$ {po.total.toLocaleString()}
+                      RD$ {po.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
                   </div>
                   <Button size="sm" className="rounded-lg bg-black text-white hover:bg-neutral-800 transition-colors h-8 text-xs" onClick={() => {
@@ -1485,9 +1485,9 @@ export default function InventoryPage() {
                           />
                         </TableCell>
                         <TableCell className="text-right text-neutral-500 font-mono">
-                          RD$ {(item.unitPrice || 0).toLocaleString()}
+                          RD$ {(item.unitPrice || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
-                        <TableCell className="text-right font-bold text-neutral-900">RD$ {((item.unitPrice || 0) * item.quantity).toLocaleString()}</TableCell>
+                        <TableCell className="text-right font-bold text-neutral-900">RD$ {((item.unitPrice || 0) * item.quantity).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                         <TableCell>
                           <Button
                             variant="ghost"
@@ -1513,7 +1513,7 @@ export default function InventoryPage() {
               <div className="p-5 sm:px-6 border-t border-neutral-100 bg-neutral-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
                 <div>
                   <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado</p>
-                  <p className="text-2xl font-black text-neutral-900 leading-none whitespace-nowrap">RD$ {selectedPo.total.toLocaleString()}</p>
+                  <p className="text-2xl font-black text-neutral-900 leading-none whitespace-nowrap">RD$ {selectedPo.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                   <Button 

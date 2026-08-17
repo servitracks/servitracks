@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useStore, Customer, Vehicle, Product, Service, SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES } from "@/store/useStore";
-import { Search, ChevronDown, Trash2, Plus, Percent, DollarSign, Package, Wrench } from "lucide-react";
+import { Search, ChevronDown, Trash2, Plus, Percent, DollarSign, Package, Wrench, Tag } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,7 @@ export default function QuotationCreateDialog({
   const [vehicleId, setVehicleId] = useState<string>("");
   const [validUntil, setValidUntil] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [observation, setObservation] = useState<string>("");
   const [status, setStatus] = useState<QuoteStatus>("draft");
   const [items, setItems] = useState<QuoteItem[]>([]);
 
@@ -85,6 +86,7 @@ export default function QuotationCreateDialog({
           setVehicleId(existingQuote.vehicleId);
           setValidUntil(existingQuote.validUntil || "");
           setNotes(existingQuote.notes || "");
+          setObservation(existingQuote.observation || "");
           setStatus(existingQuote.status);
           setItems(existingQuote.items);
           return;
@@ -106,6 +108,7 @@ export default function QuotationCreateDialog({
     setCustomerId("");
     setVehicleId("");
     setNotes("");
+    setObservation("");
     setStatus("draft");
     setItems([]);
     const defaultDate = new Date();
@@ -256,6 +259,23 @@ export default function QuotationCreateDialog({
     toast.success(`Agregada mano de obra "${name}"`);
   };
 
+  const handleAddCustomProduct = (customName?: string) => {
+    const name = customName?.trim() || "Repuesto / Artículo Libre";
+    const newItem: QuoteItem = {
+      id: `qi-ext-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      name,
+      quantity: 1,
+      unitPrice: 0,
+      taxPercentage: 18,
+      discountPercentage: 0,
+      total: 0,
+    };
+
+    newItem.total = calculateItemTotal(newItem);
+    setItems([...items, newItem]);
+    toast.success(`Agregado repuesto externo "${name}"`);
+  };
+
   const calculateItemTotal = (item: QuoteItem) => {
     const sub = item.quantity * item.unitPrice;
     const disc = sub * ((item.discountPercentage || 0) / 100);
@@ -305,6 +325,7 @@ export default function QuotationCreateDialog({
         discount: summary.discount,
         total: summary.total,
         notes: notes || undefined,
+        observation: observation || undefined,
         items,
       });
       toast.success("Cotización actualizada correctamente");
@@ -314,7 +335,7 @@ export default function QuotationCreateDialog({
       const quoteNumber = `COT-${new Date().getFullYear()}-${String(sequenceNumber).padStart(4, "0")}`;
       
       const newQuote: Quote = {
-        id: `q-${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId,
         customerId,
         vehicleId,
@@ -326,6 +347,7 @@ export default function QuotationCreateDialog({
         discount: summary.discount,
         total: summary.total,
         notes: notes || undefined,
+        observation: observation || undefined,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         items,
@@ -443,6 +465,7 @@ export default function QuotationCreateDialog({
                       {status === 'accepted' && 'Aceptada'}
                       {status === 'rejected' && 'Rechazada'}
                       {status === 'expired' && 'Expirada'}
+                      {status === 'archived' && 'Archivada'}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-xl z-[250]">
@@ -451,6 +474,7 @@ export default function QuotationCreateDialog({
                     <SelectItem value="accepted">Aceptada</SelectItem>
                     <SelectItem value="rejected">Rechazada</SelectItem>
                     <SelectItem value="expired">Expirada</SelectItem>
+                    <SelectItem value="archived">Archivada</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -468,7 +492,21 @@ export default function QuotationCreateDialog({
                       setNotes("Precios válidos por 15 días. Sujetos a cambios sin previo aviso.");
                     }
                   }}
-                  className="w-full min-h-[100px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
+                  className="w-full min-h-[80px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
+                />
+              </div>
+
+              {/* Observación / Motivo de Archivo */}
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-neutral-600 flex items-center justify-between">
+                  <span>Observación / Motivo de Archivo</span>
+                  <span className="text-[10px] text-neutral-400 font-normal">Opcional</span>
+                </Label>
+                <textarea 
+                  placeholder="Ej: Cotización archivada por presupuesto excedido del cliente, vehículo vendido o pieza descontinuada..." 
+                  value={observation}
+                  onChange={(e) => setObservation(e.target.value)}
+                  className="w-full min-h-[80px] text-xs p-3 rounded-xl border border-neutral-200 bg-white focus:outline-none focus:border-neutral-400 resize-y"
                 />
               </div>
 
@@ -509,9 +547,17 @@ export default function QuotationCreateDialog({
                   <Button
                     type="button"
                     onClick={() => { handleAddCustomLabor(itemSearch); setItemSearch(""); }}
-                    className="h-10 rounded-xl bg-black text-white hover:bg-neutral-800 font-bold text-xs px-4 whitespace-nowrap"
+                    className="h-10 rounded-xl bg-black text-white hover:bg-neutral-800 font-bold text-xs px-3 whitespace-nowrap"
                   >
                     + Mano de Obra
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => { handleAddCustomProduct(itemSearch); setItemSearch(""); }}
+                    variant="outline"
+                    className="h-10 rounded-xl border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-bold text-xs px-3 whitespace-nowrap"
+                  >
+                    + Artículo Libre / Externo
                   </Button>
                 </div>
 
@@ -604,10 +650,22 @@ export default function QuotationCreateDialog({
                               <div className="flex items-center gap-1.5">
                                 {item.productId ? (
                                   <Package className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
+                                ) : item.serviceId?.startsWith("custom-") || (!item.productId && !item.serviceId) ? (
+                                  <Tag className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
                                 ) : (
                                   <Wrench className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
                                 )}
-                                <span className="truncate max-w-[200px]">{item.name}</span>
+                                {!item.productId && (!item.serviceId || item.serviceId.startsWith("custom-")) ? (
+                                  <input
+                                    type="text"
+                                    value={item.name}
+                                    onChange={(e) => handleUpdateItem(item.id, { name: e.target.value })}
+                                    className="w-full bg-transparent font-semibold text-xs border-b border-dashed border-neutral-300 hover:border-neutral-500 focus:border-black focus:outline-none transition-colors"
+                                    placeholder="Nombre del artículo..."
+                                  />
+                                ) : (
+                                  <span className="truncate max-w-[200px]">{item.name}</span>
+                                )}
                               </div>
                             </td>
                             <td className="py-2 px-2 text-center">
