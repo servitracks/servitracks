@@ -489,7 +489,7 @@ export default function CajaPage() {
     const monto = techCommissionInfo.total;
 
     const nuevoMov: MovimientoCaja = {
-      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: crypto.randomUUID(),
       tenant_id: tenantId,
       caja_id: activeCaja.id,
       empleado_id: activeCaja.empleado_id,

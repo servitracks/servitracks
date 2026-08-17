@@ -648,6 +648,7 @@ export const useStore = create<AppState>()(
       addCajaMovement: (mov) =>
         set((state) => {
           state.addActivityLog({ action: 'caja_movement', details: `Movimiento de caja: ${mov.tipo} de RD$ ${mov.monto}`, module: 'CAJA' });
+          import("@/lib/supabaseSync").then(m => m.upsertMovimientosCaja([mov]));
           return {
             cajaMovements: [...state.cajaMovements, mov],
           };

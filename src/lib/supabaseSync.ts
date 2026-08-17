@@ -315,10 +315,15 @@ function cajaToDb(c: Caja) {
 }
 
 function dbToMovimientoCaja(row: any): MovimientoCaja {
-  return { id: row.id, tenant_id: row.tenant_id, caja_id: row.caja_id, empleado_id: row.empleado_id, tecnico_id: row.tecnico_id, tipo: row.tipo, concepto: row.concepto, monto: row.monto, monto_mano_obra: row.monto_mano_obra, metodo: row.metodo, creado_en: row.creado_en };
+  let tipo = row.tipo;
+  if (tipo === 'EGRESO' && row.concepto && (row.concepto.includes('[Pago Técnico]') || row.concepto.includes('Liquidación'))) {
+    tipo = 'PAGO_NOMINA';
+  }
+  return { id: row.id, tenant_id: row.tenant_id, caja_id: row.caja_id, empleado_id: row.empleado_id, tecnico_id: row.tecnico_id, tipo, concepto: row.concepto, monto: row.monto, monto_mano_obra: row.monto_mano_obra, metodo: row.metodo, creado_en: row.creado_en };
 }
 function movimientoCajaToDb(m: MovimientoCaja) {
-  return { id: m.id, tenant_id: m.tenant_id, caja_id: m.caja_id, empleado_id: m.empleado_id, tecnico_id: m.tecnico_id, tipo: m.tipo, concepto: m.concepto, monto: m.monto, monto_mano_obra: m.monto_mano_obra, metodo: m.metodo, creado_en: m.creado_en };
+  const safeTipo = (m.tipo === 'PAGO_NOMINA' || (m.tipo as string) === 'GASTO') ? 'EGRESO' : m.tipo;
+  return { id: m.id, tenant_id: m.tenant_id, caja_id: m.caja_id, empleado_id: m.empleado_id, tecnico_id: m.tecnico_id, tipo: safeTipo, concepto: m.concepto, monto: m.monto, monto_mano_obra: m.monto_mano_obra, metodo: m.metodo, creado_en: m.creado_en };
 }
 
 function dbToTechnician(row: any): Technician {
