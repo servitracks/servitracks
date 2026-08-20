@@ -205,49 +205,50 @@ export default function CotizacionesPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* KPI Cards — estilo SaaS ultra-compacto y 100% legible */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           {
             label: "Total Cotizado",
             value: `RD$ ${kpis.totalAmount.toLocaleString("es-DO")}`,
             icon: DollarSign,
-            color: "text-neutral-700",
-            bg: "bg-neutral-100",
+            iconBg: "bg-slate-100 text-slate-700 border-slate-200/60",
           },
           {
             label: "Cotizaciones Pendientes",
             value: kpis.pendingCount,
             icon: Calendar,
-            color: "text-blue-600",
-            bg: "bg-blue-50",
+            iconBg: "bg-blue-50 text-blue-600 border-blue-200/60",
           },
           {
             label: "Aprobadas",
             value: kpis.acceptedCount,
             icon: CheckCircle2,
-            color: "text-emerald-600",
-            bg: "bg-emerald-50",
+            iconBg: "bg-emerald-50 text-emerald-600 border-emerald-200/60",
           },
           {
             label: "Conversión de Presupuestos",
             value: `${kpis.conversionRate}%`,
             icon: FileCheck,
-            color: "text-violet-600",
-            bg: "bg-violet-50",
+            iconBg: "bg-violet-50 text-violet-600 border-violet-200/60",
           },
         ].map((kpi) => (
-          <Card key={kpi.label} className="border-neutral-100 shadow-sm">
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0", kpi.bg)}>
-                <kpi.icon className={cn("h-5 w-5", kpi.color)} />
-              </div>
-              <div>
-                <p className="text-xs font-medium text-neutral-500">{kpi.label}</p>
-                <p className="text-xl font-black text-neutral-900">{kpi.value}</p>
-              </div>
-            </CardContent>
-          </Card>
+          <div 
+            key={kpi.label} 
+            className="flex items-center gap-3 rounded-xl border border-neutral-200/80 p-3 bg-white shadow-2xs group transition-all"
+          >
+            <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg border flex-shrink-0 transition-transform group-hover:scale-105", kpi.iconBg)}>
+              <kpi.icon className="h-4.5 w-4.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 leading-tight">
+                {kpi.label}
+              </p>
+              <p className="text-base font-black tracking-tight text-neutral-900 leading-tight mt-0.5">
+                {kpi.value}
+              </p>
+            </div>
+          </div>
         ))}
       </div>
 

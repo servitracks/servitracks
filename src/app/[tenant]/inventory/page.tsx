@@ -23,6 +23,8 @@ import {
   Layers,
   ScanLine,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -506,6 +508,8 @@ export default function InventoryPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [kpiFilter, setKpiFilter] = useState<"all" | "low" | "out">("all");
+  const [sortField, setSortField] = useState<"name" | "salePrice" | "stock" | "margin">("margin");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
@@ -521,6 +525,32 @@ export default function InventoryPage() {
   const [adjustType, setAdjustType] = useState<"in" | "out" | "adjustment">("in");
   const [adjustReason, setAdjustReason] = useState("");
   const [isLookingUp, setIsLookingUp] = useState(false);
+
+  const productTableRef = useRef<HTMLDivElement>(null);
+  const comboTableRef = useRef<HTMLDivElement>(null);
+
+  const scrollTable = (ref: React.RefObject<HTMLDivElement | null>, direction: "left" | "right") => {
+    if (ref.current) {
+      ref.current.scrollBy({
+        left: direction === "left" ? -260 : 260,
+        behavior: "smooth",
+      });
+    }
+  };
+
+  const calculateMargin = (salePrice: number, costPrice: number): number => {
+    if (!salePrice || salePrice <= 0 || !costPrice || costPrice <= 0) return 0;
+    return Math.round(((salePrice - costPrice) / salePrice) * 100);
+  };
+
+  const handleSort = (field: "name" | "salePrice" | "stock" | "margin") => {
+    if (sortField === field) {
+      setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortOrder("desc");
+    }
+  };
 
   // Mapeo de categorías de UPCitemdb → categorías de ServiTracks
   const mapCategoryFromBarcode = (category: string): string => {
@@ -600,6 +630,54 @@ export default function InventoryPage() {
     const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
     return matchSearch && matchCat && p.isCombo;
   });
+
+  const sortedProducts = useMemo(() => {
+    return [...filteredProducts].sort((a, b) => {
+      let valA = 0;
+      let valB = 0;
+
+      if (sortField === "margin") {
+        valA = calculateMargin(a.salePrice, a.costPrice);
+        valB = calculateMargin(b.salePrice, b.costPrice);
+      } else if (sortField === "salePrice") {
+        valA = a.salePrice;
+        valB = b.salePrice;
+      } else if (sortField === "stock") {
+        valA = a.stock;
+        valB = b.stock;
+      } else if (sortField === "name") {
+        return sortOrder === "asc"
+          ? a.name.localeCompare(b.name)
+          : b.name.localeCompare(a.name);
+      }
+
+      return sortOrder === "asc" ? valA - valB : valB - valA;
+    });
+  }, [filteredProducts, sortField, sortOrder]);
+
+  const sortedCombos = useMemo(() => {
+    return [...filteredCombos].sort((a, b) => {
+      let valA = 0;
+      let valB = 0;
+
+      if (sortField === "margin") {
+        valA = calculateMargin(a.salePrice, a.costPrice);
+        valB = calculateMargin(b.salePrice, b.costPrice);
+      } else if (sortField === "salePrice") {
+        valA = a.salePrice;
+        valB = b.salePrice;
+      } else if (sortField === "stock") {
+        valA = a.stock;
+        valB = b.stock;
+      } else if (sortField === "name") {
+        return sortOrder === "asc"
+          ? a.name.localeCompare(b.name)
+          : b.name.localeCompare(a.name);
+      }
+
+      return sortOrder === "asc" ? valA - valB : valB - valA;
+    });
+  }, [filteredCombos, sortField, sortOrder]);
 
   const totalValue = products.reduce((acc, p) => acc + p.salePrice * p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
@@ -941,13 +1019,57 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {/* KPI Cards — clickeables para filtrar */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* KPI Cards — estilo SaaS compacto (Linear / Stripe) */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {([
-          { label: "Total Productos",  value: products.length,                          icon: Package,       color: "text-neutral-700", bg: "bg-neutral-50",  ring: "ring-neutral-400",  filterKey: "all" as const,  show: true },
-          { label: "Stock Bajo",       value: lowStockCount,                             icon: AlertTriangle, color: "text-amber-600",   bg: "bg-amber-50",   ring: "ring-amber-400",    filterKey: "low" as const,  show: true },
-          { label: "Sin Stock",        value: outOfStockCount,                           icon: X,             color: "text-rose-600",   bg: "bg-rose-50",    ring: "ring-rose-400",     filterKey: "out" as const,  show: true },
-          { label: "Valor Total",      value: `RD$ ${totalValue.toLocaleString("es-DO")}`, icon: TrendingUp,  color: "text-emerald-600", bg: "bg-emerald-50", ring: "ring-emerald-400",  filterKey: null,            show: isOwner },
+          { 
+            label: "Total Productos",  
+            value: products.length, 
+            formattedValue: products.length.toString(),                         
+            icon: Package,       
+            iconBg: "bg-slate-100 text-slate-700 border-slate-200/60",  
+            activeBorder: "border-blue-500/80 ring-1 ring-blue-500/20 bg-blue-50/10",
+            badgeBg: "bg-blue-50 text-blue-700 border-blue-200/80",
+            dotColor: "bg-blue-500",
+            filterKey: "all" as const,  
+            show: true 
+          },
+          { 
+            label: "Stock Bajo",       
+            value: lowStockCount, 
+            formattedValue: lowStockCount.toString(),                            
+            icon: AlertTriangle, 
+            iconBg: "bg-amber-50 text-amber-600 border-amber-200/60",   
+            activeBorder: "border-amber-500/80 ring-1 ring-amber-500/20 bg-amber-50/10",
+            badgeBg: "bg-amber-50 text-amber-700 border-amber-200/80",
+            dotColor: "bg-amber-500",
+            filterKey: "low" as const,  
+            show: true 
+          },
+          { 
+            label: "Sin Stock",        
+            value: outOfStockCount, 
+            formattedValue: outOfStockCount.toString(),                          
+            icon: X,             
+            iconBg: "bg-rose-50 text-rose-600 border-rose-200/60",    
+            activeBorder: "border-rose-500/80 ring-1 ring-rose-500/20 bg-rose-50/10",
+            badgeBg: "bg-rose-50 text-rose-700 border-rose-200/80",
+            dotColor: "bg-rose-500",
+            filterKey: "out" as const,  
+            show: true 
+          },
+          { 
+            label: "Valor Total",      
+            value: totalValue, 
+            formattedValue: `RD$ ${totalValue.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 
+            icon: TrendingUp,  
+            iconBg: "bg-emerald-50 text-emerald-600 border-emerald-200/60", 
+            activeBorder: "",
+            badgeBg: "",
+            dotColor: "",
+            filterKey: null,            
+            show: isOwner 
+          },
         ] as const).filter(kpi => kpi.show).map((kpi) => {
           const isActive = kpi.filterKey !== null && kpiFilter === kpi.filterKey;
           const isClickable = kpi.filterKey !== null;
@@ -958,30 +1080,45 @@ export default function InventoryPage() {
               disabled={!isClickable}
               onClick={() => {
                 if (!isClickable) return;
-                setKpiFilter(isActive ? "all" : kpi.filterKey!);
+                setKpiFilter(isActive && kpi.filterKey !== "all" ? "all" : kpi.filterKey!);
               }}
               className={cn(
-                "text-left rounded-xl border shadow-sm transition-all duration-200 w-full",
+                "flex flex-col justify-between text-left rounded-xl border p-3.5 sm:p-4 transition-all duration-150 w-full bg-white shadow-2xs group relative h-full",
                 isClickable
-                  ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]"
+                  ? "cursor-pointer hover:border-neutral-300 hover:shadow-xs active:scale-[0.995]"
                   : "cursor-default",
                 isActive
-                  ? `border-transparent ring-2 ${kpi.ring} bg-white`
-                  : "border-neutral-100 bg-white"
+                  ? `${kpi.activeBorder} bg-white`
+                  : "border-neutral-200/80"
               )}
             >
-              <div className="flex items-center gap-4 p-5">
-                <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0 transition-colors", kpi.bg)}>
-                  <kpi.icon className={cn("h-5 w-5", kpi.color)} />
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg border flex-shrink-0 transition-transform group-hover:scale-105", kpi.iconBg)}>
+                    <kpi.icon className="h-3.5 w-3.5" />
+                  </div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 truncate">{kpi.label}</p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-neutral-500">{kpi.label}</p>
-                  <p className="text-xl font-black text-neutral-900">{kpi.value}</p>
-                </div>
-                {isActive && (
-                  <span className="text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5 whitespace-nowrap">
+                {isActive && kpi.filterKey !== "all" && (
+                  <span className={cn("inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border flex-shrink-0 shadow-2xs", kpi.badgeBg)}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", kpi.dotColor)} />
                     Filtrando
                   </span>
+                )}
+              </div>
+
+              <div className="mt-2.5">
+                {kpi.filterKey === null ? (
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-xs font-bold text-neutral-500">RD$</span>
+                    <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-900">
+                      {totalValue.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-neutral-900 leading-none">
+                    {kpi.formattedValue}
+                  </p>
                 )}
               </div>
             </button>
@@ -989,86 +1126,163 @@ export default function InventoryPage() {
         })}
       </div>
 
-      {/* Tabs: Productos / Movimientos */}
+      {/* Tabs: Productos / Combos / Movimientos / Pedidos */}
       <Tabs defaultValue="products">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <TabsList className="bg-neutral-100 rounded-xl p-1">
-            <TabsTrigger value="products" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Productos</TabsTrigger>
-            <TabsTrigger value="combos" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Combos / Paquetes</TabsTrigger>
-            <TabsTrigger value="movements" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm">Movimientos</TabsTrigger>
-            <TabsTrigger value="pedidos" className="rounded-lg px-5 data-[state=active]:bg-white data-[state=active]:shadow-sm text-blue-600 data-[state=active]:text-blue-700">Pedidos (Auto)</TabsTrigger>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <TabsList className="bg-neutral-100/90 p-1 rounded-xl border border-neutral-200/60 inline-flex items-center gap-1 h-auto">
+            <TabsTrigger 
+              value="products" 
+              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+            >
+              Productos
+            </TabsTrigger>
+            <TabsTrigger 
+              value="combos" 
+              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+            >
+              Combos / Paquetes
+            </TabsTrigger>
+            <TabsTrigger 
+              value="movements" 
+              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+            >
+              Movimientos
+            </TabsTrigger>
+            <TabsTrigger 
+              value="pedidos" 
+              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-blue-600 transition-all data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-2xs"
+            >
+              Pedidos (Auto)
+            </TabsTrigger>
           </TabsList>
+
           {/* Search + filter */}
-          <div className="flex gap-3 w-full sm:w-auto">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
-              <Input placeholder="Buscar producto, SKU, marca..." className="rounded-full border-neutral-200 bg-white pl-10 h-9"
-                value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="flex items-center gap-2.5 w-full md:w-auto">
+            <div className="relative flex-1 md:w-64">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
+              <Input 
+                placeholder="Buscar producto, SKU, marca..." 
+                className="rounded-xl border-neutral-200/80 bg-white pl-9 h-9 text-xs focus:border-neutral-400 transition-colors"
+                value={search} 
+                onChange={(e) => setSearch(e.target.value)} 
+              />
             </div>
             <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v || "Todos")}>
-              <SelectTrigger className="w-36 h-9 rounded-full border-neutral-200 bg-white">
-                <Filter className="h-3.5 w-3.5 mr-1 text-neutral-400" />
+              <SelectTrigger className="w-36 h-9 rounded-xl border-neutral-200/80 bg-white text-xs font-semibold text-neutral-700 hover:border-neutral-300 transition-colors">
+                <Filter className="h-3.5 w-3.5 mr-1.5 text-neutral-400" />
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="Todos">Todos</SelectItem>
-                {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              <SelectContent className="rounded-xl border-neutral-200">
+                <SelectItem value="Todos" className="text-xs">Todos</SelectItem>
+                {CATEGORIES.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
         </div>
 
-        <TabsContent value="products" className="mt-4">
-          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
-            <Table>
-              <TableHeader className="bg-neutral-50/50">
-                <TableRow>
-                  <TableHead className="w-[280px]">Producto</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Precio Venta</TableHead>
-                  <TableHead>Stock</TableHead>
-                  {isOwner && <TableHead>Margen</TableHead>}
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-[50px]" />
+        <TabsContent value="products" className="mt-4 space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-neutral-500 font-medium">
+              {sortedProducts.length} producto{sortedProducts.length !== 1 ? "s" : ""} registrado{sortedProducts.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+
+          <div 
+            ref={productTableRef} 
+            style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
+            className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100"
+          >
+            <Table className="w-full text-xs min-w-[700px]">
+              <TableHeader className="bg-neutral-50/80">
+                <TableRow className="border-b border-neutral-200/80">
+                  <TableHead 
+                    className="min-w-[200px] cursor-pointer hover:text-neutral-900 select-none py-2.5 pl-3 text-xs"
+                    onClick={() => handleSort("name")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Producto
+                      {sortField === "name" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="w-[100px] font-bold text-neutral-900 py-2.5 text-xs text-center">Categoría</TableHead>
+                  <TableHead 
+                    className="w-[125px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
+                    onClick={() => handleSort("salePrice")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Precio Venta
+                      {sortField === "salePrice" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="w-[95px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
+                    onClick={() => handleSort("stock")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Stock
+                      {sortField === "stock" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  {isOwner && (
+                    <TableHead 
+                      className="w-[85px] cursor-pointer hover:text-neutral-900 select-none font-bold text-neutral-900 py-2.5 text-xs"
+                      onClick={() => handleSort("margin")}
+                    >
+                      <div className="flex items-center gap-1">
+                        Margen
+                        {sortField === "margin" ? (
+                          sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 text-neutral-400" />
+                        )}
+                      </div>
+                    </TableHead>
+                  )}
+                  <TableHead className="w-[105px] font-bold text-neutral-900 py-2.5 text-xs text-center">Estado</TableHead>
+                  <TableHead className="w-[45px] text-right pr-3 py-2.5 text-xs" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.length === 0 ? (
+                {sortedProducts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-32 text-center text-neutral-400">
+                    <TableCell colSpan={7} className="h-28 text-center text-neutral-400 text-xs">
                       No se encontraron productos.
                     </TableCell>
                   </TableRow>
-                ) : filteredProducts.map((product) => {
-                  const margin = product.costPrice > 0
-                    ? Math.round(((product.salePrice - product.costPrice) / product.salePrice) * 100)
-                    : 0;
+                ) : sortedProducts.map((product) => {
+                  const margin = calculateMargin(product.salePrice, product.costPrice);
                   return (
-                    <TableRow key={product.id} className="group hover:bg-neutral-50/50">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 group-hover:bg-black group-hover:text-white transition-colors">
-                            <Package className="h-4 w-4" />
+                    <TableRow key={product.id} className="group hover:bg-neutral-50/70 transition-colors">
+                      <TableCell className="py-2 pl-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-7 w-7 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 group-hover:bg-neutral-900 group-hover:text-white transition-colors">
+                            <Package className="h-3.5 w-3.5" />
                           </div>
-                          <div>
-                            <p className="font-semibold text-neutral-900 text-sm">{product.name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <p className="text-xs text-neutral-400 font-mono">{product.sku}</p>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-neutral-900 text-xs leading-snug line-clamp-1">{product.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <p className="text-[10px] text-neutral-400 font-mono font-medium">{product.sku}</p>
                               {product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0 ? (
                                 <>
-                                  {product.vehicleCompatibilities.slice(0, 2).map((c, i) => (
-                                    <Badge key={i} variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                  {product.vehicleCompatibilities.slice(0, 1).map((c, i) => (
+                                    <Badge key={i} variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
                                       {[c.make, c.model, c.year].filter(Boolean).join(" ")}
                                     </Badge>
                                   ))}
-                                  {product.vehicleCompatibilities.length > 2 && (
-                                    <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
-                                      +{product.vehicleCompatibilities.length - 2} más
+                                  {product.vehicleCompatibilities.length > 1 && (
+                                    <Badge variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                      +{product.vehicleCompatibilities.length - 1} más
                                     </Badge>
                                   )}
                                 </>
                               ) : (product.vehicleMake || product.vehicleModel || product.vehicleYear) ? (
-                                <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
+                                <Badge variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
                                   {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
                                 </Badge>
                               ) : null}
@@ -1076,41 +1290,41 @@ export default function InventoryPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">
+                      <TableCell className="py-2 text-center whitespace-nowrap">
+                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">
                           {product.category}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-semibold text-sm">
+                      <TableCell className="py-2 font-bold text-xs text-neutral-900 whitespace-nowrap">
                         RD$ {product.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        <span className="block text-[10px] font-normal text-neutral-400 mt-0.5">Base: RD$ {(product.salePrice / (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        <span className="block text-[9px] font-normal text-neutral-400">Base: RD$ {(product.salePrice / (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-2 whitespace-nowrap">
                         <div>
-                          <span className={cn("font-bold text-sm", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
+                          <span className={cn("font-bold text-xs", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
                             {product.stock}
                           </span>
-                          <span className="text-neutral-400 text-xs"> / mín {product.minStock}</span>
+                          <span className="text-neutral-400 text-[10px] font-medium"> / mín {product.minStock}</span>
                         </div>
                       </TableCell>
                       {isOwner && (
-                        <TableCell>
-                          <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
+                        <TableCell className="py-2 whitespace-nowrap">
+                          <span className="text-xs font-bold text-emerald-600">{margin}%</span>
                         </TableCell>
                       )}
-                      <TableCell>
+                      <TableCell className="py-2 text-center whitespace-nowrap">
                         {product.stock <= 0 ? (
-                          <Badge className="bg-rose-100 text-rose-700 border-none text-xs">Agotado</Badge>
+                          <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Agotado</Badge>
                         ) : product.stock <= product.minStock ? (
-                          <Badge className="bg-amber-100 text-amber-700 border-none text-xs">Stock Bajo</Badge>
+                          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Stock Bajo</Badge>
                         ) : (
-                          <Badge className="bg-emerald-100 text-emerald-700 border-none text-xs">Disponible</Badge>
+                          <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Disponible</Badge>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-2 text-right pr-3">
                         <DropdownMenu>
-                          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors">
-                            <MoreVertical className="h-4 w-4 text-neutral-400" />
+                          <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors ml-auto">
+                            <MoreVertical className="h-3.5 w-3.5 text-neutral-400" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
                             <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
@@ -1152,42 +1366,94 @@ export default function InventoryPage() {
         </TabsContent>
 
         {/* Combos Tab Content */}
-        <TabsContent value="combos" className="mt-4">
-          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
-            <Table>
+        <TabsContent value="combos" className="mt-4 space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-neutral-500 font-medium">
+              {sortedCombos.length} combo{sortedCombos.length !== 1 ? "s" : ""} registrado{sortedCombos.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+
+          <div 
+            ref={comboTableRef} 
+            style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
+            className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100"
+          >
+            <Table className="w-full text-xs min-w-[700px]">
               <TableHeader className="bg-neutral-50/50">
-                <TableRow>
-                  <TableHead className="w-[300px]">Combo / Paquete</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Costo Real</TableHead>
-                  <TableHead>Precio Venta</TableHead>
-                  <TableHead>Stock Posible</TableHead>
-                  {isOwner && <TableHead>Margen</TableHead>}
-                  <TableHead className="w-[50px]" />
+                <TableRow className="border-b border-neutral-200/80">
+                  <TableHead 
+                    className="min-w-[200px] cursor-pointer hover:text-neutral-900 select-none py-2.5 pl-3 text-xs"
+                    onClick={() => handleSort("name")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Combo / Paquete
+                      {sortField === "name" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead className="w-[100px] font-bold text-neutral-900 py-2.5 text-xs">Categoría</TableHead>
+                  <TableHead className="w-[110px] font-bold text-neutral-900 py-2.5 text-xs">Costo Real</TableHead>
+                  <TableHead 
+                    className="w-[125px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
+                    onClick={() => handleSort("salePrice")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Precio Venta
+                      {sortField === "salePrice" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  <TableHead 
+                    className="w-[95px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
+                    onClick={() => handleSort("stock")}
+                  >
+                    <div className="flex items-center gap-1 font-bold text-neutral-900">
+                      Stock Posible
+                      {sortField === "stock" && (
+                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                      )}
+                    </div>
+                  </TableHead>
+                  {isOwner && (
+                    <TableHead 
+                      className="w-[85px] cursor-pointer hover:text-neutral-900 select-none font-bold text-neutral-900 py-2.5 text-xs"
+                      onClick={() => handleSort("margin")}
+                    >
+                      <div className="flex items-center gap-1">
+                        Margen
+                        {sortField === "margin" ? (
+                          sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3 text-neutral-400" />
+                        )}
+                      </div>
+                    </TableHead>
+                  )}
+                  <TableHead className="w-[45px] text-right pr-3 py-2.5 text-xs" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredCombos.length === 0 ? (
+                {sortedCombos.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-32 text-center text-neutral-400">
+                    <TableCell colSpan={7} className="h-28 text-center text-neutral-400 text-xs">
                       No se encontraron combos o paquetes. Crea uno usando el botón "Nuevo".
                     </TableCell>
                   </TableRow>
-                ) : filteredCombos.map((combo) => {
-                  const margin = combo.costPrice > 0
-                    ? Math.round(((combo.salePrice - combo.costPrice) / combo.salePrice) * 100)
-                    : 0;
+                ) : sortedCombos.map((combo) => {
+                  const margin = calculateMargin(combo.salePrice, combo.costPrice);
                   return (
                     <TableRow key={combo.id} className="group hover:bg-neutral-50/50">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 text-emerald-600 transition-colors">
-                            <Layers className="h-4 w-4" />
+                      <TableCell className="py-2 pl-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-7 w-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 text-emerald-600 transition-colors">
+                            <Layers className="h-3.5 w-3.5" />
                           </div>
-                          <div>
-                            <p className="font-semibold text-neutral-900 text-sm">{combo.name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <p className="text-xs text-neutral-400 font-mono">{combo.sku}</p>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-neutral-900 text-xs leading-snug line-clamp-1">{combo.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <p className="text-[10px] text-neutral-400 font-mono">{combo.sku}</p>
                               <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
                                 {combo.comboItems?.length || 0} artículos
                               </Badge>
@@ -1236,34 +1502,36 @@ export default function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="movements" className="mt-4">
-          <div className="rounded-xl border border-neutral-100 bg-white shadow-sm overflow-hidden">
-            <Table>
-              <TableHeader className="bg-neutral-50/50">
-                <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Cantidad</TableHead>
-                  <TableHead>Motivo</TableHead>
-                  <TableHead>Fecha</TableHead>
+          <div className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto">
+            <Table className="w-full text-xs min-w-[650px]">
+              <TableHeader className="bg-neutral-50/80">
+                <TableRow className="border-b border-neutral-200/80">
+                  <TableHead className="py-2.5 pl-3 font-bold text-neutral-900 text-xs">Producto</TableHead>
+                  <TableHead className="w-[100px] py-2.5 font-bold text-neutral-900 text-xs text-center">Tipo</TableHead>
+                  <TableHead className="w-[85px] py-2.5 font-bold text-neutral-900 text-xs text-center">Cantidad</TableHead>
+                  <TableHead className="py-2.5 font-bold text-neutral-900 text-xs text-center">Motivo</TableHead>
+                  <TableHead className="w-[170px] py-2.5 pr-3 font-bold text-neutral-900 text-xs text-center">Fecha</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {movements.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="h-32 text-center text-neutral-400">Sin movimientos registrados.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="h-28 text-center text-neutral-400 text-xs">Sin movimientos registrados.</TableCell></TableRow>
                 ) : [...movements].reverse().map((m) => (
-                  <TableRow key={m.id} className="hover:bg-neutral-50/50">
-                    <TableCell className="font-medium text-sm">{m.productName}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {m.type === "in" ? <ArrowUp className="h-3.5 w-3.5 text-emerald-500" /> : m.type === "out" ? <ArrowDown className="h-3.5 w-3.5 text-rose-500" /> : <ArrowUpDown className="h-3.5 w-3.5 text-blue-500" />}
-                        <span className={cn("text-xs font-semibold", m.type === "in" ? "text-emerald-600" : m.type === "out" ? "text-rose-600" : "text-blue-600")}>
+                  <TableRow key={m.id} className="hover:bg-neutral-50/70 transition-colors">
+                    <TableCell className="py-2 pl-3 font-semibold text-xs text-neutral-900">{m.productName}</TableCell>
+                    <TableCell className="py-2 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {m.type === "in" ? <ArrowUp className="h-3 w-3 text-emerald-600" /> : m.type === "out" ? <ArrowDown className="h-3 w-3 text-rose-600" /> : <ArrowUpDown className="h-3 w-3 text-blue-600" />}
+                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border border-none", m.type === "in" ? "bg-emerald-50 text-emerald-700" : m.type === "out" ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700")}>
                           {m.type === "in" ? "Entrada" : m.type === "out" ? "Salida" : "Ajuste"}
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="font-bold">{m.quantity}</TableCell>
-                    <TableCell className="text-sm text-neutral-600">{m.reason}</TableCell>
-                    <TableCell className="text-xs text-neutral-400">{new Date(m.date).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</TableCell>
+                    <TableCell className="py-2 text-center font-bold text-xs text-neutral-900">{m.quantity}</TableCell>
+                    <TableCell className="py-2 text-center text-xs text-neutral-600 truncate max-w-[220px]">{m.reason}</TableCell>
+                    <TableCell className="py-2 pr-3 text-center text-[11px] text-neutral-500 font-medium whitespace-nowrap">
+                      {new Date(m.date).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" })}, {new Date(m.date).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

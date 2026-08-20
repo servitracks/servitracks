@@ -10,6 +10,7 @@ import StepPreviewEditor, { ImportRow } from "./StepPreviewEditor";
 import StepConfirm from "./StepConfirm";
 import { useStore } from "@/store/useStore";
 import SupplierFormDialog from "@/components/proveedores/SupplierFormDialog";
+import { cn } from "@/lib/utils";
 
 import { Supplier } from "@/store/types";
 
@@ -70,7 +71,12 @@ export default function ImportWizardModal({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent 
-        className="sm:max-w-3xl rounded-2xl max-h-[92vh] overflow-hidden flex flex-col p-0"
+        className={cn(
+          "rounded-2xl overflow-hidden flex flex-col p-0 transition-all duration-300",
+          step === 4 
+            ? "sm:max-w-6xl w-[96vw] max-w-[96vw] h-[92vh] max-h-[92vh]" 
+            : "sm:max-w-3xl max-h-[92vh]"
+        )}
       >
         {/* Header */}
         <DialogHeader className="px-6 pt-6 pb-0 flex-shrink-0">
@@ -123,7 +129,10 @@ export default function ImportWizardModal({
         </DialogHeader>
 
         {/* Step Content */}
-        <div className="flex-1 overflow-y-auto flex flex-col px-6 py-4">
+        <div className={cn(
+          "flex-1 flex flex-col px-6 py-4 min-h-0",
+          step === 4 ? "overflow-hidden" : "overflow-y-auto"
+        )}>
           {step === 1 && (
             <StepSourceSelect
               selected={sourceType}

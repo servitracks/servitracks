@@ -59,23 +59,124 @@ interface StepUploadProcessProps {
   selectedSupplierId: string;
 }
 
+function parseNumber(val: unknown): number {
+  if (typeof val === "number") return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  // Convert text, strip currency symbols, replace commas used as thousand separators
+  const str = String(val).replace(/[^0-9.-]/g, "").trim();
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}
+
+function getVal(raw: Record<string, unknown>, keyAliases: string[]): unknown {
+  const normKeys = Object.keys(raw).reduce((acc, k) => {
+    const cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+    acc[cleanKey] = raw[k];
+    return acc;
+  }, {} as Record<string, unknown>);
+
+  for (const alias of keyAliases) {
+    const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normKeys[cleanAlias] !== undefined && normKeys[cleanAlias] !== null && String(normKeys[cleanAlias]).trim() !== "") {
+      return normKeys[cleanAlias];
+    }
+  }
+  return undefined;
+}
+
+function autoDetectCategory(name: string, rawCategory?: string): string {
+  if (rawCategory && CATEGORIES.includes(rawCategory.trim())) {
+    return rawCategory.trim();
+  }
+  const upper = name.toUpperCase();
+  if (upper.includes("FRENO") || upper.includes("BANDA") || upper.includes("DISCO") || upper.includes("PASTILLA")) return "Frenos";
+  if (upper.includes("ACEITE") || upper.includes("LUBRICANTE") || upper.includes("VALVULINA") || upper.includes("GRASA")) return "Lubricantes";
+  if (upper.includes("FILTRO")) return "Filtros";
+  if (upper.includes("ROTULA") || upper.includes("RÓTULA") || upper.includes("TERMINAL") || upper.includes("SUSPENSION") || upper.includes("SUSPENSIÓN") || upper.includes("AMORTIGUADOR")) return "Suspensión";
+  if (upper.includes("NEUMATICO") || upper.includes("NEUMÁTICO") || upper.includes("GOMA") || upper.includes("LLANTA")) return "Neumáticos";
+  if (upper.includes("BATERIA") || upper.includes("BATERÍA") || upper.includes("BUJIA") || upper.includes("BUJÍA") || upper.includes("ELECTRICO") || upper.includes("ELÉCTRICO") || upper.includes("FUSIBLE")) return "Eléctrico";
+  if (upper.includes("TRANSMISION") || upper.includes("TRANSMISIÓN") || upper.includes("EMBRAGUE") || upper.includes("CLUTCH")) return "Transmisión";
+  return "Otros";
+}
+
+function autoExtractSku(name: string, explicitSku?: string): string {
+  if (explicitSku && explicitSku.trim() !== "") return explicitSku.trim();
+  
+  // Try to find code patterns like 8615-MD1447-TK or 58101-D7A10-TK-C or 56820-C1000
+  const match = name.match(/([A-Z0-9]{3,}(?:-[A-Z0-9]+)+)/i);
+  if (match && match[1]) {
+    return match[1].toUpperCase();
+  }
+  return "";
+}
+
 function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
+  const nameVal = String(getVal(raw, [
+    "name", "nombre", "producto", "descripcion", "descripción", 
+    "articulo", "artículo", "item", "detalle"
+  ]) ?? "").trim();
+
+  const explicitSku = String(getVal(raw, [
+    "sku", "codigo", "código", "referencia", "ref", "noparte", 
+    "no.parte", "numparte", "parte", "id"
+  ]) ?? "").trim();
+
+  const sku = autoExtractSku(nameVal, explicitSku);
+
+  const brand = String(getVal(raw, [
+    "brand", "marca", "fabricante"
+  ]) ?? "").trim();
+
+  const rawCat = String(getVal(raw, [
+    "category", "categoria", "categoría", "grupo", "linea", "línea"
+  ]) ?? "");
+
+  const category = autoDetectCategory(nameVal, rawCat);
+
+  const supplier = String(getVal(raw, [
+    "supplier", "proveedor", "distribuidor", "suplidor"
+  ]) ?? "").trim();
+
+  // Costo: Costo Unit., Costo Unitario, Precio Costo, Con ITBIS Unit., Costo Total, Costo
+  const rawCost = getVal(raw, [
+    "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto", 
+    "conitbisunit", "costo", "costototal"
+  ]);
+  const costPrice = parseNumber(rawCost);
+
+  // Precio Venta: Precio Unit., Precio Unitario, Precio Venta, Precio, Precio Total
+  const rawSale = getVal(raw, [
+    "salePrice", "preciounit", "preciounitario", "precioventa", "preciodeventa", 
+    "precio", "preciototal"
+  ]);
+  const salePrice = parseNumber(rawSale);
+
+  // Cantidad / Stock: Inv.Total, Inv Total, Cantidad, Stock, Qty, Existencia
+  const rawQty = getVal(raw, [
+    "invtotal", "invtotal.", "inv total", "quantity", "cantidad", "qty", 
+    "stock", "existencia", "existencias", "unidades"
+  ]);
+  const quantity = parseNumber(rawQty) || 1;
+  const stock = parseNumber(getVal(raw, ["stock", "existencia"])) || quantity;
+
+  const minStock = parseNumber(getVal(raw, ["minstock", "stockminimo", "stockmínimo"])) || 5;
+  const tax = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18;
+  const location = String(getVal(raw, ["location", "ubicacion", "ubicación", "estante", "tramo"]) ?? "").trim();
+
   return {
     _id: `row-${index}-${Date.now()}`,
-    name: String(raw.name ?? raw.Nombre ?? raw.NOMBRE ?? raw.producto ?? raw.Producto ?? ""),
-    sku: String(raw.sku ?? raw.SKU ?? raw.Codigo ?? raw.codigo ?? raw.código ?? raw.CODIGO ?? raw["Código"] ?? ""),
-    brand: String(raw.brand ?? raw.Marca ?? raw.marca ?? raw.MARCA ?? ""),
-    category: CATEGORIES.includes(String(raw.category ?? raw.Categoria ?? raw.categoria ?? raw.Categoría ?? raw["Categoría"] ?? "").trim())
-      ? String(raw.category ?? raw.Categoria ?? raw.categoria ?? raw.Categoría ?? raw["Categoría"] ?? "").trim()
-      : "Otros",
-    supplier: String(raw.supplier ?? raw.Proveedor ?? raw.proveedor ?? raw.PROVEEDOR ?? ""),
-    costPrice: Number(raw.costPrice ?? raw["Precio Costo"] ?? raw["precio costo"] ?? raw["Precio de Costo"] ?? raw.costo ?? raw.precio ?? raw.Precio ?? 0) || 0,
-    salePrice: Number(raw.salePrice ?? raw["Precio Venta"] ?? raw["precio venta"] ?? raw["Precio de Venta"] ?? 0) || 0,
-    quantity: Number(raw.quantity ?? raw.Quantity ?? raw.Cantidad ?? raw.cantidad ?? raw.CANTIDAD ?? raw.qty ?? 0) || 0,
-    stock: Number(raw.stock ?? raw.Stock ?? raw.STOCK ?? 0) || 0,
-    minStock: Number(raw.minStock ?? raw["Stock Minimo"] ?? raw["Stock Mínimo"] ?? 5) || 5,
-    tax: Number(raw.tax ?? raw.Impuesto ?? raw.ITBIS ?? 18) || 18,
-    location: String(raw.location ?? raw.Ubicacion ?? raw.Ubicación ?? raw.ubicacion ?? ""),
+    name: nameVal,
+    sku: sku,
+    brand: brand,
+    category: category,
+    supplier: supplier,
+    costPrice: costPrice,
+    salePrice: salePrice,
+    quantity: quantity,
+    stock: stock,
+    minStock: minStock,
+    tax: tax,
+    location: location,
     _hasError: false,
   };
 }
@@ -89,8 +190,28 @@ function parseCSVtoRows(file: File): Promise<ImportRow[]> {
         const workbook = XLSX.read(data, { type: "array" });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as Record<string, unknown>[];
-        const rows = jsonData.map((row, i) => toImportRow(row, i));
+        
+        // Intelligent header detection: find the row containing "Nombre", "Producto", "Inv", "Costo", or "Precio"
+        const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: false }) as unknown[][];
+        let headerRowIndex = 0;
+        if (rawRows && rawRows.length > 0) {
+          for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+            const row = rawRows[i];
+            if (Array.isArray(row)) {
+              const rowStr = row.map(cell => String(cell).toLowerCase()).join(" ");
+              if (rowStr.includes("nombre") || rowStr.includes("producto") || rowStr.includes("inv") || rowStr.includes("costo") || rowStr.includes("precio")) {
+                headerRowIndex = i;
+                break;
+              }
+            }
+          }
+        }
+
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRowIndex, defval: "", raw: false }) as Record<string, unknown>[];
+        const rows = jsonData
+          .map((row, i) => toImportRow(row, i))
+          .filter((r) => r.name.trim() !== "");
+
         resolve(rows);
       } catch (err) {
         reject(err);

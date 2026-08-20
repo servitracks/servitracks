@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { cn } from "@/lib/utils";
 import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
-  Search, ShoppingCart, X,
+  Search, ShoppingCart, X, Plus,
   Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
   Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList, Wallet
 } from "lucide-react";
@@ -668,83 +668,116 @@ export default function POSPage() {
           </div>
 
           {/* Category tabs */}
-          <div className="flex gap-1 px-4 pt-3 pb-2 overflow-x-auto shrink-0">
+          <div className="flex gap-1.5 px-4 pt-2.5 pb-2 overflow-x-auto shrink-0 custom-scrollbar">
             {CATEGORIES.map((cat) => (
               <button key={cat} onClick={() => setCategory(cat)}
-                className={cn("px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors",
-                  category === cat ? "bg-black text-white" : "bg-white text-neutral-500 hover:bg-neutral-100 border border-neutral-200")}>
+                className={cn("px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer",
+                  category === cat ? "bg-black text-white border-black shadow-sm scale-[1.02]" : "bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black border-neutral-200")}>
                 {cat}
               </button>
             ))}
           </div>
 
           {/* Product grid */}
-          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+          <div className="flex-1 overflow-y-auto px-3 sm:px-4 pt-3 pb-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(145px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(155px,1fr))] gap-3 items-start">
               {filteredProducts.map((product) => {
                 const inCart = cart.find((i) => i.id === product.id);
-                const isLowStock = product.stock > 0 && product.stock <= 5;
-                const isOutOfStock = product.stock <= 0;
+                const isService = product.category === "Servicios" || product.stock >= 9000 || product.sku?.startsWith("SRV") || product.name.toLowerCase().includes("alineación") || product.name.toLowerCase().includes("mantenimiento") || product.name.toLowerCase().includes("mano de obra");
+                const isLowStock = !isService && product.stock > 0 && product.stock <= 5;
+                const isOutOfStock = !isService && product.stock <= 0;
 
                 return (
                   <button key={product.id} onClick={() => addToCart(product)}
                     disabled={isOutOfStock}
                     className={cn(
-                      "relative text-left rounded-2xl border transition-all duration-200 group flex flex-col h-full",
+                      "relative text-left rounded-xl border transition-all duration-200 group flex flex-col h-auto min-w-0 bg-white shadow-2xs",
                       isOutOfStock
                         ? "opacity-60 cursor-not-allowed bg-neutral-100 border-neutral-200"
-                        : "bg-white border-neutral-200 hover:border-black hover:shadow-xl hover:-translate-y-1 active:scale-[0.98]",
-                      inCart && "border-black ring-2 ring-black ring-offset-2"
+                        : "border-neutral-200 hover:border-black hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98]",
+                      inCart && "border-black ring-2 ring-black ring-offset-1"
                     )}>
-                    <div className={cn("absolute top-0 left-0 right-0 h-1.5 rounded-t-2xl",
+                    {/* Barra Superior de Acento */}
+                    <div className={cn("absolute top-0 left-0 right-0 h-1 rounded-t-xl z-10",
                       product.category === "Lubricantes" ? "bg-amber-400"
-                      : product.category === "Filtros" ? "bg-blue-400"
-                      : product.category === "Frenos" ? "bg-rose-400"
-                      : product.category === "Suspensión" ? "bg-violet-400"
-                      : product.category === "Neumáticos" ? "bg-emerald-400"
+                      : product.category === "Filtros" ? "bg-blue-500"
+                      : product.category === "Frenos" ? "bg-rose-500"
+                      : product.category === "Suspensión" ? "bg-violet-500"
+                      : product.category === "Neumáticos" ? "bg-emerald-500"
                       : product.category === "Motor" ? "bg-orange-500"
-                      : product.category === "Servicios" ? "bg-neutral-900"
-                      : "bg-neutral-300")} />
-                    <div className="p-4 flex flex-col flex-1">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400 mb-1">
-                        {product.brand || "Genérico"}
-                      </span>
-                      <h3 className="text-sm font-extrabold text-neutral-900 leading-tight line-clamp-2 mb-2 group-hover:text-black transition-colors">
+                      : isService ? "bg-neutral-900"
+                      : "bg-neutral-400")} />
+
+                    <div className="p-2.5 flex flex-col min-w-0 pt-2.5">
+                      {/* Marca y Categoria en fila compacta */}
+                      <div className="flex items-center justify-between gap-1 mb-1 min-w-0">
+                        <span className="text-[9px] font-black uppercase tracking-wider text-neutral-400 truncate block max-w-[55%]">
+                          {product.brand || "Genérico"}
+                        </span>
+                        {product.category && (
+                          <span className={cn(
+                            "text-[8px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded-full shrink-0 border truncate max-w-[45%]",
+                            product.category === "Lubricantes" ? "bg-amber-50 text-amber-700 border-amber-200/80"
+                            : product.category === "Filtros" ? "bg-blue-50 text-blue-700 border-blue-200/80"
+                            : product.category === "Frenos" ? "bg-rose-50 text-rose-700 border-rose-200/80"
+                            : product.category === "Suspensión" ? "bg-violet-50 text-violet-700 border-violet-200/80"
+                            : product.category === "Neumáticos" ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
+                            : isService ? "bg-neutral-100 text-neutral-800 border-neutral-200"
+                            : "bg-neutral-50 text-neutral-600 border-neutral-200/70"
+                          )}>
+                            {product.category}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Nombre del Producto / Servicio */}
+                      <h3 className="text-xs font-bold text-neutral-900 leading-snug line-clamp-2 group-hover:text-black transition-colors my-0.5" title={product.name}>
                         {product.name}
                       </h3>
-                      <div className="mt-auto pt-2 flex flex-col gap-2">
-                        <div className="flex items-baseline gap-1 h-6">
+
+                      {/* Footer: Precio (Izquierda) + Stock/Servicio (Derecha) pegado al nombre */}
+                      <div className="mt-1.5 pt-0.5 flex items-center justify-between gap-1 min-w-0 w-full">
+                        <div className="flex items-baseline gap-0.5 min-w-0">
                           {product.salePrice > 0 ? (
                             <>
-                              <span className="text-[10px] font-bold text-neutral-400">RD$</span>
-                              <span className="text-lg font-black text-neutral-900">
+                              <span className="text-[8px] font-bold text-neutral-400 shrink-0">RD$</span>
+                              <span className="text-[11px] sm:text-xs font-black text-neutral-900 tracking-tight whitespace-nowrap">
                                 {product.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </>
                           ) : (
-                            <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded uppercase tracking-wider mt-1">Precio Variable</span>
+                            <span className="text-[8px] font-bold text-neutral-500 bg-neutral-100 px-1 py-0.5 rounded uppercase tracking-wider">Var.</span>
                           )}
                         </div>
-                        <div className="flex items-center">
+
+                        {/* Badge de Stock o Servicio ultra-compacto */}
+                        {isService ? (
+                          <div className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[8px] font-extrabold bg-neutral-900 text-white shrink-0">
+                            <Wrench className="h-2 w-2 text-neutral-300 shrink-0" />
+                            <span>Servicio</span>
+                          </div>
+                        ) : (
                           <div className={cn(
-                            "flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold",
-                            isOutOfStock ? "bg-rose-100 text-rose-600" :
-                            isLowStock ? "bg-amber-100 text-amber-700" :
-                            "bg-emerald-50 text-emerald-600"
+                            "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[8px] font-bold shrink-0 border",
+                            isOutOfStock ? "bg-rose-50 text-rose-600 border-rose-200" :
+                            isLowStock ? "bg-amber-50 text-amber-700 border-amber-200" :
+                            "bg-emerald-50 text-emerald-700 border-emerald-200/60"
                           )}>
                             {isOutOfStock ? (
-                              <><AlertTriangle className="h-3 w-3" /> Agotado</>
+                              <><AlertTriangle className="h-2 w-2 shrink-0" /> <span>Agotado</span></>
                             ) : isLowStock ? (
-                              <><Package className="h-3 w-3" /> Solo {product.stock}</>
+                              <><Package className="h-2 w-2 shrink-0" /> <span>{product.stock}</span></>
                             ) : (
-                              <><CheckCircle className="h-3 w-3" /> {product.stock} disp.</>
+                              <><CheckCircle className="h-2 w-2 shrink-0 text-emerald-600" /> <span>{product.stock} disp.</span></>
                             )}
                           </div>
-                        </div>
+                        )}
                       </div>
                     </div>
+
+                    {/* Badge de Cantidad en Carrito */}
                     {inCart && (
-                      <div className="absolute -top-2 -right-2 h-7 w-7 rounded-full bg-black text-white text-xs flex items-center justify-center font-black shadow-lg animate-in zoom-in duration-200 border-2 border-white">
+                      <div className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-black text-white text-[11px] flex items-center justify-center font-black shadow-lg border-2 border-white z-30">
                         {inCart.quantity}
                       </div>
                     )}
@@ -786,8 +819,18 @@ export default function POSPage() {
                 <span className="font-bold text-lg">Venta</span>
               </div>
               <div className="flex items-center gap-3">
-                {cart.length > 0 && (
-                  <button onClick={() => setCart([])} className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors">
+                {(cart.length > 0 || posCustomerId || posMechanicId || discount > 0) && (
+                  <button 
+                    onClick={() => { 
+                      setCart([]); 
+                      setPosCustomerId(""); 
+                      setPosMechanicId(""); 
+                      setDiscount(0); 
+                      setDiscountType("fixed");
+                      toast.info("Venta reiniciada");
+                    }} 
+                    className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer"
+                  >
                     Vaciar
                   </button>
                 )}
@@ -798,112 +841,135 @@ export default function POSPage() {
             </div>
 
             {/* ── Barra Superior de Opciones Rápidas: Cliente, Técnico y Descuento ── */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar">
+            <div className="grid grid-cols-3 gap-1.5 w-full">
               {/* Cliente */}
-              <Popover open={customerPopoverOpen} onOpenChange={setCustomerPopoverOpen}>
-                <PopoverTrigger className={cn(
-                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
-                  posCustomerId 
-                    ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
-                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
-                )}>
-                  <User className={cn("h-3.5 w-3.5", posCustomerId ? "text-neutral-300" : "text-neutral-400")} />
-                  <span className="max-w-[95px] truncate">
-                    {posCustomerId ? tenantCustomers.find((c) => c.id === posCustomerId)?.name ?? "Cliente" : "Cliente"}
-                  </span>
-                </PopoverTrigger>
-                <PopoverContent className="w-[280px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
-                  <Input 
-                    placeholder="Buscar por nombre, teléfono o RNC..." 
-                    value={posCustomerSearch}
-                    onChange={(e) => setPosCustomerSearch(e.target.value)}
-                    className="h-9 mb-2 text-xs rounded-lg border-neutral-200"
-                  />
-                  <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
-                    <button 
-                      onClick={() => { setPosCustomerId(""); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
-                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posCustomerId ? "bg-black text-white" : "hover:bg-neutral-100")}
-                    >
-                      Consumidor Final (Ticket Normal)
-                    </button>
-                    {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).map(c => (
+              <div className="relative w-full">
+                <Popover open={customerPopoverOpen} onOpenChange={setCustomerPopoverOpen}>
+                  <PopoverTrigger className={cn(
+                    "flex items-center justify-center gap-1.5 px-2 h-8 rounded-lg border text-[11px] font-bold transition-all w-full min-w-0",
+                    posCustomerId 
+                      ? "bg-neutral-900 text-white border-neutral-900 shadow-sm pr-6"
+                      : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                  )}>
+                    <User className={cn("h-3.5 w-3.5 shrink-0", posCustomerId ? "text-neutral-300" : "text-neutral-400")} />
+                    <span className="truncate">
+                      {posCustomerId ? tenantCustomers.find((c) => c.id === posCustomerId)?.name ?? "Cliente" : "Cliente"}
+                    </span>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[280px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
+                    <Input 
+                      placeholder="Buscar por nombre, teléfono o RNC..." 
+                      value={posCustomerSearch}
+                      onChange={(e) => setPosCustomerSearch(e.target.value)}
+                      className="h-9 mb-2 text-xs rounded-lg border-neutral-200"
+                    />
+                    <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
                       <button 
-                        key={c.id}
-                        onClick={() => { setPosCustomerId(c.id); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
-                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors flex flex-col", posCustomerId === c.id ? "bg-black text-white" : "hover:bg-neutral-100")}
+                        onClick={() => { setPosCustomerId(""); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
+                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posCustomerId ? "bg-black text-white" : "hover:bg-neutral-100 text-rose-600")}
                       >
-                        <div className="font-bold">{c.name}</div>
-                        {(c.phone || c.rnc) && (
-                          <div className={cn("text-[10px] mt-0.5", posCustomerId === c.id ? "text-neutral-300" : "text-neutral-500")}>
-                            {[c.phone, c.rnc ? `RNC: ${c.rnc}` : ''].filter(Boolean).join(" • ")}
-                          </div>
-                        )}
+                        Consumidor Final (Sin Cliente)
                       </button>
-                    ))}
-                    {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).length === 0 && (
-                      <div className="text-center text-xs text-neutral-400 py-4">No se encontraron clientes</div>
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Técnico */}
-              <Popover open={technicianPopoverOpen} onOpenChange={setTechnicianPopoverOpen}>
-                <PopoverTrigger className={cn(
-                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
-                  posMechanicId 
-                    ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
-                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
-                )}>
-                  <UserCog className={cn("h-3.5 w-3.5", posMechanicId ? "text-neutral-300" : "text-neutral-400")} />
-                  <span className="max-w-[95px] truncate">
-                    {posMechanicId ? technicians.find((t) => t.id === posMechanicId)?.name ?? "Técnico" : "Técnico"}
-                  </span>
-                </PopoverTrigger>
-                <PopoverContent className="w-[220px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="start">
-                  <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
-                    <button 
-                      onClick={() => { setPosMechanicId(""); setTechnicianPopoverOpen(false); }}
-                      className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posMechanicId ? "bg-black text-white" : "hover:bg-neutral-100")}
-                    >
-                      Sin asignar
-                    </button>
-                    {tenantTechnicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
-                      <button 
-                        key={t.id}
-                        onClick={() => { setPosMechanicId(t.id); setTechnicianPopoverOpen(false); }}
-                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors font-bold", posMechanicId === t.id ? "bg-black text-white text-left" : "hover:bg-neutral-100 text-left")}
-                      >
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Descuento */}
-              <Popover>
-                <PopoverTrigger className={cn(
-                  "flex items-center gap-1.5 px-3 h-8 rounded-lg border text-[11px] font-bold transition-all shrink-0",
-                  discount > 0
-                    ? discountType === "fixed"
-                      ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm"
-                      : "bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm"
-                    : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
-                )}>
-                  <Tag className={cn("h-3.5 w-3.5", discount > 0 ? (discountType === "fixed" ? "text-emerald-600" : "text-indigo-600") : "text-neutral-400")} />
-                  <span>{discount > 0 ? (discountType === "fixed" ? `RD$${discount}` : `${discount}%`) : "Descuento"}</span>
-                </PopoverTrigger>
-                <PopoverContent className="w-[250px] p-3 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="end">
-                  <div className="space-y-2.5">
-                    <div className="flex justify-between items-center text-xs font-bold text-neutral-700">
-                      <span>Aplicar Descuento</span>
-                      {discount > 0 && (
-                        <button type="button" onClick={() => setDiscount(0)} className="text-[10px] text-rose-600 font-bold hover:underline">
-                          Quitar
+                      {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).map(c => (
+                        <button 
+                          key={c.id}
+                          onClick={() => { setPosCustomerId(c.id); setCustomerPopoverOpen(false); setPosCustomerSearch(""); }}
+                          className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors flex flex-col", posCustomerId === c.id ? "bg-black text-white" : "hover:bg-neutral-100")}
+                        >
+                          <div className="font-bold">{c.name}</div>
+                          {(c.phone || c.rnc) && (
+                            <div className={cn("text-[10px] mt-0.5", posCustomerId === c.id ? "text-neutral-300" : "text-neutral-500")}>
+                              {[c.phone, c.rnc ? `RNC: ${c.rnc}` : ''].filter(Boolean).join(" • ")}
+                            </div>
+                          )}
                         </button>
+                      ))}
+                      {tenantCustomers.filter(c => c.name.toLowerCase().includes(posCustomerSearch.toLowerCase()) || (c.phone && c.phone.includes(posCustomerSearch)) || (c.rnc && c.rnc.includes(posCustomerSearch))).length === 0 && (
+                        <div className="text-center text-xs text-neutral-400 py-4">No se encontraron clientes</div>
                       )}
                     </div>
+                  </PopoverContent>
+                </Popover>
+                {posCustomerId && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setPosCustomerId(""); }}
+                    title="Quitar cliente"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-full transition-colors z-10 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Técnico */}
+              <div className="relative w-full">
+                <Popover open={technicianPopoverOpen} onOpenChange={setTechnicianPopoverOpen}>
+                  <PopoverTrigger className={cn(
+                    "flex items-center justify-center gap-1.5 px-2 h-8 rounded-lg border text-[11px] font-bold transition-all w-full min-w-0",
+                    posMechanicId 
+                      ? "bg-neutral-900 text-white border-neutral-900 shadow-sm pr-6"
+                      : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                  )}>
+                    <UserCog className={cn("h-3.5 w-3.5 shrink-0", posMechanicId ? "text-neutral-300" : "text-neutral-400")} />
+                    <span className="truncate">
+                      {posMechanicId ? technicians.find((t) => t.id === posMechanicId)?.name ?? "Técnico" : "Técnico"}
+                    </span>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[220px] p-2 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="center">
+                    <div className="max-h-[220px] overflow-y-auto space-y-1 custom-scrollbar">
+                      <button 
+                        onClick={() => { setPosMechanicId(""); setTechnicianPopoverOpen(false); }}
+                        className={cn("w-full text-left px-3 py-2 text-xs rounded-lg font-bold transition-colors", !posMechanicId ? "bg-black text-white" : "hover:bg-neutral-100 text-rose-600")}
+                      >
+                        Sin asignar
+                      </button>
+                      {tenantTechnicians.filter((t) => t.status === "active" || t.id === posMechanicId).map((t) => (
+                        <button 
+                          key={t.id}
+                          onClick={() => { setPosMechanicId(t.id); setTechnicianPopoverOpen(false); }}
+                          className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors font-bold", posMechanicId === t.id ? "bg-black text-white text-left" : "hover:bg-neutral-100 text-left")}
+                        >
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                {posMechanicId && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setPosMechanicId(""); }}
+                    title="Quitar técnico"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-full transition-colors z-10 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Descuento */}
+              <div className="relative w-full">
+                <Popover>
+                  <PopoverTrigger className={cn(
+                    "flex items-center justify-center gap-1.5 px-2 h-8 rounded-lg border text-[11px] font-bold transition-all w-full min-w-0",
+                    discount > 0
+                      ? discountType === "fixed"
+                        ? "bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm pr-6"
+                        : "bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm pr-6"
+                      : "bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-white hover:border-neutral-300"
+                  )}>
+                    <Tag className={cn("h-3.5 w-3.5 shrink-0", discount > 0 ? (discountType === "fixed" ? "text-emerald-600" : "text-indigo-600") : "text-neutral-400")} />
+                    <span className="truncate">{discount > 0 ? (discountType === "fixed" ? `RD$${discount}` : `${discount}%`) : "Descuento"}</span>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[250px] p-3 z-[200] shadow-xl rounded-xl border border-neutral-200 bg-white" align="end">
+                    <div className="space-y-2.5">
+                      <div className="flex justify-between items-center text-xs font-bold text-neutral-700">
+                        <span>Aplicar Descuento</span>
+                        {discount > 0 && (
+                          <button type="button" onClick={() => setDiscount(0)} className="text-[10px] text-rose-600 font-bold hover:underline cursor-pointer">
+                            Quitar
+                          </button>
+                        )}
+                      </div>
                     <div className="flex items-center gap-2">
                       {/* Segmented control con colores distintivos */}
                       <div className="flex bg-neutral-100 p-0.5 rounded-lg text-xs font-bold border border-neutral-200 shrink-0">
@@ -960,8 +1026,21 @@ export default function POSPage() {
                   </div>
                 </PopoverContent>
               </Popover>
+              {discount > 0 && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setDiscount(0); }}
+                  title="Quitar descuento"
+                  className={cn(
+                    "absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full transition-colors z-10 cursor-pointer",
+                    discountType === "fixed" ? "hover:bg-emerald-200 text-emerald-700" : "hover:bg-indigo-200 text-indigo-700"
+                  )}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </div>
           </div>
+        </div>
 
           <div className="flex-1 overflow-y-auto">
             {cart.length === 0 ? (

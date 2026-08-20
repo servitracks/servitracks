@@ -916,44 +916,64 @@ export default function CajaPage() {
       </div>
 
       {/* ── TOP METRICS ROW ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         <Card 
-          className="border-none bg-[#0f3b6c] shadow-sm rounded-2xl overflow-hidden text-white cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98]"
+          className="border-none bg-[#0f3b6c] shadow-2xs rounded-xl overflow-hidden text-white cursor-pointer transition-all hover:shadow-xs active:scale-[0.995]"
           onClick={() => setDetailsModalType('CASH_IN_BOX')}
         >
-          <CardContent className="p-5 flex flex-col justify-center h-full">
-            <span className="text-xs font-semibold text-blue-200 uppercase tracking-wider block mb-1">Efectivo en Caja</span>
-            <h3 className="text-3xl font-black">{formatRD(metrics.efectivoEsperado)}</h3>
+          <CardContent className="p-3.5 sm:p-4 flex flex-col justify-between h-full">
+            <span className="text-[11px] font-bold text-blue-200 uppercase tracking-wider block mb-2">Efectivo en Caja</span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xs font-bold text-blue-300">RD$</span>
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-white">
+                {metrics.efectivoEsperado.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
           </CardContent>
         </Card>
         
         <Card 
-          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          className="border-neutral-200/80 bg-white shadow-2xs rounded-xl overflow-hidden cursor-pointer transition-all hover:border-neutral-300 hover:shadow-xs active:scale-[0.995]"
           onClick={() => setDetailsModalType('SALES_CASH')}
         >
-          <CardContent className="p-5 flex flex-col justify-center h-full">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Efectivo</span>
-            <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.ingresosEfectivo)}</h3>
+          <CardContent className="p-3.5 sm:p-4 flex flex-col justify-between h-full">
+            <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider block mb-2">Ventas Efectivo</span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xs font-bold text-neutral-400">RD$</span>
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-900">
+                {metrics.ingresosEfectivo.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
           </CardContent>
         </Card>
 
         <Card 
-          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          className="border-neutral-200/80 bg-white shadow-2xs rounded-xl overflow-hidden cursor-pointer transition-all hover:border-neutral-300 hover:shadow-xs active:scale-[0.995]"
           onClick={() => setDetailsModalType('SALES_CARD')}
         >
-          <CardContent className="p-5 flex flex-col justify-center h-full">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Tarjeta</span>
-            <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.tarjetaTotal)}</h3>
+          <CardContent className="p-3.5 sm:p-4 flex flex-col justify-between h-full">
+            <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider block mb-2">Ventas Tarjeta</span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xs font-bold text-neutral-400">RD$</span>
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-900">
+                {metrics.tarjetaTotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
           </CardContent>
         </Card>
 
         <Card 
-          className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden cursor-pointer transition-transform hover:scale-[1.02] active:scale-[0.98] hover:border-black"
+          className="border-neutral-200/80 bg-white shadow-2xs rounded-xl overflow-hidden cursor-pointer transition-all hover:border-neutral-300 hover:shadow-xs active:scale-[0.995]"
           onClick={() => setDetailsModalType('SALES_TRANSFER')}
         >
-          <CardContent className="p-5 flex flex-col justify-center h-full">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-1">Ventas Transferencia</span>
-            <h3 className="text-3xl font-black text-neutral-800">{formatRD(metrics.transferenciaTotal)}</h3>
+          <CardContent className="p-3.5 sm:p-4 flex flex-col justify-between h-full">
+            <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wider block mb-2">Ventas Transferencia</span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-xs font-bold text-neutral-400">RD$</span>
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-900">
+                {metrics.transferenciaTotal.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
           </CardContent>
         </Card>
       </div>

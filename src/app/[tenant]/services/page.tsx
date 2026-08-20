@@ -242,36 +242,38 @@ export default function ServicesPage() {
       </div>
 
       {/* Grid */}
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 items-start">
         {filteredServices.length === 0 ? (
           <div className="col-span-full py-20 text-center text-neutral-400">
             <Layers className="h-10 w-10 mx-auto mb-3 opacity-20" />
             <p className="text-sm font-medium">No se encontraron servicios</p>
           </div>
         ) : filteredServices.map((service) => (
-          <Card key={service.id} className="group border-neutral-100 shadow-sm hover:shadow-md transition-all overflow-hidden border-l-4 border-l-neutral-900">
-            <CardContent className="p-5">
+          <Card key={service.id} className="group border-neutral-200/80 shadow-2xs hover:shadow-md transition-all overflow-hidden border-l-4 border-l-neutral-900 bg-white h-auto">
+            <CardContent className="p-3 sm:p-3.5 flex flex-col min-w-0">
               <div className="flex justify-between items-start">
-                <div className="space-y-1">
-                  <Badge variant="outline" className="bg-neutral-50 text-[10px] font-bold border-neutral-200 uppercase tracking-wider">
+                <div className="space-y-0.5 min-w-0 pr-1">
+                  <Badge variant="outline" className="bg-neutral-50 text-[9px] font-extrabold border-neutral-200 uppercase tracking-wider px-1.5 py-0 mb-0.5">
                     {service.category}
                   </Badge>
-                  <h3 className="font-bold text-neutral-900 leading-tight">{service.name}</h3>
-                  <div className="flex flex-wrap gap-2 mt-1 items-center">
+                  <h3 className="font-extrabold text-neutral-900 text-sm leading-snug">{service.name}</h3>
+                  <div className="flex flex-wrap gap-1.5 mt-1 items-center">
                     {service.price > 0 ? (
-                      <span className="text-xs font-black text-neutral-900">RD$ {service.price.toLocaleString()}</span>
+                      <span className="text-xs font-black text-neutral-900">
+                        RD$ {service.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
                     ) : (
-                      <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">Precio Variable</span>
+                      <span className="text-[9px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">Precio Variable</span>
                     )}
                     {service.tax === 18 && (
-                      <span className="text-[10px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
+                      <span className="text-[9px] font-bold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
                         +ITBIS
                       </span>
                     )}
                   </div>
                 </div>
                 <DropdownMenu>
-                  <DropdownMenuTrigger className="opacity-0 group-hover:opacity-100 h-8 w-8 flex items-center justify-center rounded-full hover:bg-neutral-100 transition-all">
+                  <DropdownMenuTrigger className="opacity-0 group-hover:opacity-100 h-7 w-7 flex items-center justify-center rounded-full hover:bg-neutral-100 transition-all shrink-0">
                     <MoreVertical className="h-4 w-4 text-neutral-400" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="rounded-xl border-neutral-100">
@@ -286,9 +288,9 @@ export default function ServicesPage() {
                 </DropdownMenu>
               </div>
               
-              <div className="mt-2 flex items-center justify-between border-t border-neutral-50 pt-2">
-                <div className="flex items-center gap-2 text-xs text-neutral-500">
-                  <Clock className="h-3.5 w-3.5 text-neutral-400" />
+              <div className="mt-1.5 pt-1.5 flex items-center justify-between border-t border-neutral-100/70">
+                <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+                  <Clock className="h-3 w-3 text-neutral-400 shrink-0" />
                   <span>{service.duration || "—"}</span>
                 </div>
                 {service.description && (
