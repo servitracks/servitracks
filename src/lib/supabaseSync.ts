@@ -264,6 +264,8 @@ export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTa
     customerId: row.customer_id,
     mechanicId: row.mechanic_id,
     orderId: row.order_id,
+    discount: row.discount || undefined,
+    discountType: row.discount_type || undefined,
     items: row.items,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -806,6 +808,8 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     customer_id: t.customerId,
     mechanic_id: t.mechanicId,
     order_id: t.orderId || null,
+    discount: t.discount || null,
+    discount_type: t.discountType || null,
     items: t.items,
     created_at: t.createdAt,
     updated_at: t.updatedAt

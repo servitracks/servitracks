@@ -284,6 +284,8 @@ export interface OpenTab {
   customerId: string;
   mechanicId: string;
   orderId: string | null;
+  discount?: number;
+  discountType?: 'fixed' | 'percent';
   items: OpenTabItem[];
   createdAt: string;
   updatedAt: string;

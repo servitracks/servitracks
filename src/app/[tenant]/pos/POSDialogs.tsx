@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck, FolderOpen } from "lucide-react";
+import { Banknote, CreditCard, Smartphone, CheckCircle2, Printer, X, Search, FileText, Check, ShieldCheck, FolderOpen, Tag, UserCog } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Wrench } from "lucide-react";
@@ -696,7 +696,7 @@ interface OpenTabsDialogProps {
 }
 
 export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: OpenTabsDialogProps) {
-  const { openTabs, deleteOpenTab, updateProduct, addMovement, tenants, products } = useStore();
+  const { openTabs, deleteOpenTab, updateProduct, addMovement, tenants, products, technicians, customers } = useStore();
   const tabs = openTabs.filter(t => t.tenantId === tenantId);
   const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
 
@@ -718,18 +718,40 @@ export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: Open
           ) : (
             <div className="space-y-3">
               {tabs.map((tab) => {
-                const total = tab.items.reduce((acc, i) => acc + (i.salePrice * i.quantity), 0);
+                const subtotal = tab.items.reduce((acc, i) => acc + (i.salePrice * i.quantity), 0);
+                const discAmount = tab.discount ? (tab.discountType === 'percent' ? (subtotal * tab.discount) / 100 : tab.discount) : 0;
+                const total = Math.max(0, subtotal - discAmount);
+
+                const tech = tab.mechanicId && tab.mechanicId !== 'none' ? technicians.find(t => t.id === tab.mechanicId) : null;
+                const customer = tab.customerId && tab.customerId !== 'walk-in' ? customers.find(c => c.id === tab.customerId) : null;
+                const displayName = customer ? customer.name : (tab.tabName || "Consumidor Final");
+
                 return (
                   <div key={tab.id} className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm flex items-center justify-between hover:border-amber-300 transition-colors group">
-                    <div>
-                      <h4 className="font-bold text-neutral-900">{tab.tabName}</h4>
-                      <p className="text-xs text-neutral-500 mt-1">
-                        {tab.items.length} artículos • Creada: {new Date(tab.createdAt).toLocaleString('es-DO')}
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-neutral-900">{displayName}</h4>
+                        {tech && (
+                          <Badge variant="outline" className="text-[10px] bg-neutral-100 text-neutral-700 font-semibold gap-1 py-0 px-2 border-neutral-200">
+                            <UserCog className="h-3 w-3" /> {tech.name}
+                          </Badge>
+                        )}
+                        {discAmount > 0 && (
+                          <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 font-bold gap-1 py-0 px-2 border-emerald-200">
+                            <Tag className="h-3 w-3" /> -RD$ {discAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })} {tab.discountType === 'percent' ? `(${tab.discount}%)` : ''}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-neutral-500">
+                        {tab.items.length} artículo{tab.items.length === 1 ? '' : 's'} • Creada: {new Date(tab.createdAt).toLocaleString('es-DO', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                       </p>
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <p className="text-sm font-black text-neutral-900">RD$ {total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        {discAmount > 0 && (
+                          <p className="text-[10px] text-neutral-400 line-through">RD$ {subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                        )}
                       </div>
                       <div className="flex gap-2">
                         <Button

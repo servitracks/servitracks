@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
-import { cn } from "@/lib/utils";
+import { cn, isServiceItem } from "@/lib/utils";
 import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X, Plus,
@@ -481,21 +481,23 @@ export default function POSPage() {
       orderId: activeOrderId || undefined,
       mechanicId: posMechanicId || undefined,
       items: cart.map((i) => {
+        const itemIsService = isServiceItem(i, tenantServices);
         let itemCommission = 0;
-        if (selectedTech && selectedTech.pagoNomina) {
+        if (selectedTech && selectedTech.pagoNomina && itemIsService) {
           if (selectedTech.tipoPago === "fijo") {
             itemCommission = selectedTech.pagoNomina;
           } else {
-            // Porcentaje del técnico seleccionado (ej: 30%)
+            // Porcentaje del técnico seleccionado (ej: 30%) aplicado UNICAMENTE en servicios
             itemCommission = (i.salePrice * selectedTech.pagoNomina) / 100;
           }
-        } else if (i.id.startsWith("labor-") || i.sku === "MANO-OBRA") {
-          itemCommission = i.salePrice;
+        } else if (itemIsService && (i.id.startsWith("labor-") || i.sku === "MANO-OBRA")) {
+          itemCommission = i.laborPrice ?? i.salePrice;
         }
 
         return { 
           id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           productId: i.id, 
+          serviceId: itemIsService ? ((i as any).serviceId || i.id) : undefined,
           name: i.name, 
           quantity: i.quantity, 
           unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
@@ -1107,10 +1109,9 @@ export default function POSPage() {
                 disabled={cart.length === 0}
                 onClick={() => {
                   if (cart.length === 0) return;
-                  if (!posCustomerId) {
-                    toast.error("Seleccione un cliente para guardar la cuenta");
-                    return;
-                  }
+                  
+                  const customerObj = tenantCustomers.find(c => c.id === posCustomerId);
+                  const tabName = customerObj ? customerObj.name : "Consumidor Final";
                   
                   // Descontar inventario inmediatamente
                   const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
@@ -1125,7 +1126,7 @@ export default function POSPage() {
                         productName: item.name,
                         type: "out",
                         quantity: item.quantity,
-                        reason: `Cuenta en Espera - Cliente: ${tenantCustomers.find(c => c.id === posCustomerId)?.name || 'Consumidor Final'}`,
+                        reason: `Cuenta en Espera - Cliente: ${tabName}`,
                         date: new Date().toISOString(),
                       });
                     });
@@ -1134,10 +1135,12 @@ export default function POSPage() {
                   const newTab = {
                     id: `tab-${Date.now()}`,
                     tenantId,
-                    tabName: tenantCustomers.find(c => c.id === posCustomerId)?.name || "Cliente Final",
+                    tabName,
                     customerId: posCustomerId || "walk-in",
                     mechanicId: posMechanicId || "none",
                     orderId: activeOrderId || null,
+                    discount: discount > 0 ? discount : 0,
+                    discountType: discount > 0 ? discountType : "fixed",
                     items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity })),
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
@@ -1194,9 +1197,16 @@ export default function POSPage() {
               // Limpiar la mesa
               clearSale();
               
-              // Cargar datos
+              // Cargar datos del cliente, técnico y descuento
               setPosCustomerId(tab.customerId === "walk-in" ? "" : tab.customerId);
               setPosMechanicId(tab.mechanicId === "none" ? "" : tab.mechanicId);
+              if (tab.discount && tab.discount > 0) {
+                setDiscount(tab.discount);
+                setDiscountType(tab.discountType || "fixed");
+              } else {
+                setDiscount(0);
+                setDiscountType("fixed");
+              }
               setActiveOrderId(tab.orderId);
               setCart(tab.items.map(i => ({
                 ...i,

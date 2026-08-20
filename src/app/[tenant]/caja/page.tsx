@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { 
   Wallet, Lock, ArrowDownLeft, ArrowUpRight, AlertTriangle, Plus, 
   CheckCircle2, Printer, Search, FileText, PiggyBank, Coins, 
-  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users,
+  History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users, User,
   CreditCard, Smartphone
 } from "lucide-react";
 import { useStore, Caja, MovimientoCaja, Empleado, Tenant, Invoice } from "@/store/useStore";
@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, isServiceItem } from "@/lib/utils";
 import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 // Dominican peso formatting helper
@@ -64,6 +64,7 @@ export default function CajaPage() {
     updateTenant,
     technicians = [],
     invoices = [],
+    services = [],
     updateInvoice,
     users = []
   } = useStore();
@@ -159,22 +160,29 @@ export default function CajaPage() {
     );
     
     pendingInvoices.forEach(inv => {
+      const tech = technicians.find(t => t.id === inv.mechanicId);
       (inv.items || []).forEach(item => {
         if (!item) return;
-        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-        if (isManoObra) {
-          globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-        } else {
-          let safeLabor = item.laborPrice || 0;
-          if (item.unitPrice && safeLabor > item.unitPrice) {
-            safeLabor = safeLabor / 100;
+        const isService = isServiceItem(item, services);
+        if (isService) {
+          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+          if (isManoObraDirecta) {
+            globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+          } else {
+            let safeLabor = item.laborPrice || 0;
+            if (item.unitPrice && safeLabor > item.unitPrice) {
+              safeLabor = safeLabor / 100;
+            }
+            if (safeLabor === 0 && tech?.pagoNomina && tech?.tipoPago === "porcentaje") {
+              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
+            }
+            globalTotal += safeLabor * (item.quantity || 1);
           }
-          globalTotal += safeLabor * (item.quantity || 1);
         }
       });
     });
     return globalTotal;
-  }, [invoices, tenantId]);
+  }, [invoices, tenantId, services, technicians]);
 
   // Helper to calculate pending labor sum for a technician
   const calculateTechCommission = (techId: string) => {
@@ -193,24 +201,36 @@ export default function CajaPage() {
       let invTotal = 0;
       (inv.items || []).forEach(item => {
         if (!item) return;
-        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-        if (isManoObra) {
-          invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-        } else {
-          let safeLabor = item.laborPrice || 0;
-          if (item.unitPrice && safeLabor > item.unitPrice) {
-            safeLabor = safeLabor / 100;
+        const isService = isServiceItem(item, services);
+        if (isService) {
+          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+          if (isManoObraDirecta) {
+            invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+          } else {
+            let safeLabor = item.laborPrice || 0;
+            if (item.unitPrice && safeLabor > item.unitPrice) {
+              safeLabor = safeLabor / 100;
+            }
+            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
+              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
+            }
+            invTotal += safeLabor * (item.quantity || 1);
           }
-          invTotal += safeLabor * (item.quantity || 1);
         }
       });
 
-      // Fallback si la factura no tiene laborPrice individual por item
+      // Fallback si la factura no tiene laborPrice individual por item (calculamos solo sobre los servicios de la factura)
       if (invTotal === 0 && tech.pagoNomina) {
-        if (tech.tipoPago === "fijo") {
-          invTotal = tech.pagoNomina;
-        } else {
-          invTotal = (inv.subtotal * tech.pagoNomina) / 100;
+        const servicesSubtotal = (inv.items || [])
+          .filter(item => isServiceItem(item, services))
+          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
+
+        if (servicesSubtotal > 0) {
+          if (tech.tipoPago === "fijo") {
+            invTotal = tech.pagoNomina;
+          } else {
+            invTotal = (servicesSubtotal * tech.pagoNomina) / 100;
+          }
         }
       }
 
@@ -296,22 +316,44 @@ export default function CajaPage() {
 
       (inv.items || []).forEach(item => {
         if (!item) return;
-        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-        if (isManoObra) {
-          const mTotal = ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-          manoObraTotal += mTotal;
-          if (mTotal > 0) nombresAplicables.push(item.name);
-        } else {
-          let safeLabor = item.laborPrice || 0;
-          if (item.unitPrice && safeLabor > item.unitPrice) {
-            safeLabor = safeLabor / 100;
+        const isService = isServiceItem(item, services);
+        if (isService) {
+          const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+          if (isManoObra) {
+            const mTotal = ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+            manoObraTotal += mTotal;
+            if (mTotal > 0) nombresAplicables.push(item.name);
+          } else {
+            let safeLabor = item.laborPrice || 0;
+            if (item.unitPrice && safeLabor > item.unitPrice) {
+              safeLabor = safeLabor / 100;
+            }
+            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
+              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
+            }
+            const cTotal = safeLabor * (item.quantity || 1);
+            comisionTotal += cTotal;
+            if (cTotal > 0) nombresAplicables.push(item.name);
           }
-          const cTotal = safeLabor * (item.quantity || 1);
-          comisionTotal += cTotal;
-          if (cTotal > 0) nombresAplicables.push(item.name);
         }
       });
       
+      // Fallback si no hubo comisión por item directo pero hay subtotal de servicios
+      if (comisionTotal === 0 && manoObraTotal === 0 && tech.pagoNomina) {
+        const servicesSubtotal = (inv.items || [])
+          .filter(item => isServiceItem(item, services))
+          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
+
+        if (servicesSubtotal > 0) {
+          if (tech.tipoPago === "fijo") {
+            comisionTotal = tech.pagoNomina;
+          } else {
+            comisionTotal = (servicesSubtotal * tech.pagoNomina) / 100;
+          }
+          nombresAplicables.push("Comisión por servicios de la factura");
+        }
+      }
+
       const totalFila = comisionTotal + manoObraTotal;
 
       return {
@@ -329,7 +371,7 @@ export default function CajaPage() {
     });
 
     return { total: totalGlobal, items: filteredItems };
-  }, [pendingTechInvoices, technicians, selectedTechToPay]);
+  }, [pendingTechInvoices, technicians, selectedTechToPay, services]);
 
   // Histórico de liquidaciones de caja
   const historicalLiquidaciones = useMemo(() => {
@@ -1117,20 +1159,23 @@ export default function CajaPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-neutral-50 border-b border-neutral-100 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
-                  <th className="p-4 w-40 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('creado_en')}>
+                <tr className="bg-neutral-50/80 border-b border-neutral-100 text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
+                  <th className="py-3.5 px-4 w-28 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('creado_en')}>
                     Hora {sortConfig?.key === 'creado_en' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="p-4 w-32 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('tipo')}>
+                  <th className="py-3.5 px-4 w-36 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('tipo')}>
                     Tipo {sortConfig?.key === 'tipo' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="p-4 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('concepto')}>
-                    Concepto {sortConfig?.key === 'concepto' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  <th className="py-3.5 px-4 cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('concepto')}>
+                    Concepto / Detalles {sortConfig?.key === 'concepto' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="p-4 w-32 text-center cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('metodo')}>
+                  <th className="py-3.5 px-4 w-44 hidden md:table-cell">
+                    Responsable / Técnico
+                  </th>
+                  <th className="py-3.5 px-4 w-36 text-center cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('metodo')}>
                     Método {sortConfig?.key === 'metodo' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="p-4 w-32 text-right cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('monto')}>
+                  <th className="py-3.5 px-4 w-36 text-right cursor-pointer hover:bg-neutral-100 transition-colors" onClick={() => requestSort('monto')}>
                     Monto {sortConfig?.key === 'monto' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
                 </tr>
@@ -1138,7 +1183,7 @@ export default function CajaPage() {
               <tbody className="divide-y divide-neutral-100">
                 {processedActiveMovements.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="p-10 text-center text-neutral-400 font-semibold">
+                    <td colSpan={6} className="p-10 text-center text-neutral-400 font-semibold">
                       No se encontraron movimientos registrados.
                     </td>
                   </tr>
@@ -1148,6 +1193,11 @@ export default function CajaPage() {
                     const isEgreso = ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA'].includes(mov.tipo);
                     const matchingInvoice = findInvoiceForMovement(mov);
                     const isClickable = !!matchingInvoice;
+
+                    // Resolve technician or employee responsible
+                    const techId = mov.tecnico_id || matchingInvoice?.mechanicId;
+                    const techName = techId ? technicians.find(t => t.id === techId)?.name : null;
+                    const empName = mov.empleado_id ? tenantUsers.find(u => u.id === mov.empleado_id)?.name : null;
 
                     return (
                       <tr 
@@ -1160,38 +1210,75 @@ export default function CajaPage() {
                         }}
                         className={cn(
                           "transition-colors",
-                          isClickable ? "hover:bg-blue-50/40 cursor-pointer" : "hover:bg-neutral-50/50"
+                          isClickable ? "hover:bg-blue-50/50 cursor-pointer" : "hover:bg-neutral-50/60"
                         )}
                       >
-                        <td className="p-4 text-neutral-500 font-medium">
-                          {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
+                        <td className="py-3.5 px-4 text-neutral-500 font-medium whitespace-nowrap">
+                          {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true })}
                         </td>
-                        <td className="p-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           <Badge className={cn(
-                            "rounded-full px-3 py-0.5 text-[10px] font-bold border-none",
-                            isIngreso ? "bg-emerald-600 text-white" : isEgreso ? "bg-rose-600 text-white" : "bg-neutral-600 text-white"
+                            "rounded-full px-2.5 py-0.5 text-[10px] font-bold border shadow-2xs",
+                            isIngreso ? "bg-emerald-50 text-emerald-700 border-emerald-200" : 
+                            isEgreso ? "bg-rose-50 text-rose-700 border-rose-200" : 
+                            "bg-neutral-100 text-neutral-700 border-neutral-200"
                           )}>
                             <span className="flex items-center gap-1">
-                              {isIngreso ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                              {isIngreso ? <ArrowDownLeft className="h-3 w-3 text-emerald-600" /> : <ArrowUpRight className="h-3 w-3 text-rose-600" />}
                               {mov.tipo === 'GASTO_CAJA_CHICA' ? 'Caja Chica' : mov.tipo === 'INGRESO' ? 'Ingreso' : mov.tipo}
                             </span>
                           </Badge>
                         </td>
-                        <td className="p-4 font-semibold text-neutral-800 max-w-sm truncate">
-                          <div className="flex items-center gap-2">
-                            <span>{mov.concepto}</span>
+                        <td className="py-3.5 px-4 text-neutral-800">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <span className="font-semibold text-neutral-900 block">{mov.concepto}</span>
+                              {matchingInvoice?.customerName && (
+                                <span className="text-[11px] text-neutral-500 font-medium flex items-center gap-1 mt-0.5">
+                                  <User className="h-3 w-3 text-neutral-400" />
+                                  Cliente: {matchingInvoice.customerName}
+                                </span>
+                              )}
+                            </div>
                             {isClickable && (
-                              <Badge variant="outline" className="text-[9px] font-bold border-blue-200 bg-blue-50 text-blue-700 rounded-md py-0 px-1 hover:bg-blue-100 transition-colors">
+                              <Badge variant="outline" className="text-[10px] font-bold border-blue-200 bg-blue-50 text-blue-700 rounded-md py-0.5 px-2 hover:bg-blue-100 transition-colors w-fit self-start sm:self-auto">
                                 Editar Factura
                               </Badge>
                             )}
                           </div>
                         </td>
-                        <td className="p-4 text-center text-neutral-500 font-medium">
-                          {mov.metodo === 'EFECTIVO' ? '—' : mov.metodo}
+                        <td className="py-3.5 px-4 text-neutral-600 hidden md:table-cell whitespace-nowrap">
+                          {techName ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100">
+                              <Users className="h-3 w-3" /> {techName}
+                            </span>
+                          ) : empName ? (
+                            <span className="text-[11px] font-medium text-neutral-600">
+                              {empName}
+                            </span>
+                          ) : (
+                            <span className="text-neutral-400 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          {mov.metodo === 'EFECTIVO' ? (
+                            <span className="inline-flex items-center justify-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                              <Wallet className="h-3 w-3 text-emerald-600" /> EFECTIVO
+                            </span>
+                          ) : mov.metodo === 'TARJETA' ? (
+                            <span className="inline-flex items-center justify-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70">
+                              <CreditCard className="h-3 w-3 text-blue-600" /> TARJETA
+                            </span>
+                          ) : mov.metodo === 'TRANSFERENCIA' ? (
+                            <span className="inline-flex items-center justify-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-violet-50 text-violet-700 border border-violet-200/70">
+                              <Smartphone className="h-3 w-3 text-violet-600" /> TRANSF.
+                            </span>
+                          ) : (
+                            <span className="text-neutral-400 text-xs">—</span>
+                          )}
                         </td>
                         <td className={cn(
-                          "p-4 text-right font-bold text-sm tabular-nums",
+                          "py-3.5 px-4 text-right font-extrabold text-sm tabular-nums whitespace-nowrap",
                           isIngreso ? "text-emerald-600" : "text-rose-500"
                         )}>
                           {isIngreso ? "+" : "-"}{formatRD(mov.monto)}

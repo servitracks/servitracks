@@ -5,11 +5,12 @@ import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { Wallet, Activity, ArrowRight, ShieldAlert, BadgeCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatRD } from "@/lib/utils";
+import { formatRD, isServiceItem } from "@/lib/utils";
 
 export default function MisComisionesPage() {
   const { tenant } = useParams();
   const tenants = useStore((s) => s.tenants);
+  const services = useStore((s) => s.services);
   const currentTenant = tenants.find((t) => t.slug === tenant);
   const tenantId = currentTenant?.id ?? "";
 
@@ -46,23 +47,45 @@ export default function MisComisionesPage() {
 
   const { totalComision, itemsPendientes } = useMemo(() => {
     let globalTotal = 0;
+    const tech = miPerfilTecnico;
     const items = pendingInvoices.map(inv => {
       let comisionTotal = 0;
       let manoObraTotal = 0;
 
       (inv.items || []).forEach(item => {
         if (!item) return;
-        const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-        if (isManoObra) {
-          manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-        } else {
-          let safeLabor = item.laborPrice || 0;
-          if (item.unitPrice && safeLabor > item.unitPrice) {
-            safeLabor = safeLabor / 100;
+        const isService = isServiceItem(item, services);
+        if (isService) {
+          const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
+          if (isManoObra) {
+            manoObraTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
+          } else {
+            let safeLabor = item.laborPrice || 0;
+            if (item.unitPrice && safeLabor > item.unitPrice) {
+              safeLabor = safeLabor / 100;
+            }
+            if (safeLabor === 0 && tech?.pagoNomina && tech?.tipoPago === "porcentaje") {
+              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
+            }
+            comisionTotal += safeLabor * (item.quantity || 1);
           }
-          comisionTotal += safeLabor * (item.quantity || 1);
         }
       });
+
+      // Fallback si la factura no tiene laborPrice individual por item
+      if (comisionTotal === 0 && manoObraTotal === 0 && tech?.pagoNomina) {
+        const servicesSubtotal = (inv.items || [])
+          .filter(item => isServiceItem(item, services))
+          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
+
+        if (servicesSubtotal > 0) {
+          if (tech.tipoPago === "fijo") {
+            comisionTotal = tech.pagoNomina;
+          } else {
+            comisionTotal = (servicesSubtotal * tech.pagoNomina) / 100;
+          }
+        }
+      }
       
       const totalFila = comisionTotal + manoObraTotal;
       globalTotal += totalFila;
@@ -77,7 +100,7 @@ export default function MisComisionesPage() {
     });
 
     return { totalComision: globalTotal, itemsPendientes: items };
-  }, [pendingInvoices]);
+  }, [pendingInvoices, miPerfilTecnico, services]);
 
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
