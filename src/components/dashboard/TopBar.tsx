@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield, Menu, CloudUpload, FileText, Package, Car } from "lucide-react";
+import { Bell, Search, User, Headphones, LogOut, MessageSquare, Save, Shield, Menu, CloudUpload, FileText, Package, Car, Building2, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -373,6 +373,15 @@ export function TopBar({ onMenuClick }: TopBarProps) {
               <DropdownMenuItem onClick={handleOpenProfile} className="rounded-lg py-2 cursor-pointer gap-2">
                 <User className="h-4 w-4 text-neutral-400" /> Perfil
               </DropdownMenuItem>
+
+              {(currentUser?.role === 'owner' || currentUser?.role === 'superadmin' || activeRole === 'owner' || activeRole === 'superadmin') && (
+                <DropdownMenuItem 
+                  onClick={() => navigate(`/${tenantSlug}/admin-panel`)} 
+                  className="rounded-lg py-2 cursor-pointer gap-2 text-emerald-600 font-semibold hover:text-emerald-700 hover:bg-emerald-50 focus:bg-emerald-50 focus:text-emerald-700 transition-colors"
+                >
+                  <Building2 className="h-4 w-4 text-emerald-600" /> Panel Administrador
+                </DropdownMenuItem>
+              )}
 
               <DropdownMenuItem onClick={handleSupport} className="rounded-lg py-2 cursor-pointer gap-2">
                 <Headphones className="h-4 w-4 text-neutral-400" /> Soporte

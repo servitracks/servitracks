@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import { useParams } from "@/lib/next-compat";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { cleanBaseUrl, cleanApiKey } from "@/lib/evolutionApi";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -319,12 +320,48 @@ export default function Conversations() {
       return;
     }
 
-    // 2. Send via WaSender API
-    if (currentTenant?.wasenderApiKey) {
+    // 2. Send via WhatsApp Provider (Evolution API or WaSender)
+    const isEvolution = currentTenant?.waProvider === "evolution" || (!currentTenant?.wasenderApiKey && currentTenant?.evolutionApiKey);
+
+    if (isEvolution) {
+      try {
+        const evoUrl = cleanBaseUrl(currentTenant?.evolutionBaseUrl);
+        const evoKey = cleanApiKey(currentTenant?.evolutionApiKey);
+        const evoInstance = currentTenant?.evolutionInstanceName || currentTenant?.slug || "autocheck";
+        let cleanPhone = conv.phone.replace(/[^0-9]/g, "");
+        if (cleanPhone.length === 10 && (cleanPhone.startsWith("809") || cleanPhone.startsWith("829") || cleanPhone.startsWith("849"))) {
+          cleanPhone = "1" + cleanPhone;
+        }
+
+        const res = await fetch(`${evoUrl}/message/sendText/${evoInstance}`, {
+          method: "POST",
+          headers: {
+            "apikey": evoKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            number: cleanPhone,
+            text: text,
+          }),
+        });
+
+        if (res.ok) {
+          if (msg) {
+            await supabase.from("wa_messages").update({ status: "delivered" }).eq("id", msg.id);
+            setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, status: "delivered" } : m));
+          }
+        } else {
+          const errData = await res.json().catch(() => null);
+          console.warn("Evolution API send error:", errData);
+          toast.warning(`Guardado en DB. Error Evolution API: ${errData?.message || res.statusText}`);
+        }
+      } catch (e: any) {
+        toast.warning("Mensaje guardado. Sin conexión a Evolution API.");
+      }
+    } else if (currentTenant?.wasenderApiKey) {
       try {
         const edgeFunctionUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy`;
         
-        // Exact format required by wasenderapi.com/api/send-message
         const payload = type === "text" 
           ? { 
               to: conv.phone, 
@@ -359,7 +396,6 @@ export default function Conversations() {
           console.warn("WaSender API error:", errMsg, data);
           toast.warning(`Guardado en DB. Error WaSender: ${errMsg}`);
         } else {
-          // Update message status to delivered
           if (msg) {
             await supabase.from("wa_messages").update({ status: "delivered" }).eq("id", msg.id);
             setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, status: "delivered" } : m));
@@ -641,7 +677,7 @@ export default function Conversations() {
                   }
 
                   return (
-                    <div key={msg.id} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-2 group`}>
+                    <div key={`${msg.id}-${idx}`} className={`flex ${isSent ? "justify-end" : "justify-start"} mb-2 group`}>
                       <div className={`max-w-[75%] relative rounded-2xl px-4 py-2 text-[15px] shadow-sm ${isSent ? "bg-[#d9fdd3] text-[#111b21] rounded-tr-md" : "bg-white text-[#111b21] rounded-tl-md border border-neutral-100"}`}>
                         {showTail && (
                           <div className={`absolute top-0 w-3 h-3 ${isSent ? "-right-2 bg-[#d9fdd3]" : "-left-2 bg-white"}`}

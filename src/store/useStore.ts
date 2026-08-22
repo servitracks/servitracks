@@ -1207,6 +1207,23 @@ export const useStore = create<AppState>()(
             isAuthenticated: false,
           };
         }
+        if (_persistedState) {
+          if (Array.isArray((_persistedState as any).tenants)) {
+            (_persistedState as any).tenants = (_persistedState as any).tenants.map((t: any) => ({
+              ...t,
+              evolutionBaseUrl: (!t.evolutionBaseUrl || t.evolutionBaseUrl.includes('ip_de_tu_vps') || t.evolutionBaseUrl.includes('evolution.servitracks.com') || !t.evolutionBaseUrl.startsWith('http')) ? 'https://wa.servitracks.com' : t.evolutionBaseUrl,
+              evolutionApiKey: (!t.evolutionApiKey || t.evolutionApiKey.includes('ip_de_tu_vps')) ? 'servitracks_evolution_secret_key_2026' : t.evolutionApiKey,
+            }));
+          }
+          if ((_persistedState as any).currentTenant) {
+            const ct = (_persistedState as any).currentTenant;
+            (_persistedState as any).currentTenant = {
+              ...ct,
+              evolutionBaseUrl: (!ct.evolutionBaseUrl || ct.evolutionBaseUrl.includes('ip_de_tu_vps') || ct.evolutionBaseUrl.includes('evolution.servitracks.com') || !ct.evolutionBaseUrl.startsWith('http')) ? 'https://wa.servitracks.com' : ct.evolutionBaseUrl,
+              evolutionApiKey: (!ct.evolutionApiKey || ct.evolutionApiKey.includes('ip_de_tu_vps')) ? 'servitracks_evolution_secret_key_2026' : ct.evolutionApiKey,
+            };
+          }
+        }
         return _persistedState;
       },
       partialize: (state: AppState) => ({

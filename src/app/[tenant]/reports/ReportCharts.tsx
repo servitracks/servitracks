@@ -3,29 +3,37 @@
 import { useState, useEffect } from "react";
 import {
   Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip,
-  Line, LineChart, Cell, Pie, PieChart, Legend,
+  Line, LineChart, Cell, Pie, PieChart, Legend, Area, AreaChart,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowUpRight } from "lucide-react";
+import { TrendingUp, DollarSign, PieChart as PieIcon, BarChart2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const monthlyRevenue = [
-  { name: "Ene", total: 145000 }, { name: "Feb", total: 162000 },
-  { name: "Mar", total: 138000 }, { name: "Abr", total: 189000 },
-  { name: "May", total: 210000 }, { name: "Jun", total: 175000 },
-  { name: "Jul", total: 230000 }, { name: "Ago", total: 215000 },
-  { name: "Sep", total: 198000 }, { name: "Oct", total: 240000 },
-  { name: "Nov", total: 265000 }, { name: "Dic", total: 290000 },
-];
+const PIE_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#64748b"];
 
-const PIE_COLORS = ["#000", "#52525b", "#a1a1aa", "#d4d4d8"];
-
-interface ReportChartsProps {
-  topProducts: { name: string; qty: number; revenue: number }[];
-  statusData: { name: string; value: number }[];
+interface ChartTimePoint {
+  name: string;
+  ingresos: number;
+  egresos: number;
+  neto: number;
 }
 
-export default function ReportCharts({ topProducts, statusData }: ReportChartsProps) {
+interface ReportChartsProps {
+  timeSeriesData: ChartTimePoint[];
+  topProducts: { name: string; qty: number; revenue: number }[];
+  statusData: { name: string; value: number }[];
+  paymentData: { name: string; value: number }[];
+  periodLabel: string;
+}
+
+export default function ReportCharts({
+  timeSeriesData,
+  topProducts,
+  statusData,
+  paymentData,
+  periodLabel,
+}: ReportChartsProps) {
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -33,87 +41,198 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
     return () => clearTimeout(timer);
   }, []);
 
+  const totalPeriodRevenue = timeSeriesData.reduce((sum, d) => sum + d.ingresos, 0);
+  const totalPeriodExpenses = timeSeriesData.reduce((sum, d) => sum + d.egresos, 0);
+
   return (
-    <>
-      {/* Revenue line chart */}
-      <Card className="border-neutral-100 shadow-sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-lg font-bold">Ingresos Mensuales 2026</CardTitle>
-              <p className="text-xs text-neutral-400 mt-0.5">Proyección anual completa</p>
-            </div>
-            <Badge className="bg-emerald-100 text-emerald-700 border-none rounded-full gap-1">
-              <ArrowUpRight className="h-3 w-3" /> +22% vs 2025
-            </Badge>
+    <div className="space-y-6">
+      {/* Dynamic Revenue & Expenses Area / Line Chart */}
+      <Card className="border border-neutral-200/80 shadow-xs rounded-3xl bg-white p-5 sm:p-6 overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-5 border-b border-neutral-100">
+          <div>
+            <CardTitle className="text-base sm:text-lg font-black text-neutral-900 flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-emerald-600" />
+              Flujo Financiero en Vivo ({periodLabel})
+            </CardTitle>
+            <p className="text-xs text-neutral-500 font-medium mt-0.5">
+              Comparativa de ingresos cobrados vs. egresos de caja registrados
+            </p>
           </div>
-        </CardHeader>
-        <CardContent className="h-[280px] w-full">
-          {isMounted && (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 text-emerald-800 font-bold text-xs border border-emerald-200/70">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              Ingresos: RD$ {totalPeriodRevenue.toLocaleString("es-DO")}
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-50 text-rose-800 font-bold text-xs border border-rose-200/70">
+              <span className="h-2 w-2 rounded-full bg-rose-500" />
+              Gastos: RD$ {totalPeriodExpenses.toLocaleString("es-DO")}
+            </span>
+          </div>
+        </div>
+
+        <div className="h-[280px] w-full pt-4">
+          {isMounted ? (
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-              <LineChart data={monthlyRevenue}>
-                <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
-                <Tooltip
-                  contentStyle={{ borderRadius: "12px", border: "1px solid #f0f0f0", boxShadow: "0 10px 20px -5px rgba(0,0,0,0.1)", fontSize: "12px" }}
-                  formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Ingresos"]}
+              <AreaChart data={timeSeriesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                  </linearGradient>
+                  <linearGradient id="colorEgresos" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+                <YAxis
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
                 />
-                <Line type="monotone" dataKey="total" stroke="#000" strokeWidth={2.5}
-                  dot={{ fill: "#000", r: 3 }} activeDot={{ r: 6 }} />
-              </LineChart>
+                <Tooltip
+                  contentStyle={{
+                    borderRadius: "16px",
+                    border: "1px solid #e2e8f0",
+                    boxShadow: "0 10px 25px -5px rgba(0,0,0,0.1)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                  formatter={(v: any, name: any) => [
+                    `RD$ ${Number(v || 0).toLocaleString("es-DO")}`,
+                    name === "ingresos" ? "Ingresos Cobrados" : name === "egresos" ? "Gastos Operativos" : "Ganancia Neta",
+                  ]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="ingresos"
+                  stroke="#10b981"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#colorIngresos)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="egresos"
+                  stroke="#ef4444"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#colorEgresos)"
+                />
+              </AreaChart>
             </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-xs text-neutral-400 animate-pulse">
+              Cargando gráfico...
+            </div>
           )}
-        </CardContent>
+        </div>
       </Card>
 
-      {/* Bottom charts */}
+      {/* 2-Column Auxiliary Charts */}
       <div className="grid gap-6 lg:grid-cols-5">
-        <Card className="lg:col-span-3 border-neutral-100 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold">Top Productos / Servicios</CardTitle>
-          </CardHeader>
-          <CardContent className="h-[260px] w-full">
-            {topProducts.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-neutral-400 text-sm">Sin datos de ventas.</div>
-            ) : isMounted ? (
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <BarChart data={topProducts} layout="vertical">
-                  <XAxis type="number" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false}
-                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                  <YAxis type="category" dataKey="name" stroke="#aaa" fontSize={10} tickLine={false} axisLine={false} width={150} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: "12px", border: "1px solid #f0f0f0", fontSize: "12px" }}
-                    formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Ingresos"]}
-                  />
-                  <Bar dataKey="revenue" fill="#000" radius={[0, 4, 4, 0]} barSize={20} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : null}
-          </CardContent>
+        {/* Top Repuestos & Servicios */}
+        <Card className="lg:col-span-3 border border-neutral-200/80 shadow-xs rounded-3xl bg-white p-5 sm:p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-4 border-b border-neutral-100">
+              <div>
+                <CardTitle className="text-base font-bold text-neutral-900 flex items-center gap-2">
+                  <BarChart2 className="h-4 w-4 text-neutral-700" />
+                  Top Repuestos & Servicios Más Rentables
+                </CardTitle>
+                <p className="text-xs text-neutral-500 font-medium mt-0.5">Ranking por volumen de facturación</p>
+              </div>
+            </div>
+
+            <div className="h-[250px] w-full pt-3">
+              {topProducts.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-neutral-400 text-xs font-medium">
+                  Sin ventas registradas en el período.
+                </div>
+              ) : isMounted ? (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                  <BarChart data={topProducts} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <XAxis
+                      type="number"
+                      stroke="#94a3b8"
+                      fontSize={10}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      stroke="#475569"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                      width={130}
+                    />
+                    <Tooltip
+                      contentStyle={{ borderRadius: "14px", border: "1px solid #e2e8f0", fontSize: "12px", fontWeight: 600 }}
+                      formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Facturación"]}
+                    />
+                    <Bar dataKey="revenue" fill="#0f172a" radius={[0, 6, 6, 0]} barSize={18} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : null}
+            </div>
+          </div>
         </Card>
 
-        <Card className="lg:col-span-2 border-neutral-100 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-bold">Estado de Órdenes</CardTitle>
-          </CardHeader>
-          <CardContent className="w-full">
-            {statusData.length === 0 ? (
-              <div className="flex items-center justify-center h-40 text-neutral-400 text-sm">Sin órdenes.</div>
-            ) : isMounted ? (
-              <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0}>
-                <PieChart>
-                  <Pie data={statusData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
-                    {statusData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip contentStyle={{ borderRadius: "12px", border: "1px solid #f0f0f0", fontSize: "12px" }} />
-                  <Legend iconType="circle" iconSize={8}
-                    formatter={(v) => <span className="text-xs text-neutral-600">{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : null}
-          </CardContent>
+        {/* Distribución de Cobros y Métodos */}
+        <Card className="lg:col-span-2 border border-neutral-200/80 shadow-xs rounded-3xl bg-white p-5 sm:p-6 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-4 border-b border-neutral-100">
+              <div>
+                <CardTitle className="text-base font-bold text-neutral-900 flex items-center gap-2">
+                  <PieIcon className="h-4 w-4 text-neutral-700" />
+                  Métodos de Cobro
+                </CardTitle>
+                <p className="text-xs text-neutral-500 font-medium mt-0.5">Distribución en el período</p>
+              </div>
+            </div>
+
+            <div className="w-full pt-2">
+              {paymentData.length === 0 ? (
+                <div className="flex items-center justify-center h-48 text-neutral-400 text-xs font-medium">
+                  Sin cobros registrados.
+                </div>
+              ) : isMounted ? (
+                <ResponsiveContainer width="100%" height={230} minWidth={0} minHeight={0}>
+                  <PieChart>
+                    <Pie
+                      data={paymentData}
+                      cx="50%"
+                      cy="48%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {paymentData.map((_, i) => (
+                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: "14px", border: "1px solid #e2e8f0", fontSize: "12px", fontWeight: 600 }}
+                      formatter={(v: any) => [`RD$ ${Number(v || 0).toLocaleString("es-DO")}`, "Monto"]}
+                    />
+                    <Legend
+                      iconType="circle"
+                      iconSize={8}
+                      formatter={(v) => <span className="text-xs text-neutral-700 font-semibold">{v}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : null}
+            </div>
+          </div>
         </Card>
       </div>
-    </>
+    </div>
   );
 }

@@ -102,11 +102,19 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'owner';
 
+  const isSuperAdmin = (currentUser?.role as string) === 'superadmin' || currentUser?.email === 'admin@servitracks.com';
+
   const filteredNavigation = [...navigation].filter((item) => {
     if (!item.roles.includes(activeRole)) return false;
 
+    // Si es Superadmin, ve todo
+    if (isSuperAdmin) return true;
+
     // Filtros de SaaS por plan/override
     if (item.href === "/conversaciones" && !isModuleEnabled(currentTenant, "whatsapp")) return false;
+    if (item.href === "/nomina" && !isModuleEnabled(currentTenant, "nomina_comisiones")) return false;
+    if (item.href === "/mis-comisiones" && !isModuleEnabled(currentTenant, "nomina_comisiones")) return false;
+    if (item.href === "/proveedores" && !isModuleEnabled(currentTenant, "proveedores_cuentas")) return false;
 
     return true;
   }).sort((a, b) => {

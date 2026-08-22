@@ -13,7 +13,7 @@ import { useHydration } from "@/store/useHydration";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
 import React from "react";
 
-import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
+import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { logout } from "@/lib/storage";
@@ -23,7 +23,7 @@ export default function DashboardLayout() {
   const params = useParams();
   const navigate = useNavigate();
   const hydrated = useHydration();
-  const { tenants, updateTenant, currentUserId, users } = useStore();
+  const { tenants, updateTenant, currentUserId, users, globalConfig } = useStore();
   const location = useLocation();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSoporteModal, setShowSoporteModal] = useState(false);
@@ -44,6 +44,24 @@ export default function DashboardLayout() {
     ? tenants.find((t) => t.slug === tenantSlug) ?? null
     : null;
   const isPending = currentTenant?.status === "pending";
+
+  // Auto-cleaner global de almacenamiento local para eliminar configuraciones obsoletas de VPS/IP
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        Object.keys(localStorage).forEach((key) => {
+          const val = localStorage.getItem(key);
+          if (val && (val.includes("ip_de_tu_vps") || val.includes("8080"))) {
+            const cleaned = val
+              .replaceAll("http://ip_de_tu_vps:8080", "https://wa.servitracks.com")
+              .replaceAll("ip_de_tu_vps:8080", "https://wa.servitracks.com")
+              .replaceAll("ip_de_tu_vps", "https://wa.servitracks.com");
+            localStorage.setItem(key, cleaned);
+          }
+        });
+      } catch (e) {}
+    }
+  }, []);
 
   // Redirigir a login si no está autenticado o si el tenant no existe (una vez hidratado el store)
   useEffect(() => {
@@ -182,6 +200,8 @@ export default function DashboardLayout() {
       "/activity": ['owner', 'superadmin'],
       "/maintenance": ['owner', 'cashier', 'superadmin'],
       "/settings": ['owner', 'superadmin'],
+      "/admin-panel": ['owner', 'superadmin'],
+      "/sucursales": ['owner', 'superadmin'],
     };
 
     // Buscar si la ruta actual coincide con una de las rutas protegidas
@@ -1006,6 +1026,21 @@ export default function DashboardLayout() {
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} unreadChatsCount={unreadChatsCount} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar onMenuClick={() => setSidebarOpen(true)} />
+
+        {/* Banner de Anuncio Global del Sistema (Emitido por Superadmin) */}
+        {globalConfig?.systemAnnouncement?.active && globalConfig.systemAnnouncement.message && (
+          <div className={`px-4 py-2.5 flex items-center justify-center gap-2.5 text-xs font-bold shadow-xs ${
+            globalConfig.systemAnnouncement.type === 'warning'
+              ? 'bg-amber-500 text-amber-950'
+              : globalConfig.systemAnnouncement.type === 'success'
+                ? 'bg-emerald-600 text-white'
+                : 'bg-blue-600 text-white'
+          }`}>
+            <Megaphone className="h-4 w-4 flex-shrink-0 animate-bounce" />
+            <span>{globalConfig.systemAnnouncement.message}</span>
+          </div>
+        )}
+
         {/* Banner de cuenta regresiva de prueba */}
         {isTrialActive && (
           <div className="bg-black px-4 py-2.5 flex items-center justify-center gap-3 text-white text-xs font-bold shadow-sm">

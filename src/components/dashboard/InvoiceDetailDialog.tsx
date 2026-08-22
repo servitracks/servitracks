@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Printer, Save, FileText, X, Plus } from "lucide-react";
+import { Printer, Save, FileText, X, Plus, AlertOctagon, Ban, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Ticket } from "@/components/pos/Ticket";
 import { useParams } from "@/lib/next-compat";
@@ -32,6 +32,8 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
 
   const [isEditing, setIsEditing] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [pinPendingAction, setPinPendingAction] = useState<"edit" | "cancel" | null>(null);
   const [editForm, setEditForm] = useState({
     ncf: "",
     paymentMethod: "cash" as Invoice["paymentMethod"],
@@ -55,6 +57,7 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
           setIsEditing(true);
         } else {
           setIsEditing(false);
+          setPinPendingAction("edit");
           setShowPinModal(true);
         }
       } else {
@@ -112,12 +115,43 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
     if (isOwner) {
       setIsEditing(true);
     } else {
+      setPinPendingAction("edit");
+      setShowPinModal(true);
+    }
+  };
+
+  const handleStartCancel = () => {
+    if (isOwner) {
+      setShowCancelConfirm(true);
+    } else {
+      setPinPendingAction("cancel");
       setShowPinModal(true);
     }
   };
 
   const handlePinSuccess = () => {
-    setIsEditing(true);
+    if (pinPendingAction === "cancel") {
+      setShowCancelConfirm(true);
+    } else {
+      setIsEditing(true);
+    }
+    setPinPendingAction(null);
+  };
+
+  const handleConfirmCancelInvoice = () => {
+    if (!invoice) return;
+    updateInvoice(invoice.id, {
+      status: "cancelled",
+    });
+    setEditForm((prev) => ({ ...prev, status: "cancelled" }));
+    useStore.getState().addActivityLog({
+      action: "cancelled_invoice",
+      details: `Anuló la factura #${invoice.ncf || invoice.id.slice(-6).toUpperCase()} y se restableció el inventario`,
+      module: "POS",
+    });
+    toast.success(`Factura #${invoice.ncf || invoice.id.slice(-6).toUpperCase()} anulada correctamente. El inventario ha sido devuelto.`);
+    setShowCancelConfirm(false);
+    onClose();
   };
 
   const handleSave = () => {
@@ -199,6 +233,18 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
           </DialogHeader>
 
           <div className="space-y-5 py-4 overflow-y-auto flex-1 pr-1">
+            {editForm.status === "cancelled" && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-3.5 flex items-center gap-3 text-xs font-medium animate-in fade-in">
+                <AlertOctagon className="h-5 w-5 text-rose-600 flex-shrink-0" />
+                <div>
+                  <p className="font-bold text-rose-900">Esta factura fue ANULADA</p>
+                  <p className="text-[11px] text-rose-700 leading-tight mt-0.5">
+                    El valor fue anulado y el inventario de repuestos fue devuelto al stock.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Visual Receipt Summary card */}
             <div className="bg-neutral-50 rounded-2xl border border-neutral-200/60 p-5 font-mono text-xs leading-relaxed space-y-2.5 relative overflow-hidden">
               <div className="absolute right-4 top-4">
@@ -450,6 +496,16 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
                 >
                   <Printer className="h-4 w-4" /> Imprimir
                 </Button>
+                {editForm.status !== "cancelled" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleStartCancel}
+                    className="rounded-xl flex-1 h-11 font-bold text-rose-600 border-rose-200 hover:bg-rose-50 hover:border-rose-300 gap-1.5 text-sm"
+                  >
+                    <Ban className="h-4 w-4" /> Anular Factura
+                  </Button>
+                )}
                 <Button
                   type="button"
                   onClick={handleStartEdit}
@@ -467,8 +523,55 @@ export function InvoiceDetailDialog({ open, onClose, invoice, defaultEdit = fals
         open={showPinModal} 
         onOpenChange={setShowPinModal} 
         onSuccess={handlePinSuccess} 
-        description="Se requiere autorización del administrador para editar o modificar facturas ya registradas."
+        description="Se requiere autorización del administrador para editar o anular facturas ya registradas."
       />
+
+      {/* Modal de Confirmación de Anulación */}
+      <Dialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <DialogContent className="sm:max-w-md rounded-2xl border-none shadow-2xl p-6">
+          <DialogHeader className="pb-3 border-b border-neutral-100">
+            <DialogTitle className="flex items-center gap-2.5 text-lg font-bold text-rose-600">
+              <div className="h-9 w-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
+                <AlertOctagon className="h-5 w-5" />
+              </div>
+              ¿Anular Factura #{editForm.ncf || invoice.id.slice(-6).toUpperCase()}?
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-3 space-y-3 text-sm text-neutral-600 leading-relaxed">
+            <p>
+              ¿Estás seguro de que deseas anular esta factura por un total de <strong className="text-neutral-900 font-bold">RD$ {calculatedTotals.total.toLocaleString("es-DO", { minimumFractionDigits: 2 })}</strong>?
+            </p>
+            
+            <div className="bg-amber-50 border border-amber-200/80 text-amber-900 rounded-xl p-3.5 text-xs space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-amber-900">
+                <Package className="h-4 w-4 text-amber-600" /> Reposición Automática de Inventario
+              </p>
+              <p className="text-amber-700">
+                Los productos vendidas en esta factura volverán automáticamente al stock de tu inventario.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2 border-t border-neutral-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowCancelConfirm(false)}
+              className="rounded-xl flex-1 h-10 font-bold text-neutral-600 border-neutral-200 hover:bg-neutral-50"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmCancelInvoice}
+              className="rounded-xl flex-1 h-10 font-bold bg-rose-600 hover:bg-rose-700 text-white gap-2 border-none shadow-sm"
+            >
+              <Ban className="h-4 w-4" /> Sí, Anular Factura
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

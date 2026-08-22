@@ -10,6 +10,10 @@ export interface Tenant {
   status?: 'active' | 'pending' | 'suspended';
   wasenderApiKey?: string;
   wasenderPhone?: string;
+  waProvider?: 'evolution' | 'wasender';
+  evolutionBaseUrl?: string;
+  evolutionApiKey?: string;
+  evolutionInstanceName?: string;
   monto_caja_chica?: number;
   monto_actual_caja_chica?: number;
   adminPin?: string;
@@ -31,10 +35,20 @@ export interface Tenant {
       updatedAt?: string;
     };
     sidebarOrder?: Record<string, number>;
+    waProvider?: 'evolution' | 'wasender';
+    evolutionBaseUrl?: string;
+    evolutionApiKey?: string;
+    evolutionInstanceName?: string;
+    wasenderApiKey?: string;
+    wasenderPhone?: string;
     modulos_override?: {
       whatsapp?: boolean;
       facturacion_fiscal?: boolean;
       multisucursal?: boolean;
+      nomina_comisiones?: boolean;
+      inspecciones_mpi?: boolean;
+      proveedores_cuentas?: boolean;
+      inventario_avanzado?: boolean;
       logistica?: boolean;
       procesos?: boolean;
     };
@@ -395,25 +409,31 @@ export interface Empleado {
 
 export type PlanId = 'basico' | 'pro' | 'enterprise' | string;
 
+export interface PlanModulos {
+  whatsapp: boolean;
+  facturacion_fiscal: boolean;
+  multisucursal: boolean;
+  nomina_comisiones?: boolean;
+  inspecciones_mpi?: boolean;
+  proveedores_cuentas?: boolean;
+  inventario_avanzado?: boolean;
+  logistica?: boolean;
+  procesos?: boolean;
+}
+
 export interface Plan {
   id: PlanId;
   nombre: string;
   precio_mensual: number;
   precio_anual?: number;
-  limite_empleados: number;
+  limite_empleados: number | null;
   limite_ordenes_mes: number | null;
-  limite_whatsapp_mes?: number;
+  limite_whatsapp_mes?: number | null;
   /** Máximo de sucursales permitidas. null = ilimitadas */
   limite_sucursales: number | null;
   /** Costo mensual (RD$) por cada sucursal adicional */
   precio_sucursal_adicional: number;
-  modulos: {
-    whatsapp: boolean;
-    facturacion_fiscal: boolean;
-    multisucursal: boolean;
-    logistica: boolean;
-    procesos?: boolean;
-  };
+  modulos: PlanModulos;
   destacado?: boolean;
   polar_product_monthly_url?: string;
   polar_product_yearly_url?: string;
@@ -432,6 +452,12 @@ export interface GlobalConfig {
   trialDays: number;
   defaultPlanId: PlanId;
   bankDetails?: BankDetails;
+  systemAnnouncement?: {
+    message: string;
+    active: boolean;
+    type?: 'info' | 'warning' | 'success';
+    createdAt?: string;
+  };
 }
 
 export interface LicenciaLocal {

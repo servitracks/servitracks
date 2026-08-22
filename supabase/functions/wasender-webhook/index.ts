@@ -118,8 +118,13 @@ serve(async (req) => {
             if (isWasender) {
                 console.log('WaSender event received:', body.event);
                 
-                if (body.event === 'messages.received') {
-                    const rawMessages = body.data?.messages;
+                const isMessageEvent = 
+                    body.event === 'messages.received' || 
+                    body.event === 'messages.upsert' || 
+                    body.event === 'MESSAGES_UPSERT';
+
+                if (isMessageEvent) {
+                    const rawMessages = body.data?.messages || body.data;
                     if (!rawMessages) return new Response('No message data', { status: 200 });
 
                     // Handle array or single message object format

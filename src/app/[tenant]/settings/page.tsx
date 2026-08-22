@@ -4,7 +4,8 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown, QrCode, Smartphone } from "lucide-react";
+import { fetchConnectionState, connectInstance, logoutInstance, sendEvolutionTestMessage, setEvolutionWebhook, DEFAULT_EVOLUTION_URL, DEFAULT_EVOLUTION_API_KEY, cleanBaseUrl, cleanApiKey } from "@/lib/evolutionApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ import { getPlans, formatRD } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 import { navigation } from "@/components/dashboard/Sidebar";
 import { isModuleEnabled } from "@/lib/permissions";
+import { getTenantPlan, checkTenantLimit, DEFAULT_PLANS, formatPolarUrl } from "@/lib/plans";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
@@ -310,19 +312,218 @@ export default function SettingsPage() {
   };
 
   // ── WhatsApp tab state ──
+  const [waProvider, setWaProvider] = useState<'evolution' | 'wasender'>(taller?.waProvider || 'evolution');
   const [waKey, setWaKey] = useState(taller?.wasenderApiKey ?? "");
   const [waPhone, setWaPhone] = useState(taller?.wasenderPhone ?? "");
   const [waVisible, setWaVisible] = useState(false);
   const [waTesting, setWaTesting] = useState(false);
 
-  const saveWa = async () => {
-    // 1. Update local store immediately
-    updateTenant(taller.id, { wasenderApiKey: waKey, wasenderPhone: waPhone });
-    // 2. Persist to Supabase
-    const { error } = await supabaseAdmin
+  // Evolution API fields
+  const [evoBaseUrl, setEvoBaseUrl] = useState(cleanBaseUrl(taller?.evolutionBaseUrl || taller?.config?.evolutionBaseUrl));
+  const [evoApiKey, setEvoApiKey] = useState(cleanApiKey(taller?.evolutionApiKey || taller?.config?.evolutionApiKey));
+  const [evoInstance, setEvoInstance] = useState(taller?.evolutionInstanceName || taller?.config?.evolutionInstanceName || taller?.slug || "autocheck");
+  const [evoStatus, setEvoStatus] = useState<'open' | 'connecting' | 'close' | 'checking'>('close');
+  const [evoLoading, setEvoLoading] = useState(false);
+
+  // QR Modal State
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrBase64, setQrBase64] = useState<string | null>(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        Object.keys(localStorage).forEach((key) => {
+          const val = localStorage.getItem(key);
+          if (val && (val.includes("ip_de_tu_vps") || val.includes("8080"))) {
+            const cleaned = val
+              .replaceAll("http://ip_de_tu_vps:8080", DEFAULT_EVOLUTION_URL)
+              .replaceAll("ip_de_tu_vps:8080", DEFAULT_EVOLUTION_URL)
+              .replaceAll("ip_de_tu_vps", DEFAULT_EVOLUTION_URL);
+            localStorage.setItem(key, cleaned);
+          }
+        });
+      } catch (e) {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (taller?.id) {
+      setEvoBaseUrl(cleanBaseUrl(taller.evolutionBaseUrl || taller.config?.evolutionBaseUrl));
+      setEvoApiKey(cleanApiKey(taller.evolutionApiKey || taller.config?.evolutionApiKey));
+      setEvoInstance(taller.evolutionInstanceName || taller.config?.evolutionInstanceName || taller.slug || "autocheck");
+    }
+  }, [taller?.id, taller?.evolutionBaseUrl, taller?.evolutionApiKey, taller?.evolutionInstanceName]);
+
+  const checkEvoConnectionStatus = async () => {
+    const bUrl = cleanBaseUrl(evoBaseUrl);
+    const aKey = cleanApiKey(evoApiKey);
+    if (!aKey || !evoInstance) return;
+    setEvoLoading(true);
+    const { state } = await fetchConnectionState(bUrl, aKey, evoInstance);
+    setEvoStatus(state);
+    setEvoLoading(false);
+  };
+
+  useEffect(() => {
+    if (tab === "whatsapp" && waProvider === "evolution") {
+      checkEvoConnectionStatus();
+    }
+  }, [tab, waProvider]);
+
+  const handleGenerateQr = async () => {
+    const bUrl = cleanBaseUrl(evoBaseUrl);
+    const aKey = cleanApiKey(evoApiKey);
+    setEvoBaseUrl(bUrl);
+    setEvoApiKey(aKey);
+
+    if (!aKey) {
+      toast.error("Por favor ingresa la API Key de tu servidor Evolution API");
+      return;
+    }
+    setQrModalOpen(true);
+    setQrLoading(true);
+    setQrError(null);
+    setQrBase64(null);
+
+    if (taller?.id) {
+      await setEvolutionWebhook(bUrl, aKey, evoInstance, taller.id);
+    }
+
+    const result = await connectInstance(bUrl, aKey, evoInstance);
+    setQrLoading(false);
+
+    if (result.error) {
+      setQrError(result.error);
+      toast.error(`Error al solicitar QR: ${result.error}`);
+    } else if (result.base64) {
+      setQrBase64(result.base64);
+      toast.success("Código QR generado. Escanéalo con WhatsApp.");
+    } else {
+      setQrError("No se recibió la imagen del código QR.");
+    }
+  };
+
+  const handleEvoLogout = async () => {
+    if (!evoApiKey || !evoInstance) return;
+    setEvoLoading(true);
+    const res = await logoutInstance(evoBaseUrl, evoApiKey, evoInstance);
+    setEvoLoading(false);
+    if (res.ok) {
+      setEvoStatus('close');
+      toast.success("Sesión de WhatsApp desconectada");
+    } else {
+      toast.error(`Error al desconectar: ${res.error}`);
+    }
+  };
+
+  const handleTestEvoMessage = async () => {
+    if (!evoApiKey || !evoInstance) {
+      toast.error("Configura primero las credenciales de Evolution API");
+      return;
+    }
+    const testPhone = taller.phone || prompt("Ingresa el número de teléfono para recibir el mensaje (+1809...):");
+    if (!testPhone) return;
+
+    setWaTesting(true);
+    const res = await sendEvolutionTestMessage(evoBaseUrl, evoApiKey, evoInstance, testPhone);
+    setWaTesting(false);
+
+    if (res.ok) {
+      toast.success("✅ ¡Mensaje de prueba enviado correctamente por WhatsApp!");
+    } else {
+      toast.error(`Error al enviar mensaje: ${res.error}`);
+    }
+  };
+
+  const saveEvolutionSettings = async () => {
+    const finalBaseUrl = cleanBaseUrl(evoBaseUrl);
+    const finalApiKey = cleanApiKey(evoApiKey);
+    setEvoBaseUrl(finalBaseUrl);
+    setEvoApiKey(finalApiKey);
+
+    updateTenant(taller.id, {
+      waProvider: 'evolution',
+      evolutionBaseUrl: finalBaseUrl,
+      evolutionApiKey: finalApiKey,
+      evolutionInstanceName: evoInstance,
+    });
+
+    let { error } = await supabaseAdmin
       .from("tenants")
-      .update({ wasender_api_key: waKey, wasender_phone: waPhone })
+      .update({
+        wa_provider: 'evolution',
+        evolution_base_url: finalBaseUrl,
+        evolution_api_key: finalApiKey,
+        evolution_instance_name: evoInstance,
+        config: {
+          ...(taller.config || {}),
+          waProvider: 'evolution',
+          evolutionBaseUrl: finalBaseUrl,
+          evolutionApiKey: finalApiKey,
+          evolutionInstanceName: evoInstance,
+        }
+      })
       .eq("id", taller.id);
+
+    if (error) {
+      console.warn("Column update failed, falling back to config JSONB column:", error.message);
+      const fallback = await supabaseAdmin
+        .from("tenants")
+        .update({
+          config: {
+            ...(taller.config || {}),
+            waProvider: 'evolution',
+            evolutionBaseUrl: finalBaseUrl,
+            evolutionApiKey: finalApiKey,
+            evolutionInstanceName: evoInstance,
+          }
+        })
+        .eq("id", taller.id);
+      error = fallback.error;
+    }
+
+    if (error) {
+      console.error("Error saving Evolution settings to Supabase:", error);
+      toast.warning("Guardado localmente. Error al sincronizar.");
+    } else {
+      toast.success("Configuración de Evolution API guardada correctamente");
+    }
+  };
+
+  const saveWa = async () => {
+    updateTenant(taller.id, { waProvider: 'wasender', wasenderApiKey: waKey, wasenderPhone: waPhone });
+    let { error } = await supabaseAdmin
+      .from("tenants")
+      .update({ 
+        wa_provider: 'wasender', 
+        wasender_api_key: waKey, 
+        wasender_phone: waPhone,
+        config: {
+          ...(taller.config || {}),
+          waProvider: 'wasender',
+          wasenderApiKey: waKey,
+          wasenderPhone: waPhone,
+        }
+      })
+      .eq("id", taller.id);
+
+    if (error) {
+      const fallback = await supabaseAdmin
+        .from("tenants")
+        .update({
+          config: {
+            ...(taller.config || {}),
+            waProvider: 'wasender',
+            wasenderApiKey: waKey,
+            wasenderPhone: waPhone,
+          }
+        })
+        .eq("id", taller.id);
+      error = fallback.error;
+    }
+
     if (error) {
       console.error("Error saving WaSender to Supabase:", error);
       toast.warning("Guardado localmente. Error al sincronizar con servidor.");
@@ -1027,70 +1228,397 @@ export default function SettingsPage() {
 
       {/* ── WHATSAPP ── */}
       {tab === "whatsapp" && (
-        <Card className="border-neutral-100 shadow-sm">
-          <CardHeader>
-            <CardTitle>WaSender API</CardTitle>
-            <CardDescription>Conecta tu taller con WhatsApp Business para enviar recordatorios automáticos. Obtén tu API Key en <a href="https://wasenderapi.com" target="_blank" className="text-black font-medium underline">wasenderapi.com</a></CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>API Key</Label>
-              <div className="relative">
-                <Input type={waVisible ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10"
-                  placeholder="Bearer token de WaSender..."
-                  value={waKey} onChange={e => setWaKey(e.target.value)} />
-                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setWaVisible(!waVisible)}>
-                  {waVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
+        <div className="space-y-6">
+          {/* Provider Selection Card */}
+          <Card className="border-neutral-100 shadow-sm overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white p-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-400 flex items-center justify-center font-bold">
+                  <Smartphone className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl text-white font-bold">Integración de WhatsApp</CardTitle>
+                  <CardDescription className="text-neutral-300 text-xs mt-0.5">
+                    Selecciona el proveedor para conectar el WhatsApp de tu taller y enviar comprobantes, alertas y notificaciones.
+                  </CardDescription>
+                </div>
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Número de WhatsApp del Taller</Label>
-              <Input type="tel" className="h-10 rounded-xl border-neutral-200" placeholder="+1809XXXXXXX"
-                value={waPhone} onChange={e => setWaPhone(e.target.value)} />
-            </div>
-            <div className="flex gap-3">
-              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 cursor-pointer" onClick={saveWa}>
-                <Check className="h-4 w-4 mr-2" /> Guardar
-              </Button>
-              <Button variant="outline" className="rounded-lg cursor-pointer" onClick={testWa} disabled={waTesting}>
-                {waTesting ? "Enviando..." : "Probar Conexión"}
-              </Button>
-            </div>
-            {taller?.wasenderApiKey && (
-              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                <div className="h-2 w-2 rounded-full bg-emerald-500" />
-                <span className="text-sm text-emerald-700 font-medium">API configurada</span>
-              </div>
-            )}
-
-            <div className="pt-4 mt-4 border-t border-neutral-100 space-y-3">
-              <div>
-                <Label className="text-sm font-bold text-neutral-900">URL del Webhook (Recepción de Mensajes)</Label>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Copia esta URL y pégala en la configuración de Webhook dentro de tu cuenta de WaSender para poder recibir los mensajes de tus clientes en ServiTracks.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Input 
-                  readOnly 
-                  className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
-                  value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`} 
-                />
-                <Button 
-                  variant="outline" 
-                  className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 hover:bg-neutral-50"
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Evolution API Option */}
+                <div
                   onClick={() => {
-                    navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`);
-                    toast.success("URL copiada al portapapeles");
+                    setWaProvider('evolution');
+                    updateTenant(taller.id, { waProvider: 'evolution' });
                   }}
+                  className={cn(
+                    "p-5 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between space-y-3",
+                    waProvider === 'evolution'
+                      ? "border-emerald-600 bg-emerald-50/40 shadow-sm"
+                      : "border-neutral-200 hover:border-neutral-300 bg-white"
+                  )}
                 >
-                  Copiar
-                </Button>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center font-bold",
+                        waProvider === 'evolution' ? "bg-emerald-600 text-white" : "bg-neutral-100 text-neutral-600"
+                      )}>
+                        <QrCode className="h-4.5 w-4.5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-neutral-900 text-sm">ServiTracks Connect</h3>
+                        <p className="text-[11px] text-neutral-500 font-medium">VPS Propio (Evolution API) · Código QR</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-emerald-100 text-emerald-800 border-none text-[10px] font-black uppercase px-2 py-0.5">
+                      GRATIS / CÓDIGO QR
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-neutral-600 leading-relaxed">
+                    Escanea el código QR con el celular de tu taller. Sin costo adicional por mensaje ni mensualidades por línea.
+                  </p>
+                </div>
+
+                {/* WaSender Option */}
+                <div
+                  onClick={() => {
+                    setWaProvider('wasender');
+                    updateTenant(taller.id, { waProvider: 'wasender' });
+                  }}
+                  className={cn(
+                    "p-5 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between space-y-3",
+                    waProvider === 'wasender'
+                      ? "border-black bg-neutral-50 shadow-sm"
+                      : "border-neutral-200 hover:border-neutral-300 bg-white"
+                  )}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className={cn("h-9 w-9 rounded-xl flex items-center justify-center font-bold",
+                        waProvider === 'wasender' ? "bg-black text-white" : "bg-neutral-100 text-neutral-600"
+                      )}>
+                        <Bell className="h-4.5 w-4.5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-neutral-900 text-sm">WaSender API</h3>
+                        <p className="text-[11px] text-neutral-500 font-medium">Proveedor SaaS Externo</p>
+                      </div>
+                    </div>
+                    <Badge className="bg-neutral-200 text-neutral-700 border-none text-[10px] font-black uppercase px-2 py-0.5">
+                      EXTERNO
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-neutral-600 leading-relaxed">
+                    Conecta usando tu Token API de wasenderapi.com.
+                  </p>
+                </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* If Evolution API is selected */}
+          {waProvider === 'evolution' && (
+            <div className="space-y-6">
+              {/* Connection Status Banner */}
+              <Card className="border-neutral-100 shadow-sm overflow-hidden">
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <div>
+                    <CardTitle className="text-base font-bold flex items-center gap-2">
+                      Estado de Conexión de WhatsApp
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Instancia actual: <strong className="font-mono text-neutral-800">{evoInstance}</strong>
+                    </CardDescription>
+                  </div>
+                  <Badge className={cn("border-none text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5",
+                    evoStatus === 'open' ? "bg-emerald-100 text-emerald-800" :
+                    evoStatus === 'connecting' ? "bg-amber-100 text-amber-800" :
+                    "bg-rose-100 text-rose-800"
+                  )}>
+                    <span className={cn("h-2 w-2 rounded-full",
+                      evoStatus === 'open' ? "bg-emerald-500 animate-pulse" :
+                      evoStatus === 'connecting' ? "bg-amber-500 animate-ping" :
+                      "bg-rose-500"
+                    )} />
+                    {evoStatus === 'open' ? "CONECTADO Y ACTIVO" :
+                     evoStatus === 'connecting' ? "CONECTANDO..." :
+                     "DESCONECTADO"}
+                  </Badge>
+                </CardHeader>
+
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <Button
+                      onClick={handleGenerateQr}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl h-11 px-5 gap-2 shadow-sm cursor-pointer border-none"
+                    >
+                      <QrCode className="h-4.5 w-4.5" />
+                      {evoStatus === 'open' ? "Re-escanear Código QR" : "Conectar / Escanear Código QR"}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={checkEvoConnectionStatus}
+                      disabled={evoLoading}
+                      className="rounded-xl h-11 font-bold border-neutral-200 hover:bg-neutral-50 gap-2 cursor-pointer"
+                    >
+                      <RefreshCw className={cn("h-4 w-4", evoLoading && "animate-spin")} />
+                      Verificar Estado
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={handleTestEvoMessage}
+                      disabled={waTesting || evoStatus !== 'open'}
+                      className="rounded-xl h-11 font-bold border-neutral-200 hover:bg-neutral-50 gap-2 cursor-pointer"
+                    >
+                      Probar Envío de Mensaje
+                    </Button>
+
+                    {evoStatus === 'open' && (
+                      <Button
+                        variant="ghost"
+                        onClick={handleEvoLogout}
+                        className="text-rose-600 hover:bg-rose-50 rounded-xl h-11 font-bold gap-2 cursor-pointer ml-auto"
+                      >
+                        <LogOut className="h-4 w-4" /> Desconectar WhatsApp
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Evolution Credentials Form */}
+              <Card className="border-neutral-100 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base font-bold">Configuración del Servidor Evolution API</CardTitle>
+                  <CardDescription>Configura la dirección de tu servidor Evolution API y las credenciales de la instancia.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label>URL Base del Servidor Evolution API</Label>
+                      <Input
+                        type="url"
+                        className="h-10 rounded-xl border-neutral-200 font-mono text-xs"
+                        placeholder="https://wa.servitracks.com"
+                        value={evoBaseUrl}
+                        onChange={(e) => setEvoBaseUrl(e.target.value)}
+                      />
+                      <p className="text-[11px] text-neutral-400">Puedes usar el servidor por defecto de ServiTracks o ingresar la URL de tu propio VPS Docker.</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label>API Key de Evolution</Label>
+                      <div className="relative">
+                        <Input
+                          type={waVisible ? "text" : "password"}
+                          className="h-10 rounded-xl border-neutral-200 pr-10 font-mono text-xs"
+                          placeholder="Tu API Key global o de la instancia..."
+                          value={evoApiKey}
+                          onChange={(e) => setEvoApiKey(e.target.value)}
+                        />
+                        <button
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent"
+                          onClick={() => setWaVisible(!waVisible)}
+                        >
+                          {waVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label>Nombre de la Instancia (ID del Taller)</Label>
+                      <Input
+                        type="text"
+                        className="h-10 rounded-xl border-neutral-200 font-mono text-xs"
+                        placeholder="taller-principal"
+                        value={evoInstance}
+                        onChange={(e) => setEvoInstance(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <Button className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold h-11 px-6 cursor-pointer" onClick={saveEvolutionSettings}>
+                    <Check className="h-4 w-4 mr-2" /> Guardar Credenciales
+                  </Button>
+
+                  <div className="pt-4 border-t border-neutral-100 space-y-3">
+                    <div>
+                      <Label className="text-sm font-bold text-neutral-900">URL del Webhook de Mensajes Entrantes</Label>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        Evolution API enviará los mensajes recibidos a este Webhook para mostrarlos en tiempo real en la pantalla de <strong>Conversaciones</strong>.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        readOnly 
+                        className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
+                        value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/evolution-webhook?tenant_id=${taller.id}`} 
+                      />
+                      <Button 
+                        variant="outline" 
+                        className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 hover:bg-neutral-50 font-bold"
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/evolution-webhook?tenant_id=${taller.id}`);
+                          toast.success("URL de Webhook copiada");
+                        }}
+                      >
+                        Copiar
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          </CardContent>
-        </Card>
+          )}
+
+          {/* If WaSender API is selected */}
+          {waProvider === 'wasender' && (
+            <Card className="border-neutral-100 shadow-sm">
+              <CardHeader>
+                <CardTitle>WaSender API</CardTitle>
+                <CardDescription>Conecta tu taller con WhatsApp Business mediante WaSender API. Obtén tu API Key en <a href="https://wasenderapi.com" target="_blank" rel="noopener noreferrer" className="text-black font-medium underline">wasenderapi.com</a></CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label>API Key</Label>
+                  <div className="relative">
+                    <Input type={waVisible ? "text" : "password"} className="h-10 rounded-xl border-neutral-200 pr-10 font-mono text-xs"
+                      placeholder="Bearer token de WaSender..."
+                      value={waKey} onChange={e => setWaKey(e.target.value)} />
+                    <button className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 cursor-pointer border-none bg-transparent" onClick={() => setWaVisible(!waVisible)}>
+                      {waVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Número de WhatsApp del Taller</Label>
+                  <Input type="tel" className="h-10 rounded-xl border-neutral-200" placeholder="+1809XXXXXXX"
+                    value={waPhone} onChange={e => setWaPhone(e.target.value)} />
+                </div>
+                <div className="flex gap-3">
+                  <Button className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold h-11 px-6 cursor-pointer" onClick={saveWa}>
+                    <Check className="h-4 w-4 mr-2" /> Guardar
+                  </Button>
+                  <Button variant="outline" className="rounded-xl h-11 font-bold cursor-pointer border-neutral-200" onClick={testWa} disabled={waTesting}>
+                    {waTesting ? "Enviando..." : "Probar Conexión"}
+                  </Button>
+                </div>
+                {taller?.wasenderApiKey && (
+                  <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                    <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                    <span className="text-sm text-emerald-700 font-medium">API WaSender configurada</span>
+                  </div>
+                )}
+
+                <div className="pt-4 mt-4 border-t border-neutral-100 space-y-3">
+                  <div>
+                    <Label className="text-sm font-bold text-neutral-900">URL del Webhook (Recepción de Mensajes)</Label>
+                    <p className="text-xs text-neutral-500 mt-1">
+                      Copia esta URL y pégala en la configuración de Webhook dentro de tu cuenta de WaSender.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input 
+                      readOnly 
+                      className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
+                      value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`} 
+                    />
+                    <Button 
+                      variant="outline" 
+                      className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 font-bold hover:bg-neutral-50"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`);
+                        toast.success("URL copiada al portapapeles");
+                      }}
+                    >
+                      Copiar
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Modal con Visor de Código QR de WhatsApp ── */}
+          <Dialog open={qrModalOpen} onOpenChange={setQrModalOpen}>
+            <DialogContent className="sm:max-w-md rounded-3xl border-none shadow-2xl p-6 text-center">
+              <DialogHeader className="pb-3 border-b border-neutral-100">
+                <DialogTitle className="flex items-center justify-center gap-2 text-xl font-bold text-neutral-900">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <QrCode className="h-5 w-5" />
+                  </div>
+                  Vincular WhatsApp por QR
+                </DialogTitle>
+                <DialogDescription className="text-xs text-neutral-500 mt-1">
+                  Sigue las instrucciones para escanear el código QR con el celular de tu taller.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="py-4 space-y-4 flex flex-col items-center justify-center">
+                {qrLoading ? (
+                  <div className="h-64 w-64 rounded-2xl bg-neutral-50 border border-neutral-200 flex flex-col items-center justify-center gap-3 text-neutral-400">
+                    <RefreshCw className="h-8 w-8 animate-spin text-emerald-600" />
+                    <span className="text-xs font-bold text-neutral-600">Generando código QR...</span>
+                  </div>
+                ) : qrError ? (
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs space-y-2 max-w-xs">
+                    <AlertTriangle className="h-6 w-6 text-rose-600 mx-auto" />
+                    <p className="font-bold">No se pudo cargar el QR</p>
+                    <p className="text-[11px] leading-tight">{qrError}</p>
+                    <Button size="sm" variant="outline" onClick={handleGenerateQr} className="rounded-lg text-xs bg-white mt-2 font-bold">
+                      Reintentar
+                    </Button>
+                  </div>
+                ) : qrBase64 ? (
+                  <div className="space-y-3 flex flex-col items-center">
+                    <div className="p-3 bg-white border-2 border-emerald-500/30 rounded-2xl shadow-md inline-block">
+                      <img
+                        src={qrBase64.startsWith("data:") ? qrBase64 : `data:image/png;base64,${qrBase64}`}
+                        alt="Código QR de WhatsApp"
+                        className="h-60 w-60 object-contain rounded-lg"
+                      />
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-800 max-w-xs text-left space-y-1">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Pasos para conectar:
+                      </p>
+                      <ol className="list-decimal list-inside text-[11px] space-y-0.5 text-emerald-700">
+                        <li>Abre WhatsApp en tu teléfono.</li>
+                        <li>Toca Menú (⋮) o Configuración.</li>
+                        <li>Selecciona <strong>Dispositivos vinculados</strong>.</li>
+                        <li>Toca <strong>Vincular un dispositivo</strong> y apunta al QR.</li>
+                      </ol>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <DialogFooter className="gap-2 pt-2 border-t border-neutral-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setQrModalOpen(false)}
+                  className="rounded-xl flex-1 h-11 font-bold text-neutral-600 border-neutral-200 hover:bg-neutral-50"
+                >
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    checkEvoConnectionStatus();
+                    setQrModalOpen(false);
+                  }}
+                  className="rounded-xl flex-1 h-11 font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-2 border-none shadow-sm cursor-pointer"
+                >
+                  <Check className="h-4 w-4" /> Ya Escaneé el QR
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       )}
 
       {/* ── IMPRESIÓN ── */}
@@ -1310,7 +1838,15 @@ export default function SettingsPage() {
                 <CardDescription>Control de acceso basado en roles (RBAC).</CardDescription>
               </div>
               <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2 cursor-pointer"
-                onClick={() => setInviteOpen(true)}>
+                onClick={() => {
+                  const currentCount = users.filter(u => u.tenantId === taller.id).length;
+                  const check = checkTenantLimit(currentTenant, "limite_empleados", currentCount, plansData);
+                  if (!check.allowed) {
+                    toast.error(check.message || "Has alcanzado el límite de empleados de tu plan.");
+                    return;
+                  }
+                  setInviteOpen(true);
+                }}>
                 <Plus className="h-4 w-4" /> Invitar Usuario
               </Button>
             </CardHeader>
@@ -1607,61 +2143,160 @@ export default function SettingsPage() {
 
       {/* ── PLANES ── */}
       {tab === "planes" && (
-        <div className="space-y-6">
+        <div className="space-y-8">
+          {/* Active Subscription Summary Card */}
+          {(() => {
+            const currentPlan = getTenantPlan(currentTenant, plansData.length > 0 ? plansData : DEFAULT_PLANS);
+            const activeEmployees = users.filter((u) => u.tenantId === taller.id).length;
+            const activeBranches = allowedTenants.length;
+            const maxBranches = currentTenant?.max_sucursales || currentPlan.limite_sucursales || 1;
+
+            return (
+              <div className="rounded-3xl border border-neutral-200/80 bg-white p-6 sm:p-8 shadow-xs space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-100 pb-6">
+                  <div className="flex items-center gap-4">
+                    <div className="h-14 w-14 rounded-2xl bg-neutral-950 text-white flex items-center justify-center shadow-md">
+                      <Crown className="h-7 w-7 text-amber-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Suscripción Actual</span>
+                        <Badge className="bg-emerald-100 text-emerald-800 border-none font-extrabold text-xs px-2.5 py-0.5">
+                          {currentTenant?.estado || "ACTIVO"}
+                        </Badge>
+                      </div>
+                      <h3 className="text-2xl sm:text-3xl font-black text-neutral-900 tracking-tight mt-0.5">
+                        Plan {currentPlan.nombre}
+                      </h3>
+                    </div>
+                  </div>
+                  <div className="text-right sm:text-right">
+                    <span className="text-xs font-bold text-neutral-400 uppercase block">Costo Base</span>
+                    <span className="text-2xl font-black text-neutral-900">{formatRD(currentPlan.precio_mensual)} <span className="text-xs text-neutral-400 font-normal">/mes</span></span>
+                  </div>
+                </div>
+
+                {/* Capacity Meters */}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-100 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-neutral-500">👥 Empleados / Técnicos</span>
+                      <span className="text-neutral-900">{activeEmployees} / {currentPlan.limite_empleados ?? "∞"}</span>
+                    </div>
+                    {currentPlan.limite_empleados && (
+                      <div className="h-2 w-full bg-neutral-200 rounded-full overflow-hidden">
+                        <div 
+                          className={cn("h-full transition-all", activeEmployees >= currentPlan.limite_empleados ? "bg-rose-500" : "bg-neutral-900")} 
+                          style={{ width: `${Math.min(100, (activeEmployees / currentPlan.limite_empleados) * 100)}%` }} 
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-100 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-neutral-500">🏪 Sucursales</span>
+                      <span className="text-neutral-900">{activeBranches} / {maxBranches}</span>
+                    </div>
+                    <div className="h-2 w-full bg-neutral-200 rounded-full overflow-hidden">
+                      <div 
+                        className={cn("h-full transition-all", activeBranches >= maxBranches ? "bg-amber-500" : "bg-emerald-600")} 
+                        style={{ width: `${Math.min(100, (activeBranches / maxBranches) * 100)}%` }} 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-100 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-neutral-500">💬 Mensajes WhatsApp</span>
+                      <span className="text-neutral-900">{currentPlan.limite_whatsapp_mes ? `${currentPlan.limite_whatsapp_mes.toLocaleString()}/mes` : "Ilimitados"}</span>
+                    </div>
+                    <div className="text-[11px] text-neutral-400 font-medium">
+                      Notificaciones de cambio de estado de OT y chat
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <div>
-            <CardTitle>Planes de Suscripción</CardTitle>
-            <CardDescription>Explora y contrata el plan que mejor se adapte a las necesidades de tu taller.</CardDescription>
+            <CardTitle className="text-xl font-black text-neutral-900 tracking-tight">Catálogo de Planes Disponibles</CardTitle>
+            <CardDescription className="text-xs sm:text-sm mt-1">Explora o actualiza el plan de tu taller para habilitar funciones avanzadas.</CardDescription>
           </div>
           
           {plansLoading ? (
             <div className="text-center py-12 text-sm text-neutral-500 font-medium">Cargando planes...</div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {plansData.map((p) => (
-                <Card key={p.id} className={cn("border p-6 shadow-sm bg-white rounded-xl flex flex-col", p.destacado ? "ring-2 ring-black border-black" : "border-neutral-200/80")}>
-                  <div className="flex items-start justify-between">
-                    <span className="font-display text-xl font-black text-neutral-900">{p.nombre}</span>
-                    {p.destacado && <Badge className="bg-neutral-900 text-white border-none">Popular</Badge>}
-                  </div>
-                  <div className="mt-2 font-display text-2xl font-extrabold text-neutral-900">{formatRD(p.precio_mensual)}<span className="text-sm font-normal text-neutral-400">/mes</span></div>
-                  {(p.precio_anual || 0) > 0 && (
-                    <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual || 0)}/año</div>
-                  )}
-                  <div className="mt-4 space-y-2 text-sm text-neutral-700 border-t border-neutral-100 pt-3 flex-grow">
-                    <div>👥 Hasta {p.limite_empleados} Técnicos/Empleados</div>
-                    <div>📦 {p.limite_ordenes_mes ?? "∞"} Órdenes/mes</div>
-                    {(p.precio_sucursal_adicional || 0) > 0 ? (
-                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra a {formatRD(p.precio_sucursal_adicional)}/mes</div>
-                    ) : (
-                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra sin costo</div>
-                    )}
-                    <div className="text-blue-600 font-semibold">💬 {(p.limite_whatsapp_mes || 0).toLocaleString()} Mensajes WhatsApp</div>
-                    <div className="border-t border-neutral-100 pt-2 space-y-1">
-                      {Object.entries(p.modulos).map(([k, v]) => (
-                        <div key={k} className={cn("flex items-center gap-2", v ? "text-neutral-950 font-bold" : "text-neutral-400 line-through opacity-50 font-medium")}>
-                          <span>{v ? "✓" : "✗"}</span>
-                          <span className="capitalize">{k === "facturacion_fiscal" ? "Facturación Electrónica" : k.replace(/_/g, " ")}</span>
+            <div className="grid gap-6 md:grid-cols-3 items-stretch">
+              {(plansData.length > 0 ? plansData : DEFAULT_PLANS).map((p) => {
+                const isCurrentPlan = currentTenant?.plan_id?.toLowerCase() === p.id.toLowerCase();
+                return (
+                  <Card key={p.id} className={cn("border p-6 sm:p-7 shadow-xs bg-white rounded-3xl flex flex-col justify-between transition-all", p.destacado ? "ring-2 ring-neutral-950 border-neutral-950 shadow-md" : "border-neutral-200/80")}>
+                    <div>
+                      <div className="flex items-start justify-between">
+                        <span className="font-heading text-xl font-extrabold text-neutral-900">{p.nombre}</span>
+                        {p.destacado && <Badge className="bg-neutral-950 text-white border-none font-bold text-[10px] uppercase tracking-wider">Popular</Badge>}
+                        {isCurrentPlan && <Badge className="bg-emerald-100 text-emerald-800 border-none font-bold text-[10px] uppercase tracking-wider">Plan Actual</Badge>}
+                      </div>
+                      <div className="mt-3 font-heading text-3xl font-black text-neutral-900">{formatRD(p.precio_mensual)}<span className="text-xs font-semibold text-neutral-400">/mes</span></div>
+                      {(p.precio_anual || 0) > 0 && (
+                        <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual || 0)}/año (Ahorras 2 meses)</div>
+                      )}
+                      <div className="mt-5 space-y-2.5 text-xs text-neutral-700 border-t border-neutral-100 pt-4">
+                        <div className="font-semibold flex items-center gap-2">👥 {p.limite_empleados ? `Hasta ${p.limite_empleados} Técnicos/Empleados` : "Empleados Ilimitados"}</div>
+                        <div className="font-semibold flex items-center gap-2">📦 {p.limite_ordenes_mes ? `Hasta ${p.limite_ordenes_mes} Órdenes/mes` : "Órdenes de Trabajo Ilimitadas"}</div>
+                        <div className="font-semibold flex items-center gap-2">🏪 {p.limite_sucursales ? `Hasta ${p.limite_sucursales} Sucursales` : "Multi-Sucursal Ilimitada"}</div>
+                        <div className="font-semibold text-blue-600 flex items-center gap-2">💬 {p.limite_whatsapp_mes ? `${p.limite_whatsapp_mes.toLocaleString()} msgs WhatsApp/mes` : "WhatsApp Ilimitado"}</div>
+                        
+                        <div className="border-t border-neutral-100 pt-3 space-y-1.5">
+                          <div className={cn("flex items-center gap-2 text-xs", p.modulos.facturacion_fiscal ? "text-emerald-700 font-bold" : "text-neutral-400 line-through opacity-60")}>
+                            <span>{p.modulos.facturacion_fiscal ? "✓" : "✗"}</span>
+                            <span>Facturación Fiscal e-CF / NCF (DGII)</span>
+                          </div>
+                          <div className={cn("flex items-center gap-2 text-xs", p.modulos.nomina_comisiones ? "text-emerald-700 font-bold" : "text-neutral-400 line-through opacity-60")}>
+                            <span>{p.modulos.nomina_comisiones ? "✓" : "✗"}</span>
+                            <span>Comisiones de Mecánicos & Nómina</span>
+                          </div>
+                          <div className={cn("flex items-center gap-2 text-xs", p.modulos.inspecciones_mpi ? "text-emerald-700 font-bold" : "text-neutral-400 line-through opacity-60")}>
+                            <span>{p.modulos.inspecciones_mpi ? "✓" : "✗"}</span>
+                            <span>Inspección Digital Multipunto (MPI)</span>
+                          </div>
+                          <div className={cn("flex items-center gap-2 text-xs", p.modulos.proveedores_cuentas ? "text-emerald-700 font-bold" : "text-neutral-400 line-through opacity-60")}>
+                            <span>{p.modulos.proveedores_cuentas ? "✓" : "✗"}</span>
+                            <span>Proveedores & Cuentas por Pagar</span>
+                          </div>
+                          <div className={cn("flex items-center gap-2 text-xs", p.modulos.multisucursal ? "text-emerald-700 font-bold" : "text-neutral-400 line-through opacity-60")}>
+                            <span>{p.modulos.multisucursal ? "✓" : "✗"}</span>
+                            <span>Panel Administrador Multi-Sede</span>
+                          </div>
                         </div>
-                      ))}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-6 pt-4 border-t border-neutral-100">
-                    <Button 
-                      className="w-full rounded-xl font-bold cursor-pointer bg-black text-white hover:bg-neutral-800"
-                      onClick={() => {
-                        const url = p.polar_product_monthly_url;
-                        if (url) {
-                          window.open(url, "_blank");
-                        } else {
-                          window.open(`https://wa.me/18299681720?text=Hola ServiTracks, me interesa contratar el plan ${p.nombre} para mi taller ${taller.name}.`, "_blank");
-                        }
-                      }}
-                    >
-                      Contratar {p.nombre}
-                    </Button>
-                  </div>
-                </Card>
-              ))}
+                    <div className="mt-6 pt-4 border-t border-neutral-100">
+                      <Button 
+                        disabled={isCurrentPlan}
+                        className={cn(
+                          "w-full rounded-2xl font-bold cursor-pointer h-11 text-xs",
+                          isCurrentPlan 
+                            ? "bg-neutral-100 text-neutral-400 cursor-not-allowed hover:bg-neutral-100" 
+                            : "bg-neutral-950 text-white hover:bg-black"
+                        )}
+                        onClick={() => {
+                          const checkoutUrl = formatPolarUrl(p.polar_product_monthly_url);
+                          if (checkoutUrl) {
+                            window.open(checkoutUrl, "_blank");
+                          } else {
+                            window.open(`https://wa.me/18299681720?text=Hola ServiTracks, quiero cambiar al plan ${p.nombre} para mi taller ${taller.name}.`, "_blank");
+                          }
+                        }}
+                      >
+                        {isCurrentPlan ? "Plan Activo" : `Actualizar a ${p.nombre}`}
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </div>

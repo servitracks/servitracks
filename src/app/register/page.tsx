@@ -763,14 +763,16 @@ export default function RegisterPage() {
                       <div className="grid gap-3.5">
                         {dbPlans.map((p) => {
                           const isSelected = form.plan_id === p.id;
-                          const empleadosLabel = p.limite_empleados >= 999999 ? "Empleados ilimitados" : `Hasta ${p.limite_empleados} empleados`;
+                          const empleadosLabel = !p.limite_empleados || p.limite_empleados >= 999999 ? "Empleados ilimitados" : `Hasta ${p.limite_empleados} empleados`;
                           const ordenesLabel = p.limite_ordenes_mes === null ? "Órdenes ilimitadas" : `${p.limite_ordenes_mes} órdenes/mes`;
                           const features = [
-                            p.modulos.facturacion_fiscal ? "Facturación Electrónica (NCF)" : null,
+                            p.modulos.facturacion_fiscal ? "Facturación Fiscal (e-CF / NCF)" : null,
+                            p.modulos.nomina_comisiones ? "Comisiones & Nómina" : null,
+                            p.modulos.inspecciones_mpi ? "Inspecciones MPI" : null,
+                            p.modulos.proveedores_cuentas ? "Proveedores & Compras" : null,
+                            p.modulos.multisucursal ? "Multi-sucursal & Panel Admin" : null,
                             p.modulos.whatsapp ? "WhatsApp Automation" : null,
-                            p.modulos.multisucursal ? "Gestión Multi-sucursal" : null,
-                            p.modulos.logistica ? "Logística y Repartidores" : null,
-                            "Gestión de clientes y vehículos",
+                            "Gestión de clientes, vehículos y caja chica",
                           ].filter(Boolean) as string[];
                           return (
                             <button

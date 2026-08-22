@@ -1,29 +1,30 @@
-import { Tenant, Plan } from '@/store/types';
+import type { Tenant, Plan, PlanModulos } from "@/store/types";
+import { isFeatureAllowed, getTenantPlan } from "@/lib/plans";
+
+export type ModuleKey = keyof PlanModulos | "whatsapp" | "facturacion_fiscal" | "multisucursal" | "nomina_comisiones" | "inspecciones_mpi" | "proveedores_cuentas" | "inventario_avanzado";
 
 export function isModuleEnabled(
-  tenant: Tenant | null,
-  moduleKey: 'whatsapp' | 'facturacion_fiscal' | 'multisucursal' | 'logistica' | 'procesos',
+  tenant: Tenant | null | undefined,
+  moduleKey: ModuleKey,
   plan?: Plan | null
 ): boolean {
   if (!tenant) return false;
 
-  // 1. PRIMERO verifica si el Super Admin forzó un Override para este negocio
-  const override = tenant.config?.modulos_override?.[moduleKey];
-  if (override !== undefined) {
-    return override; // Retorna true/false directo del negocio
+  // 1. Verificar Override manual del Superadmin
+  const override = (tenant.config?.modulos_override as any)?.[moduleKey];
+  if (override !== undefined && override !== null) {
+    return Boolean(override);
   }
 
-  // 2. SEGUNDO (Fallback): Si no hay override, usa la regla por defecto de su plan
-  // En un caso real, el plan debería estar cargado en memoria o pasarse como argumento.
-  if (plan) {
-    return !!plan.modulos?.[moduleKey];
+  // 2. Verificar en el Plan provisto o en el Plan del Tenant
+  const activePlan = plan || getTenantPlan(tenant);
+  if (activePlan && activePlan.modulos && (activePlan.modulos as any)[moduleKey] !== undefined) {
+    return Boolean((activePlan.modulos as any)[moduleKey]);
   }
 
-  // Si no tenemos el plan a mano, por seguridad retornamos falso, 
-  // o podemos asumir que 'procesos' y 'whatsapp' son true en básico según el schema de planes
-  if (moduleKey === 'procesos' || moduleKey === 'whatsapp') {
-    return true; // Comportamiento default del plan básico
-  }
+  // 3. Fallbacks coherentes para taller mecánico:
+  // WhatsApp básico siempre habilitado para comunicación con clientes
+  if (moduleKey === "whatsapp") return true;
 
   return false;
 }

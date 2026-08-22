@@ -29,6 +29,7 @@ import CotizacionesPage from "./app/[tenant]/cotizaciones/page";
 import MovimientosPage from "./app/[tenant]/movimientos/page";
 import InventoryScannerPage from "./app/[tenant]/inventory/scanner/page";
 import ActivityPage from "./app/[tenant]/activity/page";
+import AdminPanelPage from "./app/[tenant]/admin-panel/page";
 import Admin from "./app/admin/page";
 import BlogIndex from "./app/blog/page";
 import BlogPost from "./app/blog/[slug]/page";
@@ -88,6 +89,8 @@ export default function App() {
           <Route path="movimientos" element={<MovimientosPage />} />
           <Route path="inventory/scanner" element={<InventoryScannerPage />} />
           <Route path="activity" element={<ActivityPage />} />
+          <Route path="admin-panel" element={<AdminPanelPage />} />
+          <Route path="sucursales" element={<AdminPanelPage />} />
         </Route>
 
         {/* Fallback 404 Route */}

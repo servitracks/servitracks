@@ -6,6 +6,8 @@ export type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails };
 
 export const ADMIN_EMAILS = ["admin@servitracks.com", "admin@klynn.com", "rubenpolanco487@gmail.com"];
 
+import { DEFAULT_PLANS } from "@/lib/plans";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function dbToPlan(row: any): Plan {
@@ -14,12 +16,22 @@ function dbToPlan(row: any): Plan {
     nombre: row.nombre,
     precio_mensual: row.precio_mensual ?? 0,
     precio_anual: row.precio_anual ?? 0,
-    limite_empleados: row.limite_empleados ?? 5,
+    limite_empleados: row.limite_empleados ?? null,
     limite_ordenes_mes: row.limite_ordenes_mes ?? null,
-    limite_whatsapp_mes: row.limite_whatsapp_mes ?? 0,
+    limite_whatsapp_mes: row.limite_whatsapp_mes ?? null,
     limite_sucursales: row.limite_sucursales ?? null,
     precio_sucursal_adicional: row.precio_sucursal_adicional ?? 0,
-    modulos: row.modulos ?? { whatsapp: false, facturacion_fiscal: false, multisucursal: false, logistica: false },
+    modulos: {
+      whatsapp: row.modulos?.whatsapp ?? true,
+      facturacion_fiscal: row.modulos?.facturacion_fiscal ?? false,
+      multisucursal: row.modulos?.multisucursal ?? false,
+      nomina_comisiones: row.modulos?.nomina_comisiones ?? false,
+      inspecciones_mpi: row.modulos?.inspecciones_mpi ?? false,
+      proveedores_cuentas: row.modulos?.proveedores_cuentas ?? false,
+      inventario_avanzado: row.modulos?.inventario_avanzado ?? false,
+      logistica: row.modulos?.logistica ?? false,
+      procesos: row.modulos?.procesos ?? false,
+    },
     destacado: row.destacado ?? false,
     polar_product_monthly_url: row.polar_product_monthly_url ?? undefined,
     polar_product_yearly_url: row.polar_product_yearly_url ?? undefined,
@@ -32,9 +44,9 @@ function planToDb(plan: Plan) {
     nombre: plan.nombre,
     precio_mensual: plan.precio_mensual,
     precio_anual: plan.precio_anual ?? 0,
-    limite_empleados: plan.limite_empleados,
+    limite_empleados: plan.limite_empleados ?? null,
     limite_ordenes_mes: plan.limite_ordenes_mes ?? null,
-    limite_whatsapp_mes: plan.limite_whatsapp_mes ?? 0,
+    limite_whatsapp_mes: plan.limite_whatsapp_mes ?? null,
     limite_sucursales: plan.limite_sucursales ?? null,
     precio_sucursal_adicional: plan.precio_sucursal_adicional ?? 0,
     modulos: plan.modulos,
@@ -75,8 +87,13 @@ export async function getPlans(): Promise<Plan[]> {
     .from("plans")
     .select("*")
     .order("precio_mensual", { ascending: true });
-  if (error) { console.error("[storage] getPlans:", error); return useStore.getState().plans; }
-  return (data || []).map(dbToPlan);
+  if (error || !data || data.length === 0) { 
+    if (error) console.error("[storage] getPlans:", error); 
+    const storePlans = useStore.getState().plans;
+    if (storePlans && storePlans.length > 0) return storePlans;
+    return DEFAULT_PLANS; 
+  }
+  return data.map(dbToPlan);
 }
 
 export async function savePlan(plan: Plan): Promise<void> {
@@ -163,8 +180,14 @@ export async function updateTenantMaxSucursales(id: string, max_sucursales: numb
 export async function updateTenantModulosOverride(id: string, overrides: any): Promise<void> {
   const state = useStore.getState();
   const tenant = state.tenants.find(t => t.id === id);
-  if (!tenant) return;
-  const newConfig = { ...tenant.config, modulos_override: overrides };
+  let baseConfig = tenant?.config || {};
+  
+  if (!tenant) {
+    const { data: dbTenant } = await supabaseAdmin.from("tenants").select("config").eq("id", id).maybeSingle();
+    if (dbTenant?.config) baseConfig = dbTenant.config;
+  }
+
+  const newConfig = { ...baseConfig, modulos_override: overrides };
   
   const { error } = await supabaseAdmin
     .from("tenants")

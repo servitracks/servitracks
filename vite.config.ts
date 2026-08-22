@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
+// Forced Vite dev server restart for Evolution API configuration v7
 export default defineConfig({
   plugins: [react()],
   resolve: {

@@ -9,7 +9,7 @@ import {
   Package, AlertTriangle, ReceiptText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useParams } from "@/lib/next-compat";
+import { useParams, Link } from "@/lib/next-compat";
 import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 // Lazy-load recharts
@@ -107,6 +107,7 @@ export default function DashboardPage() {
       trend: todaySales >= yesterdaySales ? "up" as const : "down" as const,
       icon: TrendingUp,
       sub: `${todayInvoices.length} factura${todayInvoices.length !== 1 ? "s" : ""} hoy`,
+      href: `/${tenantSlug}/pos`,
     },
     {
       title: "Órdenes Activas",
@@ -115,6 +116,7 @@ export default function DashboardPage() {
       trend: "up" as const,
       icon: Wrench,
       sub: "En taller ahora",
+      href: `/${tenantSlug}/orders`,
     },
     {
       title: "Clientes Nuevos",
@@ -123,6 +125,7 @@ export default function DashboardPage() {
       trend: newCustomersThisWeek >= newCustomersLastWeek ? "up" as const : "down" as const,
       icon: Users,
       sub: "Total registrados",
+      href: `/${tenantSlug}/customers`,
     },
     {
       title: "Stock Bajo",
@@ -131,6 +134,7 @@ export default function DashboardPage() {
       trend: lowStockCount > 0 ? "down" as const : "up" as const,
       icon: Package,
       sub: "Productos por reponer",
+      href: `/${tenantSlug}/inventory`,
     },
   ];
 
@@ -156,16 +160,17 @@ export default function DashboardPage() {
       {/* KPI Cards */}
       <div id="tour-metrics" className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat, i) => (
-          <div 
+          <Link 
             key={stat.title} 
-            className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both"
+            href={stat.href}
+            className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both group block cursor-pointer"
             style={{ animationDelay: `${i * 80}ms`, animationDuration: '300ms' }}
           >
-            <Card className="border-neutral-100 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 duration-200">
+            <Card className="border-neutral-100 shadow-sm transition-all group-hover:shadow-md group-hover:-translate-y-1 group-hover:border-neutral-300 duration-200">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-xs font-bold uppercase tracking-wider text-neutral-400">{stat.title}</CardTitle>
-                <div className="h-8 w-8 rounded-lg bg-neutral-50 flex items-center justify-center">
-                  <stat.icon className="h-4 w-4 text-neutral-600" />
+                <CardTitle className="text-xs font-bold uppercase tracking-wider text-neutral-400 group-hover:text-neutral-700 transition-colors">{stat.title}</CardTitle>
+                <div className="h-8 w-8 rounded-lg bg-neutral-50 flex items-center justify-center group-hover:bg-neutral-100 transition-colors">
+                  <stat.icon className="h-4 w-4 text-neutral-600 group-hover:text-neutral-900" />
                 </div>
               </CardHeader>
               <CardContent>
@@ -183,7 +188,7 @@ export default function DashboardPage() {
                 <p className="text-[11px] text-neutral-400 mt-1">{stat.sub}</p>
               </CardContent>
             </Card>
-          </div>
+          </Link>
         ))}
       </div>
 
