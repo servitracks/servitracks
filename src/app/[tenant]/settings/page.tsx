@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown, QrCode, Smartphone } from "lucide-react";
+import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown, QrCode, Smartphone, Wrench, ReceiptText, Lock, ChevronDown, ChevronRight } from "lucide-react";
 import { fetchConnectionState, connectInstance, logoutInstance, sendEvolutionTestMessage, setEvolutionWebhook, DEFAULT_EVOLUTION_URL, DEFAULT_EVOLUTION_API_KEY, cleanBaseUrl, cleanApiKey } from "@/lib/evolutionApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,7 @@ import type { Plan } from "@/store/types";
 import { navigation } from "@/components/dashboard/Sidebar";
 import { isModuleEnabled } from "@/lib/permissions";
 import { getTenantPlan, checkTenantLimit, DEFAULT_PLANS, formatPolarUrl } from "@/lib/plans";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const TABS = [
   { id: "taller", label: "Taller", icon: Building2 },
@@ -35,12 +36,68 @@ const TABS = [
   { id: "planes", label: "Planes", icon: CreditCard },
 ];
 
-const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
-  { value: "owner", label: "Dueño", color: "bg-black text-white" },
-  { value: "mechanic", label: "Mecánico", color: "bg-amber-100 text-amber-800" },
-  { value: "cashier", label: "Cajero", color: "bg-blue-100 text-blue-800" },
-  { value: "warehouse", label: "Almacén", color: "bg-emerald-100 text-emerald-800" },
-  { value: "receptionist", label: "Recepción", color: "bg-violet-100 text-violet-800" },
+const ROLES: { value: TenantUser["role"]; label: string; color: string; badge: string; desc: string; icon: any; permissions: string[] }[] = [
+  { 
+    value: "owner", 
+    label: "Dueño", 
+    color: "bg-neutral-900 text-white", 
+    badge: "Admin Total", 
+    desc: "Control total del taller: finanzas, reportes, nómina, e-CF DGII, clientes y configuración.", 
+    icon: Shield,
+    permissions: ["Acceso a todos los módulos", "Reportes financieros y balances", "Apertura y cierre de caja", "Gestión de nómina y comisiones", "Configuración e-CF DGII", "Creación y edición de usuarios"]
+  },
+  { 
+    value: "cashier", 
+    label: "Cajero", 
+    color: "bg-blue-100 text-blue-800", 
+    badge: "POS & Caja", 
+    desc: "Facturación POS, cobros, arqueo, apertura y cierre de caja, registro de clientes.", 
+    icon: ReceiptText,
+    permissions: ["Facturación POS y emisión de comprobantes", "Control de caja chica y arqueo", "Gestión de cobros y cuentas por cobrar", "Registro de clientes y vehículos", "Atención por WhatsApp"]
+  },
+  { 
+    value: "mechanic", 
+    label: "Mecánico", 
+    color: "bg-amber-100 text-amber-800", 
+    badge: "Taller & OT", 
+    desc: "Ver y actualizar el estado de órdenes de trabajo asignadas y consultar sus comisiones.", 
+    icon: Wrench,
+    permissions: ["Ver órdenes de trabajo asignadas", "Actualizar estado de avance de reparaciones", "Completar checklists de inspección", "Consultar historial de 'Mis Comisiones'"]
+  },
+  { 
+    value: "warehouse", 
+    label: "Almacén", 
+    color: "bg-emerald-100 text-emerald-800", 
+    badge: "Stock & Compras", 
+    desc: "Control de inventario, ajustes de stock, pedidos a suplidores y recepción de mercancía.", 
+    icon: Package,
+    permissions: ["Gestión de inventario y catálogo de repuestos", "Ajustes de entradas y salidas de stock", "Creación y envío de Órdenes de Compra", "Recepción de mercancía de proveedores", "Control de movimientos de almacén"]
+  },
+  { 
+    value: "receptionist", 
+    label: "Recepción", 
+    color: "bg-violet-100 text-violet-800", 
+    badge: "CRM & Atención", 
+    desc: "Recepción de vehículos, creación de cotizaciones, atención al cliente y WhatsApp.", 
+    icon: Users,
+    permissions: ["Creación y seguimiento de cotizaciones", "Recepción y apertura de órdenes de trabajo", "Registro de clientes y vehículos", "Envío de recordatorios y mantenimiento", "Conversaciones de WhatsApp"]
+  },
+];
+
+const PERMISSION_MATRIX = [
+  { module: "Dashboard General", owner: "Total", cashier: false, mechanic: false, warehouse: false, receptionist: "Operativo", desc: "Métricas de ventas, órdenes del día y resumen" },
+  { module: "Órdenes de Trabajo (OT)", owner: "Total", cashier: "Lectura / Facturar", mechanic: "Solo Asignadas", warehouse: "Ver / Despachar", receptionist: "Crear / Gestionar", desc: "Apertura, diagnóstico, asignación de técnicos y avance" },
+  { module: "Facturación POS & e-CF", owner: "Total", cashier: "Total", mechanic: false, warehouse: false, receptionist: false, desc: "Cobro de facturas, comprobantes fiscales DGII y métodos de pago" },
+  { module: "Control de Caja", owner: "Total", cashier: "Operativo", mechanic: false, warehouse: false, receptionist: false, desc: "Apertura, cierre, arqueo de caja chica y registro de movimientos" },
+  { module: "Cotizaciones", owner: "Total", cashier: "Total", mechanic: false, warehouse: false, receptionist: "Total", desc: "Presupuestos para clientes y conversión a órdenes" },
+  { module: "Inventario & Ajustes de Stock", owner: "Total (con Costos)", cashier: "Solo Consulta", mechanic: false, warehouse: "Total (con Costos)", receptionist: false, desc: "Control de repuestos, entradas/salidas, precios y costos" },
+  { module: "Proveedores & Compras", owner: "Total", cashier: false, mechanic: false, warehouse: "Total", receptionist: false, desc: "Catálogo de suplidores, órdenes de compra y recepción de mercancía" },
+  { module: "Clientes & Vehículos (CRM)", owner: "Total", cashier: "Total", mechanic: false, warehouse: false, receptionist: "Total", desc: "Fichas de clientes, historial de vehículos y placas" },
+  { module: "WhatsApp & Conversaciones", owner: "Total", cashier: "Total", mechanic: false, warehouse: false, receptionist: "Total", desc: "Chat con clientes, notificaciones de estado y recordatorios" },
+  { module: "Mis Comisiones", owner: "Nómina General", cashier: false, mechanic: "Solo Propias", warehouse: false, receptionist: false, desc: "Historial de trabajos completados y comisiones acumuladas" },
+  { module: "Nómina & Liquidación", owner: "Total", cashier: false, mechanic: false, warehouse: false, receptionist: false, desc: "Cálculo de nómina y pago de comisiones a mecánicos" },
+  { module: "Reportes Financieros", owner: "Total", cashier: false, mechanic: false, warehouse: false, receptionist: false, desc: "Ventas, margen de ganancia, auditoría de actividades" },
+  { module: "Configuración del Taller", owner: "Total", cashier: false, mechanic: false, warehouse: false, receptionist: false, desc: "Datos fiscales, e-CF DGII, impresoras, usuarios y PINs" },
 ];
 
 function roleLabel(r: TenantUser["role"]) {
@@ -99,6 +156,20 @@ export default function SettingsPage() {
       }).catch(() => setPlansLoading(false));
     }
   }, [tab]);
+
+  const [showMatrix, setShowMatrix] = useState(false);
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+
+  const handleSetSimulatedRole = (r: TenantUser["role"] | null) => {
+    if (r) {
+      localStorage.setItem("simulated-role", r);
+      toast.info(`Modo simulación activado: viendo el sistema como ${roleLabel(r)}`);
+    } else {
+      localStorage.removeItem("simulated-role");
+      toast.success("Modo simulación desactivado. Vista de Dueño restaurada.");
+    }
+    window.location.reload();
+  };
 
   // ── Taller tab state ──
   const [tallerForm, setTallerForm] = useState({
@@ -1831,42 +1902,184 @@ export default function SettingsPage() {
       {tab === "users" && (
         <div className="space-y-6">
           {/* Role reference */}
-          <Card className="border-neutral-100 shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Roles Disponibles</CardTitle>
-                <CardDescription>Control de acceso basado en roles (RBAC).</CardDescription>
+          {/* Role simulation banner if active */}
+          {simulatedRole && (
+            <div className="bg-neutral-900 text-white border border-neutral-800 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-md">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg">
+                  <ShieldCheck className="h-6 w-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Control de Roles Activo</h4>
+                  <p className="text-xs text-neutral-400">
+                    Viendo el sistema con los permisos y herramientas asignadas a <strong>{roleLabel(simulatedRole as any)}</strong>.
+                  </p>
+                </div>
               </div>
-              <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2 cursor-pointer"
-                onClick={() => {
-                  const currentCount = users.filter(u => u.tenantId === taller.id).length;
-                  const check = checkTenantLimit(currentTenant, "limite_empleados", currentCount, plansData);
-                  if (!check.allowed) {
-                    toast.error(check.message || "Has alcanzado el límite de empleados de tu plan.");
-                    return;
-                  }
-                  setInviteOpen(true);
-                }}>
-                <Plus className="h-4 w-4" /> Invitar Usuario
+              <Button 
+                onClick={() => handleSetSimulatedRole(null)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs h-9 px-4 cursor-pointer"
+              >
+                Restablecer a Administrador
               </Button>
+            </div>
+          )}
+
+          {/* Role reference */}
+          <Card className="border-neutral-100 shadow-sm overflow-hidden">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4">
+              <div>
+                <CardTitle className="text-lg font-bold text-neutral-900">Roles y Control de Acceso (RBAC)</CardTitle>
+                <CardDescription className="text-xs text-neutral-500">
+                  Estructura de puestos y permisos para el personal de tu taller.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline"
+                  onClick={() => setShowMatrix(!showMatrix)}
+                  className="rounded-xl border-neutral-200 text-xs font-bold gap-1.5 h-10 cursor-pointer"
+                >
+                  <FileText className="h-4 w-4 text-neutral-500" />
+                  {showMatrix ? "Ocultar Matriz de Permisos" : "Ver Matriz de Permisos"}
+                  <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showMatrix && "rotate-180")} />
+                </Button>
+
+                <Button className="rounded-xl bg-black text-white hover:bg-neutral-800 gap-2 cursor-pointer h-10 font-bold text-xs"
+                  onClick={() => {
+                    const currentCount = users.filter(u => u.tenantId === taller.id).length;
+                    const check = checkTenantLimit(currentTenant, "limite_empleados", currentCount, plansData);
+                    if (!check.allowed) {
+                      toast.error(check.message || "Has alcanzado el límite de empleados de tu plan.");
+                      return;
+                    }
+                    setInviteOpen(true);
+                  }}>
+                  <Plus className="h-4 w-4" /> Invitar Usuario
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-3">
+
+            <CardContent className="space-y-4">
+              {/* Tarjetas de Roles con diseño moderno y permisos */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {ROLES.map(r => (
-                  <div key={r.value} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50">
-                    <Shield className="h-4 w-4 text-neutral-400" />
+                  <div key={r.value} className="flex flex-col justify-between p-4 rounded-2xl border border-neutral-200/80 bg-neutral-50/60 hover:bg-white hover:border-neutral-300 hover:shadow-xs transition-all">
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold">{r.label}</span>
-                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5", r.color)}>{r.value === "owner" ? "Admin" : r.value === "cashier" ? "POS" : r.value === "mechanic" ? "OT" : "CRM"}</Badge>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className={cn("h-8 w-8 rounded-xl flex items-center justify-center font-bold", r.color)}>
+                            <r.icon className="h-4 w-4" />
+                          </div>
+                          <span className="text-sm font-black text-neutral-900">{r.label}</span>
+                        </div>
+                        <Badge className={cn("text-[10px] font-bold border-none rounded-full px-2 py-0.5", r.color)}>{r.badge}</Badge>
                       </div>
-                      <p className="text-xs text-neutral-400">
-                        {r.value === "owner" ? "Control total del taller" : r.value === "mechanic" ? "Ver y actualizar órdenes asignadas" : r.value === "cashier" ? "Acceso al POS y facturación" : "Registrar clientes y vehículos"}
+                      <p className="text-xs text-neutral-600 leading-relaxed mb-3">
+                        {r.desc}
                       </p>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-neutral-200/70 space-y-1">
+                      <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wider">Permisos Clave:</span>
+                      <ul className="text-[11px] text-neutral-600 space-y-1">
+                        {r.permissions.slice(0, 3).map((perm, idx) => (
+                          <li key={idx} className="flex items-center gap-1.5">
+                            <span className="text-emerald-600 font-bold">✓</span> {perm}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* Control de Roles */}
+              {currentUser?.role === 'owner' && (
+                <div className="p-3.5 rounded-2xl border border-neutral-200 bg-neutral-50 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="text-xs font-black text-neutral-900 flex items-center gap-1.5">
+                      <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" /> Control de Roles
+                    </span>
+                    <p className="text-[11px] text-neutral-500">
+                      Supervisa en tiempo real qué herramientas y accesos tiene habilitados cada puesto:
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 flex-nowrap overflow-x-auto pb-0.5">
+                    {ROLES.map(r => (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => handleSetSimulatedRole(r.value === 'owner' ? null : r.value)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap shrink-0",
+                          (simulatedRole === r.value || (!simulatedRole && r.value === 'owner'))
+                            ? "bg-neutral-900 text-white border-neutral-900 shadow-xs"
+                            : "bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-100"
+                        )}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Matriz Comparativa Colapsable */}
+              {showMatrix && (
+                <div className="border border-neutral-200 rounded-2xl overflow-hidden shadow-2xs animate-in fade-in duration-300">
+                  <div className="bg-neutral-900 text-white p-3.5 flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-neutral-200">
+                        Matriz Comparativa de Permisos por Rol (RBAC)
+                      </h4>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">
+                        Resumen detallado de accesos por pantalla y módulos
+                      </p>
+                    </div>
+                    <Badge className="bg-emerald-500 text-white border-none text-[10px] font-bold">13 Módulos</Badge>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table className="text-xs bg-white">
+                      <TableHeader className="bg-neutral-50 border-b border-neutral-200">
+                        <TableRow>
+                          <TableHead className="font-bold text-neutral-900">Módulo / Pantalla</TableHead>
+                          <TableHead className="text-center font-bold text-neutral-900">Dueño</TableHead>
+                          <TableHead className="text-center font-bold text-neutral-900">Cajero</TableHead>
+                          <TableHead className="text-center font-bold text-neutral-900">Mecánico</TableHead>
+                          <TableHead className="text-center font-bold text-neutral-900">Almacén</TableHead>
+                          <TableHead className="text-center font-bold text-neutral-900">Recepción</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="divide-y divide-neutral-100">
+                        {PERMISSION_MATRIX.map((row, idx) => (
+                          <TableRow key={idx} className="hover:bg-neutral-50/70">
+                            <TableCell className="font-semibold text-neutral-900 py-2.5">
+                              {row.module}
+                              <span className="block text-[10px] font-normal text-neutral-400">{row.desc}</span>
+                            </TableCell>
+                            <TableCell className="text-center py-2.5">
+                              {row.owner ? <span className="text-xs font-bold text-emerald-600">✓ {row.owner}</span> : <span className="text-neutral-300">✕</span>}
+                            </TableCell>
+                            <TableCell className="text-center py-2.5">
+                              {row.cashier ? <span className="text-xs font-bold text-blue-600">{typeof row.cashier === 'string' ? row.cashier : '✓'}</span> : <span className="text-neutral-300">✕</span>}
+                            </TableCell>
+                            <TableCell className="text-center py-2.5">
+                              {row.mechanic ? <span className="text-xs font-bold text-amber-600">{typeof row.mechanic === 'string' ? row.mechanic : '✓'}</span> : <span className="text-neutral-300">✕</span>}
+                            </TableCell>
+                            <TableCell className="text-center py-2.5">
+                              {row.warehouse ? <span className="text-xs font-bold text-emerald-600">{typeof row.warehouse === 'string' ? row.warehouse : '✓'}</span> : <span className="text-neutral-300">✕</span>}
+                            </TableCell>
+                            <TableCell className="text-center py-2.5">
+                              {row.receptionist ? <span className="text-xs font-bold text-violet-600">{typeof row.receptionist === 'string' ? row.receptionist : '✓'}</span> : <span className="text-neutral-300">✕</span>}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

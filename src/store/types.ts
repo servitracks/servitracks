@@ -19,6 +19,8 @@ export interface Tenant {
   adminPin?: string;
   config?: {
     umbral_diferencia_caja?: number;
+    limite_efectivo_alerta?: number;
+    arqueo_ciego?: boolean;
     formato_ticket?: '57mm' | '80mm';
     formato_ticket_default?: '57mm' | '80mm';
     autoDeductInventory?: boolean;
@@ -380,6 +382,8 @@ export interface Caja {
   notas_apertura?: string;
   notas_cierre?: string;
   empleado_cierre_id?: string;
+  desglose_apertura?: Record<string, number>;
+  desglose_cierre?: Record<string, number>;
 }
 
 export type TipoMovimiento = 'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'VENTA' | 'ABONO' | 'PAGO_NOMINA';

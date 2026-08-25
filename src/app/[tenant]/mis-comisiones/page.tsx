@@ -21,18 +21,23 @@ export default function MisComisionesPage() {
   const technicians = useStore((s) => s.technicians);
   const invoices = useStore((s) => s.invoices);
 
-  // Intentar vincular el usuario actual con un técnico (por nombre)
+  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
+
+  // Intentar vincular el usuario actual con un técnico (por nombre o fallback para simulación)
   const miPerfilTecnico = useMemo(() => {
     if (!currentUser) return null;
-    return technicians.find(t => 
+    const match = technicians.find(t => 
       t.tenantId === tenantId && 
       t.name.toLowerCase().trim() === currentUser.name.toLowerCase().trim()
     );
-  }, [technicians, currentUser, tenantId]);
+    if (match) return match;
+    // Si estamos en modo simulación o el rol es mecánico, usar el primer técnico activo del taller como vista previa
+    if (simulatedRole === 'mechanic' || currentUser.role === 'mechanic') {
+      return technicians.find(t => t.tenantId === tenantId) || null;
+    }
+    return null;
+  }, [technicians, currentUser, tenantId, simulatedRole]);
 
-  // Si no se encuentra el vínculo exacto, mostramos una lista general o mensaje
-  // Pero lo ideal es que coincida.
-  
   const techId = miPerfilTecnico?.id;
 
   const pendingInvoices = useMemo(() => {
@@ -102,7 +107,6 @@ export default function MisComisionesPage() {
     return { totalComision: globalTotal, itemsPendientes: items };
   }, [pendingInvoices, miPerfilTecnico, services]);
 
-  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
 
   if (!currentUser || (activeRole !== 'mechanic' && activeRole !== 'owner')) {

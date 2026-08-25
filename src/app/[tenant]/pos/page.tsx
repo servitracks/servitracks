@@ -6,7 +6,8 @@ import { useStore, Product, WorkOrder } from "@/store/useStore";
 import {
   Search, ShoppingCart, X, Plus,
   Maximize2, Minimize2, Tag, Wrench, ShieldCheck,
-  Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList, Wallet
+  Package, AlertTriangle, CheckCircle, UserCog, FileText, User, FolderOpen, ClipboardList, Wallet,
+  LayoutGrid, Filter, Droplet, Disc, Activity, Cog, Zap, CircleDot, Sparkles, Snowflake
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -29,6 +30,22 @@ const LazyOpenTabsDialog = lazy(() => import("./POSDialogs").then(m => ({ defaul
 interface CartItem extends Product { quantity: number }
 
 type PayMethod = "cash" | "card" | "transfer";
+
+const getCategoryIcon = (categoryName: string) => {
+  const norm = categoryName.toLowerCase().trim();
+  if (norm === "todos") return <LayoutGrid className="h-3.5 w-3.5 shrink-0" />;
+  if (norm.includes("filtro")) return <Filter className="h-3.5 w-3.5 shrink-0 text-blue-500" />;
+  if (norm.includes("lubricante") || norm.includes("aceite") || norm.includes("fluido")) return <Droplet className="h-3.5 w-3.5 shrink-0 text-amber-500" />;
+  if (norm.includes("freno") || norm.includes("disco") || norm.includes("pastilla")) return <Disc className="h-3.5 w-3.5 shrink-0 text-rose-500" />;
+  if (norm.includes("suspensi") || norm.includes("amortiguador") || norm.includes("tren") || norm.includes("direccion")) return <Activity className="h-3.5 w-3.5 shrink-0 text-indigo-500" />;
+  if (norm.includes("motor") || norm.includes("correa") || norm.includes("distribuc")) return <Cog className="h-3.5 w-3.5 shrink-0 text-orange-500" />;
+  if (norm.includes("electr") || norm.includes("bater") || norm.includes("sensor")) return <Zap className="h-3.5 w-3.5 shrink-0 text-yellow-500" />;
+  if (norm.includes("servicio") || norm.includes("mantenimiento") || norm.includes("mano de obra")) return <Wrench className="h-3.5 w-3.5 shrink-0 text-emerald-500" />;
+  if (norm.includes("neumat") || norm.includes("goma") || norm.includes("llanta")) return <CircleDot className="h-3.5 w-3.5 shrink-0 text-teal-500" />;
+  if (norm.includes("accesorio") || norm.includes("iluminac") || norm.includes("bombill")) return <Sparkles className="h-3.5 w-3.5 shrink-0 text-purple-500" />;
+  if (norm.includes("enfriamiento") || norm.includes("radiador") || norm.includes("aire")) return <Snowflake className="h-3.5 w-3.5 shrink-0 text-cyan-500" />;
+  return <Tag className="h-3.5 w-3.5 shrink-0 text-neutral-500" />;
+};
 
 export default function POSPage() {
   const router = useRouter();
@@ -596,14 +613,14 @@ export default function POSPage() {
           )}
 
           {/* Top bar */}
-          <div id="tour-pos-search" className="flex items-center justify-between gap-3 bg-white border-b border-neutral-200/90 px-4 py-2.5 overflow-hidden shadow-2xs">
+          <div id="tour-pos-search" className="flex items-center justify-between gap-2.5 bg-white border-b border-neutral-200/90 px-4 py-2.5 shadow-2xs">
             {/* Search Input & Live Scanner */}
-            <div className="relative flex-1 min-w-[200px] max-w-md">
+            <div className="relative flex-1 min-w-[160px]">
               <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
               <Input 
                 ref={searchRef} 
                 placeholder="Buscar repuesto, servicio, código o marca (F1)..."
-                className="pl-10 pr-9 h-10 rounded-xl bg-neutral-50/80 border-neutral-200 text-xs font-medium w-full focus:bg-white transition-all shadow-2xs"
+                className="pl-10 pr-9 h-10 rounded-xl bg-neutral-50/90 border-neutral-200 text-xs font-medium w-full focus:bg-white transition-all shadow-2xs"
                 value={search} 
                 onChange={(e) => setSearch(e.target.value)} 
                 onKeyDown={handleBarcodeScan} 
@@ -618,82 +635,87 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* Caja Status Badge */}
-            {activeCaja ? (
-              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-50/80 border border-emerald-200/90 text-emerald-900 text-xs font-bold shrink-0">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Caja Abierta (Turno Activo)</span>
-              </div>
-            ) : (
+            {/* Right Icon Actions Hub */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* Caja Status Icon Button */}
+              {activeCaja ? (
+                <button
+                  onClick={() => router.push(`/${tenant}/caja`)}
+                  title="Caja Abierta (Turno Activo) - Clic para ver arqueo"
+                  className="h-10 w-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 flex items-center justify-center relative shrink-0 transition-all cursor-pointer shadow-2xs"
+                >
+                  <Wallet className="h-4 w-4 text-emerald-600" />
+                  <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 animate-pulse ring-2 ring-white" />
+                </button>
+              ) : (
+                <button 
+                  onClick={() => router.push(`/${tenant}/caja`)} 
+                  title="Caja Cerrada - Clic para abrir turno (F4)"
+                  className="h-10 w-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs"
+                >
+                  <AlertTriangle className="h-4 w-4 text-rose-600" />
+                </button>
+              )}
+
+              {/* Cuentas en Espera */}
               <button 
-                onClick={() => router.push(`/${tenant}/caja`)} 
-                className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold shrink-0 hover:bg-rose-100 transition-colors cursor-pointer"
-              >
-                <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
-                <span>Caja Cerrada (Abrir F4)</span>
-              </button>
-            )}
-            
-            {/* Right Action Hub */}
-            <div className="flex items-center gap-2 shrink-0">
-              <Button 
                 onClick={() => setIsOpenTabsDialogOpen(true)}
-                variant="outline"
                 title="Cuentas en Espera"
                 className={cn(
-                  "h-10 gap-2 border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded-xl transition-all font-bold shrink-0 text-xs shadow-2xs cursor-pointer",
-                  openTabs.length > 0 && "border-amber-400 text-amber-900 bg-amber-50/70 hover:bg-amber-100"
+                  "h-10 px-2.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 flex items-center justify-center gap-1.5 shrink-0 transition-all cursor-pointer shadow-2xs",
+                  openTabs.length > 0 && "border-amber-400 text-amber-900 bg-amber-50 hover:bg-amber-100"
                 )}
               >
-                <FolderOpen className="h-4 w-4 text-amber-600" />
-                <span className="hidden sm:inline">Cuentas</span>
+                <FolderOpen className="h-4 w-4 text-amber-600 shrink-0" />
                 {openTabs.length > 0 && (
-                  <Badge className="bg-amber-500 text-white rounded-full px-1.5 py-0 min-w-[20px] h-5 flex items-center justify-center font-bold text-[10px]">{openTabs.length}</Badge>
+                  <Badge className="bg-amber-500 text-white rounded-full px-1.5 py-0 min-w-[18px] h-4 flex items-center justify-center font-bold text-[9px]">{openTabs.length}</Badge>
                 )}
-              </Button>
+              </button>
 
-              <Button 
+              {/* Vincular Orden de Trabajo */}
+              <button 
                 onClick={() => setIsLinkOrderOpen(true)}
-                variant="outline"
-                title="Vincular Orden de Trabajo"
-                className="h-10 gap-2 border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded-xl transition-all font-bold shrink-0 text-xs shadow-2xs cursor-pointer"
+                title={currentOrder ? `Orden #${currentOrder.id.slice(-6).toUpperCase()} Vinculada` : "Vincular Orden de Trabajo"}
+                className={cn(
+                  "h-10 w-10 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs relative",
+                  currentOrder && "border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                )}
               >
-                <ClipboardList className="h-4 w-4 text-neutral-500" />
-                <span className="hidden sm:inline">Vincular Orden</span>
-              </Button>
+                <ClipboardList className="h-4 w-4 text-neutral-600" />
+                {currentOrder && (
+                  <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
+                )}
+              </button>
 
-              <Button 
+              {/* Mano de Obra */}
+              <button 
                 onClick={() => setIsLaborModalOpen(true)}
-                variant="outline"
                 title="Añadir Mano de obra personalizada"
-                className="h-10 gap-2 border-neutral-900 bg-neutral-900 text-white hover:bg-black rounded-xl transition-all font-bold shrink-0 text-xs shadow-2xs cursor-pointer"
+                className="h-10 w-10 rounded-xl border border-neutral-900 bg-neutral-900 text-white hover:bg-black flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs"
               >
-                <Wrench className="h-3.5 w-3.5 text-neutral-300" />
-                <span className="hidden sm:inline">Mano de obra</span>
-              </Button>
+                <Wrench className="h-4 w-4 text-neutral-200" />
+              </button>
 
-              <Button
+              {/* Garantía */}
+              <button
                 onClick={() => setIsWarrantyModalOpen(true)}
-                variant="outline"
                 title="Condiciones de Garantía"
                 className={cn(
-                  "h-10 gap-2 rounded-xl transition-all font-bold shrink-0 text-xs shadow-2xs cursor-pointer",
-                  localWarrantyText
-                    ? "border-emerald-500 text-emerald-800 bg-emerald-50 hover:bg-emerald-100"
-                    : "border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  "h-10 w-10 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs relative",
+                  localWarrantyText && "border-emerald-500 text-emerald-800 bg-emerald-50 hover:bg-emerald-100"
                 )}
               >
                 <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span className="hidden lg:inline">Garantía</span>
                 {localWarrantyText && (
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white" />
                 )}
-              </Button>
+              </button>
 
+              {/* Pantalla Completa */}
               <button 
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
-                className="p-2.5 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-600 transition-colors shrink-0 cursor-pointer shadow-2xs"
+                className="h-10 w-10 rounded-xl border border-neutral-200 bg-white hover:bg-neutral-100 text-neutral-600 transition-colors shrink-0 flex items-center justify-center cursor-pointer shadow-2xs"
               >
                 {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
@@ -701,7 +723,7 @@ export default function POSPage() {
           </div>
 
           {/* Category tabs */}
-          <div className="flex items-center gap-2 px-4 py-2.5 overflow-x-auto shrink-0 custom-scrollbar bg-neutral-100/60 border-b border-neutral-200/60">
+          <div className="flex items-center gap-2 px-4 py-2.5 overflow-x-auto shrink-0 custom-scrollbar bg-neutral-100/70 border-b border-neutral-200/70">
             {CATEGORIES.map((cat) => {
               const count = cat === "Todos" 
                 ? allPosItems.length 
@@ -718,6 +740,7 @@ export default function POSPage() {
                       : "bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 border-neutral-200/90"
                   )}
                 >
+                  {getCategoryIcon(cat)}
                   <span>{cat}</span>
                   <span className={cn(
                     "text-[10px] px-1.5 py-0.2 rounded-full font-extrabold",

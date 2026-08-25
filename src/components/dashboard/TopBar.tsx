@@ -223,6 +223,25 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
   return (
     <>
+      {simulatedRole && (
+        <div className="bg-neutral-900 text-white font-bold text-xs py-2 px-4 flex items-center justify-between shadow-md sticky top-0 z-40 border-b border-neutral-800">
+          <div className="flex items-center gap-2.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            <span>Control de Roles Activo: Viendo el sistema como <strong>{roleNames[simulatedRole] || simulatedRole}</strong></span>
+          </div>
+          <button
+            onClick={() => {
+              localStorage.removeItem("simulated-role");
+              window.location.reload();
+            }}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-3 py-1 rounded-lg font-bold cursor-pointer transition-colors"
+          >
+            Volver a Administrador
+          </button>
+        </div>
+      )}
+
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-neutral-100 bg-white/80 px-4 sm:px-8 backdrop-blur-md">
         <div className="flex w-full max-w-md items-center gap-3">
           <Button
@@ -381,6 +400,43 @@ export function TopBar({ onMenuClick }: TopBarProps) {
                 >
                   <Building2 className="h-4 w-4 text-emerald-600" /> Panel Administrador
                 </DropdownMenuItem>
+              )}
+
+              {(currentUser?.role === 'owner' || currentUser?.role === 'superadmin' || isOwner) && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger className="rounded-lg py-2 cursor-pointer gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-600" /> Control de Roles
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent className="rounded-xl border-neutral-100 p-1.5 shadow-xl w-52 bg-white">
+                      <div className="px-2 py-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Ver sistema como:</div>
+                      {[
+                        { role: null, label: "Dueño (Administración Total)" },
+                        { role: "cashier", label: "Cajero (Facturación & POS)" },
+                        { role: "mechanic", label: "Mecánico (Taller & OT)" },
+                        { role: "warehouse", label: "Almacén (Stock & Compras)" },
+                        { role: "receptionist", label: "Recepción (Atención & CRM)" },
+                      ].map((item) => (
+                        <DropdownMenuItem
+                          key={item.label}
+                          onClick={() => {
+                            if (item.role) {
+                              localStorage.setItem("simulated-role", item.role);
+                              toast.info(`Control de roles activo: viendo como ${item.label}`);
+                            } else {
+                              localStorage.removeItem("simulated-role");
+                              toast.success("Vista de Administrador restaurada");
+                            }
+                            window.location.reload();
+                          }}
+                          className="rounded-lg py-1.5 text-xs font-semibold cursor-pointer"
+                        >
+                          {(simulatedRole === item.role || (!simulatedRole && item.role === null)) ? "● " : "○ "} {item.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
               )}
 
               <DropdownMenuItem onClick={handleSupport} className="rounded-lg py-2 cursor-pointer gap-2">

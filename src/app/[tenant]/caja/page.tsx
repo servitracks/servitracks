@@ -5,7 +5,8 @@ import {
   Wallet, Lock, ArrowDownLeft, ArrowUpRight, AlertTriangle, Plus, 
   CheckCircle2, Printer, Search, FileText, PiggyBank, Coins, 
   History, Settings, Eye, Info, RefreshCw, X, Receipt, Check, FileCheck, Users, User,
-  CreditCard, Smartphone
+  CreditCard, Smartphone, Calculator, ShieldAlert, Download, Calendar, Building2, SlidersHorizontal, ArrowRight, ArrowLeft,
+  Car, Wrench, ChevronDown, ChevronUp
 } from "lucide-react";
 import { useStore, Caja, MovimientoCaja, Empleado, Tenant, Invoice } from "@/store/useStore";
 import { useParams, useRouter } from "@/lib/next-compat";
@@ -43,11 +44,25 @@ const formatDateTimeRD = (dateStr: string) => {
 const CATEGORIAS_GASTOS = [
   "Combustible",
   "Almuerzo",
-  "Suministros de Taller",
-  "Limpieza",
-  "Papelería",
-  "Servicios Públicos",
-  "Otros"
+  "Material de Limpieza",
+  "Herramientas Menores",
+  "Transporte / Envíos",
+  "Papelería / Oficina",
+  "Mantenimiento General",
+  "Otros Gastos"
+];
+
+export const DENOMINACIONES_RD = [
+  { value: 2000, label: "RD$ 2,000", type: "billete" as const },
+  { value: 1000, label: "RD$ 1,000", type: "billete" as const },
+  { value: 500, label: "RD$ 500", type: "billete" as const },
+  { value: 200, label: "RD$ 200", type: "billete" as const },
+  { value: 100, label: "RD$ 100", type: "billete" as const },
+  { value: 50, label: "RD$ 50", type: "billete" as const },
+  { value: 25, label: "RD$ 25", type: "moneda" as const },
+  { value: 10, label: "RD$ 10", type: "moneda" as const },
+  { value: 5, label: "RD$ 5", type: "moneda" as const },
+  { value: 1, label: "RD$ 1", type: "moneda" as const },
 ];
 
 export default function CajaPage() {
@@ -65,6 +80,8 @@ export default function CajaPage() {
     technicians = [],
     invoices = [],
     services = [],
+    vehicles = [],
+    customers = [],
     updateInvoice,
     users = []
   } = useStore();
@@ -252,6 +269,8 @@ export default function CajaPage() {
   const [cxcSearch, setCxcSearch] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [selectedInvoiceEdit, setSelectedInvoiceEdit] = useState(false);
+  const [selectedTechInvoiceDetail, setSelectedTechInvoiceDetail] = useState<{ inv: Invoice; item: any } | null>(null);
+  const [expandedTechInvoiceId, setExpandedTechInvoiceId] = useState<string | null>(null);
 
   const findInvoiceForMovement = (mov: MovimientoCaja) => {
     // 1. Try to find any sequence of B or E followed by 10-12 digits (NCF/e-CF)
@@ -529,6 +548,8 @@ export default function CajaPage() {
 
     const tech = technicians.find(t => t.id === selectedTechToPay);
     const monto = techCommissionInfo.total;
+    const countInvoices = pendingTechInvoices.length;
+    const invoiceItemsCopy = [...techCommissionInfo.items];
 
     const nuevoMov: MovimientoCaja = {
       id: crypto.randomUUID(),
@@ -537,7 +558,7 @@ export default function CajaPage() {
       empleado_id: activeCaja.empleado_id,
       tecnico_id: selectedTechToPay,
       tipo: 'PAGO_NOMINA',
-      concepto: `[Pago Técnico] Liquidación a ${tech?.name} por ${pendingTechInvoices.length} facturas`,
+      concepto: `[Pago Técnico] Liquidación a ${tech?.name} por ${countInvoices} factura${countInvoices === 1 ? '' : 's'}`,
       monto,
       metodo: 'EFECTIVO',
       creado_en: new Date().toISOString()
@@ -545,17 +566,18 @@ export default function CajaPage() {
 
     addCajaMovement(nuevoMov);
     
-    // Marcar facturas como pagadas
+    // Marcar facturas como pagadas de comisión para que vuelva a cero el conteo
     pendingTechInvoices.forEach(inv => {
       updateInvoice(inv.id, { isCommissionPaid: true });
     });
 
     // Imprimir comprobante de liquidación inmediatamente
-    handlePrintLiquidacion(selectedTechToPay, techCommissionInfo.items, techCommissionInfo.total, true);
+    handlePrintLiquidacion(selectedTechToPay, invoiceItemsCopy, monto, true);
 
-    setIsPagoTecnicoOpen(false);
-    setSelectedTechToPay("");
-    toast.success("Liquidación a técnico registrada con éxito e impresa");
+    // Cambiar a la pestaña de Historial para ver la liquidación registrada y reiniciar conteo de pendientes
+    setSelectedTechInvoiceDetail(null);
+    setPagoTecnicoTab('history');
+    toast.success(`Liquidación a ${tech?.name || 'técnico'} registrada (${formatRD(monto)}) y enviada al historial`);
   };
   
   const cxcInvoices = useMemo(() => {
@@ -573,6 +595,8 @@ export default function CajaPage() {
   const [aperturaMonto, setAperturaMonto] = useState("");
   const [aperturaCajero, setAperturaCajero] = useState("");
   const [aperturaNotas, setAperturaNotas] = useState("");
+  const [desgloseApertura, setDesgloseApertura] = useState<Record<number, number>>({});
+  const [showAperturaDenom, setShowAperturaDenom] = useState(false);
 
   // Movimiento Form States
   const [movTipo, setMovTipo] = useState<'INGRESO' | 'EGRESO' | 'RETIRO' | 'GASTO_CAJA_CHICA' | 'PAGO_NOMINA'>('INGRESO');
@@ -589,6 +613,23 @@ export default function CajaPage() {
   const [cierreCajeroId, setCierreCajeroId] = useState("");
   const [cierrePin, setCierrePin] = useState("");
   const [cierreNotas, setCierreNotas] = useState("");
+  const [desgloseCierre, setDesgloseCierre] = useState<Record<number, number>>({});
+  const [showCierreDenom, setShowCierreDenom] = useState(false);
+
+  // Remesa / Retiro de Seguridad Form States
+  const [isRemesaOpen, setIsRemesaOpen] = useState(false);
+  const [remesaMonto, setRemesaMonto] = useState("");
+  const [remesaDestino, setRemesaDestino] = useState("BANCO");
+  const [remesaReceptor, setRemesaReceptor] = useState("");
+  const [remesaReferencia, setRemesaReferencia] = useState("");
+  const [remesaNotas, setRemesaNotas] = useState("");
+
+  // Settings Modal State
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [configUmbralDiferencia, setConfigUmbralDiferencia] = useState(currentTenant?.config?.umbral_diferencia_caja?.toString() || "500");
+  const [configLimiteEfectivo, setConfigLimiteEfectivo] = useState(currentTenant?.config?.limite_efectivo_alerta?.toString() || "30000");
+  const [configArqueoCiego, setConfigArqueoCiego] = useState(!!currentTenant?.config?.arqueo_ciego);
+  const [configFormatoTicket, setConfigFormatoTicket] = useState<'57mm' | '80mm'>(currentTenant?.config?.formato_ticket || "80mm");
 
   // Caja Chica Setup Form
   const [ccMontoFijo, setCcMontoFijo] = useState(currentTenant?.monto_caja_chica?.toString() || "10000");
@@ -596,6 +637,8 @@ export default function CajaPage() {
   // Filters for History
   const [histFiltroCajero, setHistFiltroCajero] = useState("all");
   const [histSearch, setHistSearch] = useState("");
+  const [histFechaDesde, setHistFechaDesde] = useState("");
+  const [histFechaHasta, setHistFechaHasta] = useState("");
 
   // Search movements
   const [movSearch, setMovSearch] = useState("");
@@ -605,6 +648,47 @@ export default function CajaPage() {
 
   // Clickable Cards State
   const [detailsModalType, setDetailsModalType] = useState<'CASH_IN_BOX' | 'SALES_CASH' | 'SALES_CARD' | 'SALES_TRANSFER' | null>(null);
+
+  // Denomination calculation helpers
+  const calcDenomTotal = (desglose: Record<number, number>) => {
+    return Object.entries(desglose).reduce((sum, [valStr, qty]) => {
+      const val = parseFloat(valStr);
+      return sum + (isNaN(val) ? 0 : val * (qty || 0));
+    }, 0);
+  };
+
+  const handleDenomChange = (
+    value: number, 
+    qty: number, 
+    type: 'apertura' | 'cierre'
+  ) => {
+    const safeQty = Math.max(0, qty || 0);
+    if (type === 'apertura') {
+      const updated = { ...desgloseApertura, [value]: safeQty };
+      setDesgloseApertura(updated);
+      const total = calcDenomTotal(updated);
+      setAperturaMonto(total > 0 ? total.toString() : "");
+    } else {
+      const updated = { ...desgloseCierre, [value]: safeQty };
+      setDesgloseCierre(updated);
+      const total = calcDenomTotal(updated);
+      setContadoEfectivo(total > 0 ? total.toString() : "");
+    }
+  };
+
+  const handleDenomIncrement = (
+    value: number, 
+    delta: number, 
+    type: 'apertura' | 'cierre'
+  ) => {
+    if (type === 'apertura') {
+      const current = desgloseApertura[value] || 0;
+      handleDenomChange(value, current + delta, 'apertura');
+    } else {
+      const current = desgloseCierre[value] || 0;
+      handleDenomChange(value, current + delta, 'cierre');
+    }
+  };
 
   const detailsData = useMemo(() => {
     if (!detailsModalType) return { title: '', total: 0, items: [] as MovimientoCaja[] };
@@ -668,13 +752,16 @@ export default function CajaPage() {
       monto_inicial: monto,
       estado: 'ABIERTA',
       abierta_en: new Date().toISOString(),
-      notas_apertura: aperturaNotas
+      notas_apertura: aperturaNotas,
+      desglose_apertura: Object.keys(desgloseApertura).length > 0 ? desgloseApertura : undefined
     };
 
     addCaja(nuevaCaja);
     setIsAperturaOpen(false);
     setAperturaMonto("");
     setAperturaNotas("");
+    setDesgloseApertura({});
+    setShowAperturaDenom(false);
     toast.success("¡Caja abierta exitosamente!", {
       action: {
         label: "Ir a Facturación",
@@ -747,6 +834,167 @@ export default function CajaPage() {
     toast.success("Movimiento registrado con éxito");
   };
 
+  // Imprimir comprobante de entrega de valores / remesa
+  const handlePrintRemesa = (data: {
+    monto: number;
+    destino: string;
+    receptor: string;
+    referencia: string;
+    notas: string;
+    cajero: string;
+    fecha: string;
+  }) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const tallerName = currentTenant?.name || "SERVITRACKS";
+    const tallerRnc = currentTenant?.rnc || "";
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Comprobante de Remesa - ${data.destino}</title>
+          <style>
+            @page { margin: 12mm; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; color: #111; font-size: 13px; }
+            .header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 20px; }
+            .header h1 { margin: 0 0 4px 0; font-size: 22px; font-weight: 900; }
+            .header p { margin: 2px 0; color: #555; font-size: 11px; }
+            .badge { display: inline-block; padding: 4px 14px; border-radius: 20px; background: #ea580c; color: white; font-weight: bold; font-size: 11px; margin-top: 6px; text-transform: uppercase; }
+            .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+            .field label { font-size: 10px; color: #64748b; font-weight: 800; text-transform: uppercase; display: block; margin-bottom: 2px; }
+            .field span { font-size: 14px; font-weight: 700; color: #0f172a; }
+            .amount-box { text-align: center; background: #fff7ed; border: 2px dashed #f97316; padding: 18px; border-radius: 12px; margin: 25px 0; }
+            .amount-box .label { font-size: 11px; font-weight: 800; color: #c2410c; text-transform: uppercase; }
+            .amount-box .value { font-size: 28px; font-weight: 900; color: #ea580c; margin-top: 4px; }
+            .signatures { display: flex; justify-content: space-between; margin-top: 70px; }
+            .sig-line { width: 42%; text-align: center; border-top: 1px dashed #64748b; padding-top: 8px; font-size: 11px; font-weight: bold; color: #334155; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${tallerName}</h1>
+            ${tallerRnc ? `<p>RNC: ${tallerRnc}</p>` : ''}
+            <p style="font-weight: 800; text-transform: uppercase; margin-top: 4px;">COMPROBANTE DE RETIRO / ENTREGA DE VALORES</p>
+            <div class="badge">RETIRO DE CAJA #REM-${Date.now().toString().slice(-6)}</div>
+          </div>
+
+          <div class="box">
+            <div class="grid">
+              <div class="field">
+                <label>Destino del Efectivo</label>
+                <span>${data.destino}</span>
+              </div>
+              <div class="field" style="text-align: right;">
+                <label>Fecha & Hora</label>
+                <span>${data.fecha}</span>
+              </div>
+              <div class="field">
+                <label>Cajero Emisor</label>
+                <span>${data.cajero}</span>
+              </div>
+              <div class="field" style="text-align: right;">
+                <label>Receptor / Portador</label>
+                <span>${data.receptor || 'No especificado'}</span>
+              </div>
+              ${data.referencia ? `
+              <div class="field" style="grid-column: span 2;">
+                <label>No. de Referencia / Comprobante de Depósito</label>
+                <span>${data.referencia}</span>
+              </div>` : ''}
+              ${data.notas ? `
+              <div class="field" style="grid-column: span 2;">
+                <label>Observaciones / Motivo</label>
+                <span>${data.notas}</span>
+              </div>` : ''}
+            </div>
+          </div>
+
+          <div class="amount-box">
+            <span class="label">MONTO TOTAL ENTREGADO / RETIRADO</span>
+            <div class="value">RD$ ${data.monto.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </div>
+
+          <div class="signatures">
+            <div class="sig-line">
+              Entregado por (Cajero: ${data.cajero})
+            </div>
+            <div class="sig-line">
+              Recibido / Portador Conforme (${data.receptor || 'Firma Receptor'})
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+
+  // Submit Remesa / Retiro de Seguridad
+  const handleRemesaSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeCaja) return;
+
+    const monto = parseFloat(remesaMonto);
+    if (isNaN(monto) || monto <= 0) {
+      toast.error("Por favor, ingrese un monto válido");
+      return;
+    }
+
+    if (monto > metrics.efectivoEsperado) {
+      toast.error(`El monto a retirar (${formatRD(monto)}) supera el efectivo disponible en caja (${formatRD(metrics.efectivoEsperado)})`);
+      return;
+    }
+
+    const cajeroName = tenantUsers.find(u => u.id === activeCaja.empleado_id)?.name || "Cajero";
+    const destinoLabel = remesaDestino === 'BANCO' ? 'Depósito en Banco' :
+                         remesaDestino === 'BOVEDA' ? 'Caja Fuerte / Bóveda' :
+                         remesaDestino === 'DUENO' ? 'Entrega a Dueño / Gerencia' :
+                         remesaDestino === 'PROVEEDOR' ? 'Pago a Proveedor' : 'Otro';
+
+    const conceptoText = `[Remesa / Retiro] Destino: ${destinoLabel}${remesaReceptor ? ` - Receptor: ${remesaReceptor}` : ''}${remesaReferencia ? ` (Ref: ${remesaReferencia})` : ''}`;
+
+    const nuevoMov: MovimientoCaja = {
+      id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      tenant_id: tenantId,
+      caja_id: activeCaja.id,
+      empleado_id: activeCaja.empleado_id,
+      tipo: 'RETIRO',
+      concepto: conceptoText,
+      monto,
+      metodo: 'EFECTIVO',
+      creado_en: new Date().toISOString()
+    };
+
+    addCajaMovement(nuevoMov);
+
+    const printData = {
+      monto,
+      destino: destinoLabel,
+      receptor: remesaReceptor,
+      referencia: remesaReferencia,
+      notas: remesaNotas,
+      cajero: cajeroName,
+      fecha: new Date().toLocaleString("es-DO")
+    };
+
+    handlePrintRemesa(printData);
+
+    setIsRemesaOpen(false);
+    setRemesaMonto("");
+    setRemesaReceptor("");
+    setRemesaReferencia("");
+    setRemesaNotas("");
+    toast.success("Remesa registrada exitosamente y comprobante generado");
+  };
+
   // Close shift submission
   const handleCierreSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -786,7 +1034,9 @@ export default function CajaPage() {
       monto_contado_tarjeta: valTarjeta,
       monto_contado_transferencia: valTransferencia,
       diferencia: diferencia,
-      notas_cierre: cierreNotas
+      notas_cierre: cierreNotas,
+      empleado_cierre_id: cierreCajeroId,
+      desglose_cierre: Object.keys(desgloseCierre).length > 0 ? desgloseCierre : undefined
     });
 
     toast.success("¡Caja cerrada correctamente!");
@@ -801,7 +1051,9 @@ export default function CajaPage() {
       monto_contado_tarjeta: valTarjeta,
       monto_contado_transferencia: valTransferencia,
       diferencia: diferencia,
-      notas_cierre: cierreNotas
+      notas_cierre: cierreNotas,
+      empleado_cierre_id: cierreCajeroId,
+      desglose_cierre: Object.keys(desgloseCierre).length > 0 ? desgloseCierre : undefined
     };
     
     setSelectedTicketCaja(closedSession);
@@ -814,6 +1066,8 @@ export default function CajaPage() {
     setContadoTransferencia("");
     setCierrePin("");
     setCierreNotas("");
+    setDesgloseCierre({});
+    setShowCierreDenom(false);
   };
 
   // Configure Caja Chica limits
@@ -832,6 +1086,26 @@ export default function CajaPage() {
 
     setIsCajaChicaOpen(false);
     toast.success("Fondo de Caja Chica reiniciado y configurado correctamente");
+  };
+
+  // Save Tenant Caja Config
+  const handleSaveConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    const umbral = parseFloat(configUmbralDiferencia) || 500;
+    const limite = parseFloat(configLimiteEfectivo) || 30000;
+
+    updateTenant(tenantId, {
+      config: {
+        ...currentTenant?.config,
+        umbral_diferencia_caja: umbral,
+        limite_efectivo_alerta: limite,
+        arqueo_ciego: configArqueoCiego,
+        formato_ticket: configFormatoTicket
+      }
+    });
+
+    setIsConfigOpen(false);
+    toast.success("Configuración de control de caja guardada correctamente");
   };
 
   // Filtered and Sorted movements
@@ -908,6 +1182,134 @@ export default function CajaPage() {
       .sort((a, b) => new Date(b.cerrada_en || 0).getTime() - new Date(a.cerrada_en || 0).getTime());
   }, [cajas, tenantId]);
 
+  // Filtered closed shifts by date range and cashier
+  const filteredClosedShifts = useMemo(() => {
+    return closedShifts.filter(shift => {
+      // Cajero filter
+      if (histFiltroCajero !== "all" && shift.empleado_id !== histFiltroCajero && shift.empleado_cierre_id !== histFiltroCajero) {
+        return false;
+      }
+      // Search text
+      if (histSearch) {
+        const q = histSearch.toLowerCase();
+        const openUser = tenantUsers.find(u => u.id === shift.empleado_id)?.name?.toLowerCase() || '';
+        const closeUser = tenantUsers.find(u => u.id === shift.empleado_cierre_id)?.name?.toLowerCase() || '';
+        const idStr = shift.id.toLowerCase();
+        if (!openUser.includes(q) && !closeUser.includes(q) && !idStr.includes(q)) {
+          return false;
+        }
+      }
+      // Date range filter
+      if (histFechaDesde) {
+        const shiftDate = new Date(shift.abierta_en);
+        const fromDate = new Date(histFechaDesde + "T00:00:00");
+        if (shiftDate < fromDate) return false;
+      }
+      if (histFechaHasta) {
+        const shiftDate = new Date(shift.cerrada_en || shift.abierta_en);
+        const toDate = new Date(histFechaHasta + "T23:59:59");
+        if (shiftDate > toDate) return false;
+      }
+      return true;
+    });
+  }, [closedShifts, histFiltroCajero, histSearch, histFechaDesde, histFechaHasta, tenantUsers]);
+
+  // CSV Export functions
+  const exportCierresCSV = () => {
+    if (filteredClosedShifts.length === 0) {
+      toast.error("No hay cierres para exportar en el rango seleccionado");
+      return;
+    }
+
+    const headers = [
+      "ID Turno",
+      "Fecha Apertura",
+      "Fecha Cierre",
+      "Cajero Apertura",
+      "Cajero Cierre",
+      "Monto Inicial (RD$)",
+      "Efectivo Esperado (RD$)",
+      "Efectivo Contado (RD$)",
+      "Tarjeta Contada (RD$)",
+      "Transferencia Contada (RD$)",
+      "Diferencia (RD$)",
+      "Estado",
+      "Notas Cierre"
+    ];
+
+    const rows = filteredClosedShifts.map(s => [
+      s.id,
+      formatDateTimeRD(s.abierta_en),
+      s.cerrada_en ? formatDateTimeRD(s.cerrada_en) : "-",
+      tenantUsers.find(u => u.id === s.empleado_id)?.name || "N/A",
+      s.empleado_cierre_id ? tenantUsers.find(u => u.id === s.empleado_cierre_id)?.name || "N/A" : "-",
+      s.monto_inicial || 0,
+      s.monto_esperado_efectivo || 0,
+      s.monto_contado_efectivo || 0,
+      s.monto_contado_tarjeta || 0,
+      s.monto_contado_transferencia || 0,
+      s.diferencia || 0,
+      s.estado,
+      s.notas_cierre || ""
+    ]);
+
+    const filename = `Cierres_Caja_${tenant}_${new Date().toISOString().split('T')[0]}.csv`;
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
+      + [headers.join(","), ...rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Archivo CSV de cierres exportado con éxito");
+  };
+
+  const exportMovimientosCSV = () => {
+    if (processedActiveMovements.length === 0) {
+      toast.error("No hay movimientos para exportar");
+      return;
+    }
+
+    const headers = [
+      "ID Movimiento",
+      "Fecha y Hora",
+      "Tipo",
+      "Concepto",
+      "Método",
+      "Monto (RD$)",
+      "Mano de Obra (RD$)",
+      "Responsable"
+    ];
+
+    const rows = processedActiveMovements.map(m => [
+      m.id,
+      formatDateTimeRD(m.creado_en),
+      m.tipo,
+      m.concepto,
+      m.metodo,
+      m.monto,
+      m.monto_mano_obra || 0,
+      tenantUsers.find(u => u.id === m.empleado_id)?.name || "N/A"
+    ]);
+
+    const filename = `Movimientos_Caja_${activeCaja ? activeCaja.id : 'turno'}_${new Date().toISOString().split('T')[0]}.csv`;
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
+      + [headers.join(","), ...rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Archivo CSV de movimientos exportado con éxito");
+  };
+
+  const limiteEfectivoAlerta = currentTenant?.config?.limite_efectivo_alerta || 30000;
+  const isHighCash = activeCaja && metrics.efectivoEsperado >= limiteEfectivoAlerta;
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-1 animate-in fade-in duration-300">
       
@@ -920,6 +1322,15 @@ export default function CajaPage() {
           <p className="text-neutral-500">Apertura, movimientos del turno y cierre con cuadre.</p>
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 flex-shrink-0">
+          <Button 
+            variant="outline"
+            className="rounded-xl border-neutral-200 text-neutral-700 hover:bg-neutral-100 font-bold gap-2 h-11"
+            onClick={() => setIsConfigOpen(true)}
+            title="Configuración de Caja"
+          >
+            <SlidersHorizontal className="h-4 w-4 text-neutral-600" />
+            <span className="hidden sm:inline">Configuración</span>
+          </Button>
           <Button 
             className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2 h-11"
             onClick={() => router.push(`/${tenant}/pos`)}
@@ -956,6 +1367,34 @@ export default function CajaPage() {
           )}
         </div>
       </div>
+
+      {/* ── ALERTA DE EFECTIVO ALTO EN CAJA ── */}
+      {isHighCash && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 border-2 border-amber-400/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-sm">
+              <ShieldAlert className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-amber-950 flex items-center gap-2">
+                Alerta de Efectivo Acumulado en Caja
+                <Badge className="bg-amber-100 text-amber-800 border-amber-300 text-[10px] font-extrabold uppercase">
+                  Tope Superado
+                </Badge>
+              </h4>
+              <p className="text-xs text-amber-800 mt-0.5">
+                El efectivo estimado en gaveta es de <span className="font-extrabold text-neutral-900">{formatRD(metrics.efectivoEsperado)}</span> (límite de seguridad: {formatRD(limiteEfectivoAlerta)}). Se recomienda realizar un retiro o remesa a bóveda/banco.
+              </p>
+            </div>
+          </div>
+          <Button 
+            onClick={() => setIsRemesaOpen(true)}
+            className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs h-9 px-4 shadow-sm self-stretch sm:self-auto cursor-pointer flex-shrink-0"
+          >
+            <ArrowUpRight className="h-4 w-4 mr-1" /> Realizar Remesa Ahora
+          </Button>
+        </div>
+      )}
 
       {/* ── TOP METRICS ROW ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1044,15 +1483,26 @@ export default function CajaPage() {
         {/* PANEL 2: Acciones Rápidas */}
         <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl">
           <CardContent className="p-5 h-full flex flex-col justify-center">
-            <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider block mb-3">Acciones Rápidas</span>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">Acciones Rápidas</span>
+              {activeCaja && (
+                <button
+                  type="button"
+                  onClick={() => setIsRemesaOpen(true)}
+                  className="text-[11px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-lg flex items-center gap-1 transition-colors"
+                >
+                  <ShieldAlert className="h-3 w-3 text-amber-600" /> Remesa de Seguridad
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
               <Button 
                 variant="outline" 
                 disabled={!activeCaja}
                 onClick={() => { setMovTipo('INGRESO'); setIsMovOpen(true); }}
                 className="h-10 rounded-xl border-neutral-200 text-xs font-bold gap-2 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 cursor-pointer"
               >
-                <ArrowDownLeft className="h-4 w-4" /> Ingreso
+                <ArrowDownLeft className="h-4 w-4 text-emerald-600" /> Ingreso
               </Button>
               <Button 
                 variant="outline" 
@@ -1060,23 +1510,23 @@ export default function CajaPage() {
                 onClick={() => { setMovTipo('EGRESO'); setIsMovOpen(true); }}
                 className="h-10 rounded-xl border-neutral-200 text-xs font-bold gap-2 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 cursor-pointer"
               >
-                <ArrowUpRight className="h-4 w-4" /> Egreso
+                <ArrowUpRight className="h-4 w-4 text-rose-600" /> Egreso
               </Button>
               <Button 
                 variant="outline" 
                 disabled={!activeCaja}
-                onClick={() => { setMovTipo('RETIRO'); setIsMovOpen(true); }}
-                className="h-10 rounded-xl border-neutral-200 text-xs font-bold hover:bg-neutral-50 cursor-pointer"
+                onClick={() => setIsRemesaOpen(true)}
+                className="h-10 rounded-xl border-neutral-200 text-xs font-bold gap-1.5 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-200 cursor-pointer"
               >
-                Retiro
+                <Building2 className="h-3.5 w-3.5 text-amber-600" /> Remesa / Retiro
               </Button>
               <Button 
                 variant="outline" 
                 disabled={!activeCaja}
                 onClick={() => { setMovTipo('GASTO_CAJA_CHICA'); setIsMovOpen(true); }}
-                className="h-10 rounded-xl border-neutral-200 text-xs font-bold hover:bg-neutral-50 cursor-pointer"
+                className="h-10 rounded-xl border-neutral-200 text-xs font-bold gap-1.5 hover:bg-blue-50 hover:text-blue-700 cursor-pointer"
               >
-                Caja chica
+                <PiggyBank className="h-3.5 w-3.5 text-blue-600" /> Caja chica
               </Button>
             </div>
             <div className="mt-3">
@@ -1145,6 +1595,16 @@ export default function CajaPage() {
                 className="pl-9 h-9 text-xs rounded-xl border-neutral-200"
               />
             </div>
+            <Button
+              variant="outline"
+              onClick={exportMovimientosCSV}
+              disabled={processedActiveMovements.length === 0}
+              className="h-9 rounded-xl border-neutral-200 text-neutral-700 gap-1.5 px-3 whitespace-nowrap font-bold text-xs"
+              title="Exportar a CSV / Excel"
+            >
+              <Download className="h-3.5 w-3.5 text-neutral-600" />
+              <span className="hidden sm:inline">Exportar CSV</span>
+            </Button>
             <Button
               variant="outline"
               onClick={() => setIsPrintMovimientosOpen(true)}
@@ -1296,10 +1756,24 @@ export default function CajaPage() {
       {/* Histórico de Cierres */}
       <Card className="border-neutral-200 bg-white shadow-sm rounded-2xl overflow-hidden mt-6">
         <CardHeader className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white">
-          <CardTitle className="font-heading text-lg font-bold text-neutral-900">
-            Histórico de cierres
-          </CardTitle>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <CardTitle className="font-heading text-lg font-bold text-neutral-900">
+              Histórico de cierres
+            </CardTitle>
+            <Badge variant="outline" className="rounded-full px-3 py-0.5 border-neutral-200 text-neutral-600 bg-white">
+              {filteredClosedShifts.length}
+            </Badge>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={exportCierresCSV}
+              disabled={filteredClosedShifts.length === 0}
+              className="rounded-xl border-neutral-200 text-neutral-700 hover:bg-neutral-50 font-bold gap-1.5 text-xs h-9 cursor-pointer"
+              title="Exportar cierres a archivo CSV"
+            >
+              <Download className="h-3.5 w-3.5 text-neutral-600" /> Exportar CSV
+            </Button>
             <Button 
               variant="outline"
               className="rounded-xl border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold gap-2 text-xs h-9 cursor-pointer"
@@ -1325,6 +1799,71 @@ export default function CajaPage() {
             </Button>
           </div>
         </CardHeader>
+        
+        {/* Filtros de Histórico de Cierres (Búsqueda, Cajero, Rango de Fechas) */}
+        <div className="p-4 bg-neutral-50/70 border-b border-neutral-100 grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-400" />
+            <Input 
+              placeholder="Buscar por ID o cajero..."
+              value={histSearch}
+              onChange={(e) => setHistSearch(e.target.value)}
+              className="pl-8 h-8 text-xs rounded-xl border-neutral-200 bg-white"
+            />
+          </div>
+          <div>
+            <Select value={histFiltroCajero} onValueChange={(val) => val && setHistFiltroCajero(val)}>
+              <SelectTrigger className="h-8 rounded-xl border-neutral-200 bg-white text-xs">
+                <SelectValue placeholder="Todos los cajeros" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all">Todos los cajeros</SelectItem>
+                {tenantUsers.map(emp => (
+                  <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="h-3.5 w-3.5 text-neutral-400 flex-shrink-0" />
+            <Input 
+              type="date"
+              placeholder="Desde"
+              value={histFechaDesde}
+              onChange={(e) => setHistFechaDesde(e.target.value)}
+              className="h-8 text-xs rounded-xl border-neutral-200 bg-white"
+              title="Fecha Desde"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Calendar className="h-3.5 w-3.5 text-neutral-400 flex-shrink-0" />
+            <Input 
+              type="date"
+              placeholder="Hasta"
+              value={histFechaHasta}
+              onChange={(e) => setHistFechaHasta(e.target.value)}
+              className="h-8 text-xs rounded-xl border-neutral-200 bg-white"
+              title="Fecha Hasta"
+            />
+            {(histFechaDesde || histFechaHasta || histSearch || histFiltroCajero !== "all") && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setHistFechaDesde("");
+                  setHistFechaHasta("");
+                  setHistSearch("");
+                  setHistFiltroCajero("all");
+                }}
+                className="h-8 px-2 text-neutral-500 hover:text-neutral-900 rounded-lg text-xs"
+                title="Limpiar filtros"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
@@ -1340,14 +1879,14 @@ export default function CajaPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {closedShifts.length === 0 ? (
+                {filteredClosedShifts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="p-10 text-center text-neutral-400 font-semibold">
-                      No hay historial de cierres disponible.
+                      No hay historial de cierres disponible para los filtros aplicados.
                     </td>
                   </tr>
                 ) : (
-                  closedShifts.map((shift) => (
+                  filteredClosedShifts.map((shift) => (
                     <tr key={shift.id} className="hover:bg-neutral-50/50 transition-colors">
                       <td className="p-4 text-neutral-600 font-medium">
                         {formatDateTimeRD(shift.abierta_en)}
@@ -1392,7 +1931,7 @@ export default function CajaPage() {
 
       {/* DIALOG 1: Apertura de Caja */}
       <Dialog open={isAperturaOpen} onOpenChange={setIsAperturaOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+        <DialogContent className="sm:max-w-lg rounded-2xl p-6 overflow-y-auto max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
               <Wallet className="h-5 w-5 text-black" /> Apertura de Caja Diaria
@@ -1404,7 +1943,17 @@ export default function CajaPage() {
 
           <form onSubmit={handleAperturaSubmit} className="space-y-4 pt-2">
             <div className="space-y-1.5">
-              <Label htmlFor="apertura-monto" className="text-xs font-semibold text-neutral-600">Efectivo Inicial en Caja (RD$)</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="apertura-monto" className="text-xs font-semibold text-neutral-600">Efectivo Inicial en Caja (RD$)</Label>
+                <button
+                  type="button"
+                  onClick={() => setShowAperturaDenom(!showAperturaDenom)}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Calculator className="h-3.5 w-3.5" />
+                  {showAperturaDenom ? "Ocultar Calculadora" : "Usar Calculadora de Billetes"}
+                </button>
+              </div>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-sm">RD$</span>
                 <Input 
@@ -1414,11 +1963,71 @@ export default function CajaPage() {
                   step="0.01"
                   required
                   value={aperturaMonto}
-                  onChange={(e) => setAperturaMonto(e.target.value)}
+                  onChange={(e) => {
+                    setAperturaMonto(e.target.value);
+                    if (showAperturaDenom) setDesgloseApertura({});
+                  }}
                   className="pl-12 h-11 rounded-xl border-neutral-200 text-sm focus:ring-2 focus:ring-black"
                 />
               </div>
             </div>
+
+            {/* Calculadora de Denominaciones en Apertura */}
+            {showAperturaDenom && (
+              <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50/70 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-neutral-600 uppercase tracking-wider">
+                    Conteo de Billetes y Monedas
+                  </span>
+                  <span className="text-xs font-black text-blue-700">
+                    Suma: {formatRD(calcDenomTotal(desgloseApertura))}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                  {DENOMINACIONES_RD.map((denom) => {
+                    const count = desgloseApertura[denom.value] || 0;
+                    const subtotal = count * denom.value;
+                    return (
+                      <div key={denom.value} className="flex items-center justify-between bg-white p-2 rounded-lg border border-neutral-200/90 text-xs shadow-2xs">
+                        <span className={cn(
+                          "font-bold text-[10px] px-1.5 py-0.5 rounded",
+                          denom.type === 'billete' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-amber-50 text-amber-700 border border-amber-100"
+                        )}>
+                          {denom.label}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDenomIncrement(denom.value, 1, 'apertura')}
+                            className="h-6 px-1.5 rounded bg-neutral-100 hover:bg-neutral-200 text-[10px] font-bold text-neutral-700 cursor-pointer"
+                          >
+                            +1
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDenomIncrement(denom.value, 5, 'apertura')}
+                            className="h-6 px-1.5 rounded bg-neutral-100 hover:bg-neutral-200 text-[10px] font-bold text-neutral-700 cursor-pointer"
+                          >
+                            +5
+                          </button>
+                          <Input 
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={count || ""}
+                            onChange={(e) => handleDenomChange(denom.value, parseInt(e.target.value) || 0, 'apertura')}
+                            className="w-11 h-6 text-center text-xs p-0.5 rounded-md font-mono"
+                          />
+                          <span className="w-14 text-right font-mono font-bold text-[10px] text-neutral-700">
+                            ${subtotal.toLocaleString('es-DO')}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="apertura-cajero" className="text-xs font-semibold text-neutral-600">Cajero Responsable</Label>
@@ -1467,7 +2076,7 @@ export default function CajaPage() {
 
       {/* DIALOG 2: Cierre y Arqueo de Caja */}
       <Dialog open={isCierreOpen} onOpenChange={setIsCierreOpen}>
-        <DialogContent className="sm:max-w-lg rounded-2xl p-6 overflow-y-auto max-h-[90vh]">
+        <DialogContent className="sm:max-w-xl rounded-2xl p-6 overflow-y-auto max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
               <Lock className="h-5 w-5 text-rose-600" /> Cierre y Arqueo de Caja
@@ -1481,7 +2090,9 @@ export default function CajaPage() {
             {/* Split count breakdown */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="count-efectivo" className="text-xs font-semibold text-neutral-600">Efectivo Contado</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="count-efectivo" className="text-xs font-semibold text-neutral-600">Efectivo Contado</Label>
+                </div>
                 <div className="relative">
                   <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">RD$</span>
                   <Input 
@@ -1491,11 +2102,16 @@ export default function CajaPage() {
                     step="0.01"
                     required
                     value={contadoEfectivo}
-                    onChange={(e) => setContadoEfectivo(e.target.value)}
+                    onChange={(e) => {
+                      setContadoEfectivo(e.target.value);
+                      if (showCierreDenom) setDesgloseCierre({});
+                    }}
                     className="pl-9 h-10 rounded-xl border-neutral-200 text-xs"
                   />
                 </div>
-                <p className="text-[10px] text-neutral-400">Esperado: {formatRD(metrics.efectivoEsperado)}</p>
+                <p className="text-[10px] text-neutral-400">
+                  {currentTenant?.config?.arqueo_ciego ? "🔒 Arqueo a Ciegas" : `Esperado: ${formatRD(metrics.efectivoEsperado)}`}
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1513,7 +2129,9 @@ export default function CajaPage() {
                     className="pl-9 h-10 rounded-xl border-neutral-200 text-xs"
                   />
                 </div>
-                <p className="text-[10px] text-neutral-400">Esperado: {formatRD(metrics.tarjetaTotal)}</p>
+                <p className="text-[10px] text-neutral-400">
+                  {currentTenant?.config?.arqueo_ciego ? "🔒 Arqueo a Ciegas" : `Esperado: ${formatRD(metrics.tarjetaTotal)}`}
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -1531,12 +2149,84 @@ export default function CajaPage() {
                     className="pl-9 h-10 rounded-xl border-neutral-200 text-xs"
                   />
                 </div>
-                <p className="text-[10px] text-neutral-400">Esperado: {formatRD(metrics.transferenciaTotal)}</p>
+                <p className="text-[10px] text-neutral-400">
+                  {currentTenant?.config?.arqueo_ciego ? "🔒 Arqueo a Ciegas" : `Esperado: ${formatRD(metrics.transferenciaTotal)}`}
+                </p>
               </div>
             </div>
 
-            {/* Calculations preview dynamic banner */}
-            {contadoEfectivo && (
+            {/* Calculadora de Denominaciones en Cierre */}
+            <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setShowCierreDenom(!showCierreDenom)}
+                  className="text-xs font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Calculator className="h-3.5 w-3.5" />
+                  {showCierreDenom ? "Ocultar Desglose de Billetes" : "Desglosar Efectivo por Billetes y Monedas (RD$)"}
+                </button>
+                {showCierreDenom && (
+                  <span className="text-xs font-extrabold text-blue-900 font-mono">
+                    {formatRD(calcDenomTotal(desgloseCierre))}
+                  </span>
+                )}
+              </div>
+
+              {showCierreDenom && (
+                <div className="pt-2 border-t border-neutral-200 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                  {DENOMINACIONES_RD.map((denom) => {
+                    const count = desgloseCierre[denom.value] || 0;
+                    const subtotal = count * denom.value;
+                    return (
+                      <div key={denom.value} className="flex items-center justify-between bg-white p-2 rounded-lg border border-neutral-200/90 text-xs shadow-2xs">
+                        <span className={cn(
+                          "font-bold text-[10px] px-1.5 py-0.5 rounded",
+                          denom.type === 'billete' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-amber-50 text-amber-700 border border-amber-100"
+                        )}>
+                          {denom.label}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleDenomIncrement(denom.value, 1, 'cierre')}
+                            className="h-6 px-1.5 rounded bg-neutral-100 hover:bg-neutral-200 text-[10px] font-bold text-neutral-700 cursor-pointer"
+                          >
+                            +1
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDenomIncrement(denom.value, 5, 'cierre')}
+                            className="h-6 px-1.5 rounded bg-neutral-100 hover:bg-neutral-200 text-[10px] font-bold text-neutral-700 cursor-pointer"
+                          >
+                            +5
+                          </button>
+                          <Input 
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={count || ""}
+                            onChange={(e) => handleDenomChange(denom.value, parseInt(e.target.value) || 0, 'cierre')}
+                            className="w-11 h-6 text-center text-xs p-0.5 rounded-md font-mono"
+                          />
+                          <span className="w-14 text-right font-mono font-bold text-[10px] text-neutral-700">
+                            ${subtotal.toLocaleString('es-DO')}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Calculations preview dynamic banner or Blind count notice */}
+            {currentTenant?.config?.arqueo_ciego ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3 text-xs text-blue-900 flex items-center gap-2">
+                <Lock className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                <span><strong>Modo Arqueo a Ciegas Activo:</strong> Ingrese el dinero físico presente. La conciliación y posibles diferencias se calcularán internamente al autorizar el cierre.</span>
+              </div>
+            ) : contadoEfectivo ? (
               <div className={cn(
                 "rounded-xl border p-3 flex justify-between items-center text-xs",
                 (parseFloat(contadoEfectivo) - metrics.efectivoEsperado) === 0
@@ -1551,7 +2241,7 @@ export default function CajaPage() {
                   {formatRD(parseFloat(contadoEfectivo) - metrics.efectivoEsperado)}
                 </span>
               </div>
-            )}
+            ) : null}
 
             {/* Cashier Verification PIN */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-neutral-100 pt-3">
@@ -1565,7 +2255,7 @@ export default function CajaPage() {
                   </SelectTrigger>
                   <SelectContent className="rounded-xl">
                     {tenantUsers.map(emp => (
-                      <SelectItem key={emp.id} value={emp.id}>{emp.name} {} ({emp.role})</SelectItem>
+                      <SelectItem key={emp.id} value={emp.id}>{emp.name} ({emp.role})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1619,7 +2309,213 @@ export default function CajaPage() {
         </DialogContent>
       </Dialog>
 
-      {/* DIALOG 3: Registrar Movimiento Rápido */}
+      {/* DIALOG: Remesa / Retiro Formal de Efectivo */}
+      <Dialog open={isRemesaOpen} onOpenChange={setIsRemesaOpen}>
+        <DialogContent className="sm:max-w-lg rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-amber-600" /> Registro de Remesa / Retiro de Valores
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Retire efectivo de la gaveta para resguardo en banco, caja fuerte o entrega a administración, generando un comprobante formal.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleRemesaSubmit} className="space-y-4 pt-2">
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs flex justify-between items-center text-amber-950">
+              <span>Efectivo actual disponible en caja:</span>
+              <span className="font-black text-sm">{formatRD(metrics.efectivoEsperado)}</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="remesa-monto" className="text-xs font-semibold text-neutral-700">Monto a Retirar (RD$)</Label>
+                <div className="relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">RD$</span>
+                  <Input 
+                    id="remesa-monto"
+                    type="number"
+                    placeholder="0.00"
+                    step="0.01"
+                    required
+                    value={remesaMonto}
+                    onChange={(e) => setRemesaMonto(e.target.value)}
+                    className="pl-9 h-10 rounded-xl border-neutral-200 text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="remesa-destino" className="text-xs font-semibold text-neutral-700">Destino del Efectivo</Label>
+                <Select value={remesaDestino} onValueChange={(val) => val && setRemesaDestino(val)}>
+                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-xs">
+                    <SelectValue placeholder="Seleccione destino" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="BANCO">Depósito en Banco</SelectItem>
+                    <SelectItem value="BOVEDA">Caja Fuerte / Bóveda</SelectItem>
+                    <SelectItem value="DUENO">Entrega a Dueño / Gerencia</SelectItem>
+                    <SelectItem value="PROVEEDOR">Pago a Proveedor</SelectItem>
+                    <SelectItem value="OTRO">Otro Destino</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="remesa-receptor" className="text-xs font-semibold text-neutral-700">Nombre del Receptor / Portador</Label>
+                <Input 
+                  id="remesa-receptor"
+                  placeholder="Ej: Juan Pérez / Seguridad"
+                  value={remesaReceptor}
+                  onChange={(e) => setRemesaReceptor(e.target.value)}
+                  className="h-10 rounded-xl border-neutral-200 text-xs"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="remesa-referencia" className="text-xs font-semibold text-neutral-700">No. Comprobante / Ref. Depósito</Label>
+                <Input 
+                  id="remesa-referencia"
+                  placeholder="Ej: DEP-948210 / BHD"
+                  value={remesaReferencia}
+                  onChange={(e) => setRemesaReferencia(e.target.value)}
+                  className="h-10 rounded-xl border-neutral-200 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="remesa-notas" className="text-xs font-semibold text-neutral-700">Observaciones Adicionales</Label>
+              <Textarea 
+                id="remesa-notas"
+                placeholder="Detalles sobre el retiro..."
+                value={remesaNotas}
+                onChange={(e) => setRemesaNotas(e.target.value)}
+                className="rounded-xl border-neutral-200 text-xs"
+              />
+            </div>
+
+            <DialogFooter className="mt-4 flex gap-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setIsRemesaOpen(false)}
+                className="rounded-xl border-neutral-200 h-10"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                type="submit"
+                className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold h-10 shadow-lg shadow-amber-600/10 gap-1.5"
+              >
+                <Printer className="h-4 w-4" /> Registrar e Imprimir Comprobante
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG: Configuración de Caja */}
+      <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg font-bold flex items-center gap-2">
+              <SlidersHorizontal className="h-5 w-5 text-neutral-900" /> Configuración de Control de Caja
+            </DialogTitle>
+            <DialogDescription className="text-xs text-neutral-500">
+              Personalice las políticas de seguridad, arqueo ciego y límites de efectivo para este taller.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveConfig} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="cfg-umbral" className="text-xs font-semibold text-neutral-700">
+                Umbral de Alerta por Diferencia de Cuadre (RD$)
+              </Label>
+              <Input 
+                id="cfg-umbral"
+                type="number"
+                placeholder="500"
+                value={configUmbralDiferencia}
+                onChange={(e) => setConfigUmbralDiferencia(e.target.value)}
+                className="h-10 rounded-xl border-neutral-200 text-xs"
+              />
+              <p className="text-[10px] text-neutral-400">
+                Si la diferencia al cerrar la caja supera este monto, el sistema emitirá una advertencia de auditoría.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cfg-limite" className="text-xs font-semibold text-neutral-700">
+                Límite de Efectivo para Alerta de Remesa (RD$)
+              </Label>
+              <Input 
+                id="cfg-limite"
+                type="number"
+                placeholder="30000"
+                value={configLimiteEfectivo}
+                onChange={(e) => setConfigLimiteEfectivo(e.target.value)}
+                className="h-10 rounded-xl border-neutral-200 text-xs"
+              />
+              <p className="text-[10px] text-neutral-400">
+                Tope máximo sugerido de efectivo en cajón antes de alertar para remesa a banco/bóveda.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cfg-formato" className="text-xs font-semibold text-neutral-700">
+                Formato de Impresora Térmica Predeterminado
+              </Label>
+              <Select value={configFormatoTicket} onValueChange={(val) => val && setConfigFormatoTicket(val as any)}>
+                <SelectTrigger className="h-10 rounded-xl border-neutral-200 text-xs">
+                  <SelectValue placeholder="Formato" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="80mm">80 mm (Estándar POS)</SelectItem>
+                  <SelectItem value="57mm">57 mm (Mini Térmico / Portátil)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
+              <div>
+                <Label htmlFor="cfg-ciego" className="text-xs font-bold text-neutral-800 block cursor-pointer">
+                  Activar Arqueo a Ciegas (Blind Count)
+                </Label>
+                <p className="text-[10px] text-neutral-400">
+                  Oculta los montos teóricos esperados al cajero durante el conteo de cierre.
+                </p>
+              </div>
+              <input 
+                id="cfg-ciego"
+                type="checkbox"
+                checked={configArqueoCiego}
+                onChange={(e) => setConfigArqueoCiego(e.target.checked)}
+                className="h-5 w-5 rounded border-neutral-300 text-black focus:ring-black cursor-pointer"
+              />
+            </div>
+
+            <DialogFooter className="mt-4 flex gap-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setIsConfigOpen(false)}
+                className="rounded-xl border-neutral-200 h-10"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                type="submit"
+                className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold h-10"
+              >
+                Guardar Configuración
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isMovOpen} onOpenChange={setIsMovOpen}>
         <DialogContent className="sm:max-w-md rounded-2xl p-6">
           <DialogHeader>
@@ -2075,6 +2971,26 @@ export default function CajaPage() {
 
                       <div className="border-t border-dashed border-neutral-400 my-2" />
                       
+                      {/* Desglose de denominaciones físicas si existe */}
+                      {selectedTicketCaja.desglose_cierre && Object.values(selectedTicketCaja.desglose_cierre).some(v => v > 0) && (
+                        <div className="mb-2">
+                          <div className="text-center font-bold text-[9px] uppercase tracking-wide mb-1 text-neutral-500">
+                            DESGLOSE DE BILLETES
+                          </div>
+                          {DENOMINACIONES_RD.map((denom) => {
+                            const cant = selectedTicketCaja.desglose_cierre?.[denom.value] || 0;
+                            if (cant <= 0) return null;
+                            return (
+                              <div key={denom.value} className="flex justify-between text-[9px]">
+                                <span>{cant} x {denom.label}:</span>
+                                <span>${(cant * denom.value).toLocaleString('es-DO')}</span>
+                              </div>
+                            );
+                          })}
+                          <div className="border-t border-dashed border-neutral-300 my-1.5" />
+                        </div>
+                      )}
+
                       <div className="text-center font-bold text-[9px] uppercase tracking-wide mb-1 text-neutral-500">
                         OTROS MEDIOS
                       </div>
@@ -2168,19 +3084,40 @@ export default function CajaPage() {
                 const printContents = document.getElementById("arqueo-thermal-receipt")?.innerHTML;
                 if (!printContents) return;
                 
-                const originalContents = document.body.innerHTML;
-                
-                // Open separate printable popup or print inline
-                document.body.innerHTML = `
-                  <div style="font-family: monospace; padding: 20px; display: flex; justify-content: center;">
-                    ${printContents}
-                  </div>
-                `;
-                
-                window.print();
-                
-                // Restore original DOM
-                window.location.reload();
+                const win = window.open('', '', 'height=600,width=400');
+                if (win) {
+                  win.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <title>Arqueo de Caja - ${currentTenant?.name || "ServiTracks"}</title>
+                        <style>
+                          @page { size: ${currentTenant?.config?.formato_ticket === '57mm' ? '58mm' : '80mm'} auto; margin: 0; }
+                          body { font-family: monospace; font-size: 10px; margin: 8px; line-height: 1.4; }
+                          .text-center { text-align: center; }
+                          .font-bold { font-weight: bold; }
+                          .font-black { font-weight: 900; }
+                          .flex { display: flex; justify-content: space-between; }
+                          .border-t { border-top: 1px dashed #444; margin: 6px 0; }
+                          .border-b { border-bottom: 1px dashed #444; margin: 6px 0; }
+                          .uppercase { text-transform: uppercase; }
+                        </style>
+                      </head>
+                      <body>
+                        ${printContents}
+                        <script>
+                          window.onload = function() {
+                            window.print();
+                            window.onafterprint = function() { window.close(); };
+                          };
+                        </script>
+                      </body>
+                    </html>
+                  `);
+                  win.document.close();
+                } else {
+                  window.print();
+                }
               }}
               className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold gap-2"
             >
@@ -2403,55 +3340,256 @@ export default function CajaPage() {
               </div>
             </div>
 
-            {pagoTecnicoTab === 'pending' ? (
+            {selectedTechInvoiceDetail ? (
+              /* VISTA DETALLE: SOLO COMISIONES Y MANO DE OBRA DEL TÉCNICO */
+              (() => {
+                const { inv, item } = selectedTechInvoiceDetail;
+                const tech = technicians.find(t => t.id === selectedTechToPay);
+                const customer = customers.find(c => c.id === inv.customerId);
+                const vehicle = inv.vehicleId ? vehicles.find(v => v.id === inv.vehicleId) : null;
+
+                // Filtrar solo los trabajos/servicios que corresponden a mano de obra y comisiones
+                const techItems = (inv.items || []).map((it) => {
+                  const isService = isServiceItem(it, services);
+                  const isLabor = (it.id && it.id.startsWith("labor-")) || (it.name && it.name.toLowerCase() === "mano de obra");
+                  
+                  let itCommission = 0;
+                  if (isService) {
+                    if (isLabor) {
+                      itCommission = ((it.laborPrice ?? it.unitPrice) || 0) * (it.quantity || 1);
+                    } else {
+                      let safeLabor = it.laborPrice || 0;
+                      if (it.unitPrice && safeLabor > it.unitPrice) safeLabor = safeLabor / 100;
+                      if (safeLabor === 0 && tech?.pagoNomina && tech.tipoPago === "porcentaje") {
+                        safeLabor = ((it.unitPrice || 0) * tech.pagoNomina) / 100;
+                      }
+                      itCommission = safeLabor * (it.quantity || 1);
+                    }
+                  }
+
+                  return {
+                    ...it,
+                    isService,
+                    isLabor,
+                    commission: itCommission,
+                  };
+                }).filter(it => it.commission > 0 || it.isLabor || it.isService);
+
+                return (
+                  <div className="space-y-4 animate-in fade-in-50 duration-200">
+                    {/* Header con botón Volver y Total */}
+                    <div className="bg-neutral-900 text-white rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTechInvoiceDetail(null)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-neutral-300 hover:text-white bg-neutral-800 hover:bg-neutral-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <ArrowLeft className="h-3.5 w-3.5" /> Volver a Lista
+                          </button>
+                          <span className="bg-blue-600 text-white text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider">
+                            Factura #{inv.id.slice(-6).toUpperCase()}
+                          </span>
+                          {inv.ncf && (
+                            <span className="bg-neutral-800 text-neutral-300 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border border-neutral-700">
+                              NCF: {inv.ncf}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-base font-bold text-white flex items-center gap-1.5 pt-1">
+                          <Wrench className="h-4 w-4 text-emerald-400" /> Trabajos y Mano de Obra Realizados
+                        </h4>
+                        <p className="text-[11px] text-neutral-400">
+                          Emitida el {new Date(inv.createdAt).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' })} • Técnico: <strong className="text-neutral-200">{tech?.name || 'Técnico'}</strong>
+                        </p>
+                      </div>
+
+                      <div className="bg-neutral-800/90 border border-neutral-700 rounded-xl p-3 text-right shrink-0">
+                        <span className="text-[10px] font-bold uppercase text-neutral-400 tracking-wider">Total Comisión a Liquidar</span>
+                        <p className="text-xl font-black text-emerald-400 font-mono">
+                          {formatRD(item.totalFila)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Cliente & Vehículo Minimalist Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200/80">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1 mb-0.5">
+                          <User className="h-3.5 w-3.5 text-neutral-500" /> Cliente
+                        </span>
+                        <p className="font-bold text-xs text-neutral-900">
+                          {inv.customerName || customer?.name || "Cliente No Registrado"}
+                        </p>
+                        {customer?.phone && (
+                          <p className="text-[11px] text-neutral-500">Tel: {customer.phone}</p>
+                        )}
+                      </div>
+
+                      <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200/80">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1 mb-0.5">
+                          <Car className="h-3.5 w-3.5 text-neutral-500" /> Vehículo Atendido
+                        </span>
+                        <p className="font-bold text-xs text-neutral-900">
+                          {vehicle ? `${vehicle.brand} ${vehicle.model} ${vehicle.year ? `(${vehicle.year})` : ''}` : (inv.vehicleId || 'Vehículo de mostrador')}
+                        </p>
+                        <div className="text-[11px] text-neutral-500 flex items-center gap-2">
+                          {vehicle?.plate && (
+                            <span className="bg-neutral-200/80 font-mono font-bold px-1.5 py-0.2 rounded text-neutral-800 text-[10px]">
+                              🚗 {vehicle.plate}
+                            </span>
+                          )}
+                          {inv.km && <span>KM: {inv.km.toLocaleString()}</span>}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tabla Minimalista: Solo Trabajo / Servicio, Fecha, Tipo y Monto de Comisión */}
+                    <div className="border border-neutral-200 rounded-xl overflow-hidden shadow-2xs bg-white">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="bg-neutral-50/90 border-b border-neutral-200 text-neutral-500 font-bold uppercase text-[10px] tracking-wider">
+                            <th className="py-2.5 px-3.5">Trabajo / Servicio Realizado</th>
+                            <th className="py-2.5 px-3.5 w-28">Fecha</th>
+                            <th className="py-2.5 px-3.5 text-center w-28">Tipo</th>
+                            <th className="py-2.5 px-3.5 text-right w-36">Comisión / M.O.</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-100">
+                          {techItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-6 text-center text-neutral-400 italic text-xs">
+                                No se encontraron servicios ni mano de obra asignada a esta factura.
+                              </td>
+                            </tr>
+                          ) : (
+                            techItems.map((it, idx) => (
+                              <tr key={idx} className="hover:bg-neutral-50/70 transition-colors">
+                                <td className="py-3 px-3.5 font-semibold text-neutral-900">
+                                  {it.name}
+                                  {it.quantity && it.quantity > 1 && (
+                                    <span className="ml-2 text-[10px] text-neutral-500 font-mono">
+                                      (x{it.quantity})
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3.5 text-neutral-500 font-mono text-[11px] whitespace-nowrap">
+                                  {new Date(inv.createdAt).toLocaleDateString('es-DO')}
+                                </td>
+                                <td className="py-3 px-3.5 text-center">
+                                  <span className="text-[10px] px-2 py-0.5 rounded-md font-bold bg-neutral-100 text-neutral-700 border border-neutral-200">
+                                    {it.isLabor ? "Mano de Obra" : "Servicio"}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3.5 text-right font-mono font-bold text-neutral-900 text-sm">
+                                  {formatRD(it.commission)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        <tfoot className="bg-neutral-50/90 border-t border-neutral-200 font-bold">
+                          <tr>
+                            <td colSpan={3} className="py-3 px-3.5 text-right uppercase text-[11px] text-neutral-600">
+                              Total Comisión de esta Factura:
+                            </td>
+                            <td className="py-3 px-3.5 text-right font-mono font-black text-emerald-600 text-base">
+                              {formatRD(item.totalFila)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : pagoTecnicoTab === 'pending' ? (
               <>
                 {selectedTechToPay && (
                   <>
                     {techCommissionInfo.items.length === 0 ? (
-                      <div className="bg-neutral-50 p-6 rounded-xl border border-neutral-200 text-center">
-                        <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2 opacity-80" />
-                        <p className="text-sm font-semibold text-neutral-700">El técnico está al día</p>
+                      <div className="bg-neutral-50 p-8 rounded-2xl border border-neutral-200 text-center">
+                        <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-2 opacity-90" />
+                        <p className="text-sm font-bold text-neutral-800">El técnico está al día</p>
                         <p className="text-xs text-neutral-500 mt-0.5">No hay facturas pendientes de comisión.</p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
-                        <div className="border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
-                          <table className="w-full text-left text-xs">
-                            <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase">
+                      <div className="space-y-3.5">
+                        <div className="border border-neutral-200/90 rounded-2xl overflow-hidden shadow-2xs bg-white">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead className="bg-neutral-50/90 border-b border-neutral-200 text-neutral-500 uppercase text-[10px] tracking-wider">
                               <tr>
-                                <th className="p-3 font-bold">Factura / Fecha</th>
-                                <th className="p-3 font-bold text-right text-purple-700">Comisión</th>
-                                <th className="p-3 font-bold text-right text-blue-700">Mano de Obra</th>
-                                <th className="p-3 font-bold text-right text-neutral-900">Total Fila</th>
+                                <th className="py-3 px-4 font-bold">Factura / Cliente / Vehículo</th>
+                                <th className="py-3 px-4 font-bold">Trabajos Realizados</th>
+                                <th className="py-3 px-4 font-bold text-right w-44">Comisión / M.O.</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-100">
-                              {techCommissionInfo.items.map((item, idx) => (
-                                <tr key={idx} className="hover:bg-neutral-50 transition-colors">
-                                  <td className="p-3">
-                                    <div className="font-bold text-neutral-800">#{item.inv.id.slice(-6).toUpperCase()}</div>
-                                    <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
-                                    <div className="text-[10px] text-blue-600/80 font-medium mt-0.5 line-clamp-1" title={item.nombresAplicables.join(', ')}>
-                                      {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
-                                    </div>
-                                  </td>
-                                  <td className="p-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
-                                  <td className="p-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>
-                                  <td className="p-3 text-right font-black text-neutral-900">{formatRD(item.totalFila)}</td>
-                                </tr>
-                              ))}
+                              {techCommissionInfo.items.map((item, idx) => {
+                                const vehicle = item.inv.vehicleId ? vehicles.find(v => v.id === item.inv.vehicleId) : null;
+                                const vehiclePlate = vehicle?.plate;
+
+                                return (
+                                  <tr 
+                                    key={idx} 
+                                    onClick={() => setSelectedTechInvoiceDetail({ inv: item.inv, item })}
+                                    className="hover:bg-neutral-50 transition-colors cursor-pointer group select-none"
+                                    title={`Clic para ver detalle de Factura #${item.inv.id.slice(-6).toUpperCase()}`}
+                                  >
+                                    <td className="py-3.5 px-4">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="font-bold text-neutral-900 group-hover:text-blue-600 transition-colors text-sm">
+                                          #{item.inv.id.slice(-6).toUpperCase()}
+                                        </span>
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 group-hover:bg-blue-50 group-hover:text-blue-700 border border-neutral-200 transition-all">
+                                          <Eye className="h-3 w-3" /> Ver Trabajos
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                                        <span className="text-[11px] text-neutral-400 font-mono">
+                                          {new Date(item.inv.createdAt).toLocaleDateString('es-DO')}
+                                        </span>
+                                        {item.inv.customerName && (
+                                          <span className="text-[11px] text-neutral-600 font-medium">
+                                            • {item.inv.customerName}
+                                          </span>
+                                        )}
+                                        {vehiclePlate && (
+                                          <span className="text-[10px] text-neutral-700 font-mono bg-neutral-100 px-1.5 py-0.2 rounded border border-neutral-200 font-semibold">
+                                            🚗 {vehiclePlate}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="py-3.5 px-4">
+                                      <div className="text-[11px] text-neutral-600 font-medium line-clamp-2" title={item.nombresAplicables.join(', ')}>
+                                        {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(' • ') : 'Servicio general'}
+                                      </div>
+                                    </td>
+                                    <td className="py-3.5 px-4 text-right font-mono font-black text-neutral-900 group-hover:text-blue-600 transition-colors text-base">
+                                      {formatRD(item.totalFila)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
-                            <tfoot className="bg-blue-50 border-t border-blue-100">
-                              <tr>
-                                <td colSpan={3} className="p-3 text-right font-bold text-blue-800 uppercase text-xs">
-                                  Total a Liquidar:
-                                </td>
-                                <td className="p-3 text-right font-black text-blue-900 text-sm">
-                                  {formatRD(techCommissionInfo.total)}
-                                </td>
-                              </tr>
-                            </tfoot>
                           </table>
+                        </div>
+
+                        {/* Minimalist Summary Card */}
+                        <div className="bg-neutral-950 text-white rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] font-bold uppercase text-neutral-400 tracking-wider">Total a Liquidar</span>
+                            <p className="text-xs text-neutral-300">
+                              {techCommissionInfo.items.length} {techCommissionInfo.items.length === 1 ? 'factura pendiente' : 'facturas pendientes'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-2xl font-black font-mono text-emerald-400 tracking-tight">
+                              {formatRD(techCommissionInfo.total)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2525,15 +3663,26 @@ export default function CajaPage() {
           </div>
 
           <DialogFooter className="p-6 bg-neutral-50 border-t border-neutral-100">
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => setIsPagoTecnicoOpen(false)}
-              className="rounded-xl border-neutral-200 h-10 font-bold"
-            >
-              Cerrar
-            </Button>
-            {pagoTecnicoTab === 'pending' && (
+            {selectedTechInvoiceDetail ? (
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setSelectedTechInvoiceDetail(null)}
+                className="rounded-xl border-neutral-200 h-10 font-bold"
+              >
+                <ArrowLeft className="h-4 w-4 mr-1.5" /> Volver al Listado
+              </Button>
+            ) : (
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setIsPagoTecnicoOpen(false)}
+                className="rounded-xl border-neutral-200 h-10 font-bold"
+              >
+                Cerrar
+              </Button>
+            )}
+            {!selectedTechInvoiceDetail && pagoTecnicoTab === 'pending' && (
               <Button 
                 onClick={handleLiquidarTecnico}
                 disabled={!selectedTechToPay || techCommissionInfo.total <= 0}
@@ -2555,6 +3704,7 @@ export default function CajaPage() {
         invoice={selectedInvoice} 
         defaultEdit={selectedInvoiceEdit}
       />
+
       {/* DIALOG: Detalles de Tarjetas (KPIs) */}
       <Dialog open={!!detailsModalType} onOpenChange={(open) => !open && setDetailsModalType(null)}>
         <DialogContent className="sm:max-w-2xl rounded-2xl p-0 overflow-hidden bg-neutral-50/50">

@@ -70,6 +70,7 @@ import { ImportRow } from "@/components/inventory/StepPreviewEditor";
 import QuoteRequestDialog from "@/components/inventory/QuoteRequestDialog";
 import PrintLabelDialog from "@/components/inventory/PrintLabelDialog";
 import ComboCreateDialog from "@/components/inventory/ComboCreateDialog";
+import { sendEvolutionTextMessage, cleanBaseUrl, cleanApiKey } from "@/lib/evolutionApi";
 
 const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
 
@@ -525,6 +526,7 @@ export default function InventoryPage() {
   const [adjustType, setAdjustType] = useState<"in" | "out" | "adjustment">("in");
   const [adjustReason, setAdjustReason] = useState("");
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [isSendingPo, setIsSendingPo] = useState(false);
 
   const productTableRef = useRef<HTMLDivElement>(null);
   const comboTableRef = useRef<HTMLDivElement>(null);
@@ -1801,29 +1803,90 @@ export default function InventoryPage() {
                     Cerrar
                   </Button>
                   <Button 
-                    onClick={() => {
-                      updatePurchaseOrder(selectedPo.id, { status: 'enviada' });
-                      toast.success("Orden marcada como enviada.");
+                    disabled={isSendingPo}
+                    onClick={async () => {
+                      if (isSendingPo) return;
+                      setIsSendingPo(true);
                       
-                      let msg = `*Orden de Compra #${selectedPo.number || selectedPo.id.slice(-6).toUpperCase()}* - ${currentTenant?.name || 'Taller'}\n\nHola, necesitamos solicitar los siguientes artículos:\n\n`;
-                      selectedPo.items.forEach((item: any) => {
-                        msg += `- ${item.quantity}x ${item.productName}\n`;
-                      });
-                      msg += `\nGracias. Quedamos a la espera.`;
-                      
-                      const supplier = suppliers.find(s => s.commercialName === selectedPo.supplierId || s.id === selectedPo.supplierId);
-                      let phone = "";
-                      if (supplier && supplier.contacts && supplier.contacts.length > 0) {
-                        phone = supplier.contacts[0].whatsapp || supplier.contacts[0].phone || "";
+                      try {
+                        updatePurchaseOrder(selectedPo.id, { status: 'enviada' });
+                        
+                        const supplier = suppliers.find(
+                          (s) => s.id === selectedPo.supplierId || 
+                                 s.commercialName.toLowerCase() === selectedPo.supplierId?.toLowerCase() ||
+                                 s.code?.toLowerCase() === selectedPo.supplierId?.toLowerCase()
+                        );
+                        
+                        let rawPhone = "";
+                        if (supplier && supplier.contacts && supplier.contacts.length > 0) {
+                          const contact = supplier.contacts.find(c => c.whatsapp || c.phone) || supplier.contacts[0];
+                          rawPhone = contact?.whatsapp || contact?.phone || "";
+                        }
+                        
+                        const tallerName = currentTenant?.name || "ServiTracks";
+                        const tallerRnc = currentTenant?.rnc ? `\n📋 RNC: ${currentTenant.rnc}` : "";
+                        const poNum = selectedPo.number || selectedPo.id.slice(-6).toUpperCase();
+                        
+                        let msg = `📦 *ORDEN DE COMPRA #${poNum}*\n`;
+                        msg += `🏢 *${tallerName}*${tallerRnc}\n\n`;
+                        msg += `Hola *${supplier?.commercialName || 'Estimado Proveedor'}*, le enviamos la siguiente orden de pedido:\n\n`;
+                        
+                        selectedPo.items.forEach((item: any, idx: number) => {
+                          const itemPrice = item.unitPrice || 0;
+                          const itemSub = itemPrice * (item.quantity || 1);
+                          msg += `*${idx + 1}.* ${item.productName}\n`;
+                          msg += `   • Cantidad: *${item.quantity}* unid.\n`;
+                          if (itemPrice > 0) {
+                            msg += `   • Precio Ref.: RD$ ${itemPrice.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+                            msg += `   • Subtotal: RD$ ${itemSub.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+                          }
+                        });
+                        
+                        msg += `\n💰 *TOTAL ESTIMADO: RD$ ${selectedPo.total.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n\n`;
+                        msg += `Por favor confirmar disponibilidad y tiempo estimado de entrega.\n¡Muchas gracias!`;
+                        
+                        const cleanPhone = rawPhone.replace(/\D/g, '');
+                        
+                        if (!cleanPhone) {
+                          toast.warning("La orden se marcó como enviada, pero el proveedor no tiene un teléfono o WhatsApp configurado.");
+                          setIsPoPreviewOpen(false);
+                          return;
+                        }
+                        
+                        // Enviar automáticamente mediante Evolution API
+                        const evoUrl = cleanBaseUrl(currentTenant?.evolutionBaseUrl);
+                        const evoKey = cleanApiKey(currentTenant?.evolutionApiKey);
+                        const evoInstance = currentTenant?.evolutionInstanceName || currentTenant?.slug || "autocheck";
+                        
+                        const res = await sendEvolutionTextMessage(evoUrl, evoKey, evoInstance, cleanPhone, msg);
+                        
+                        if (res.ok) {
+                          toast.success(`✅ Orden #${poNum} enviada exitosamente por WhatsApp a ${supplier?.commercialName || cleanPhone}`);
+                        } else {
+                          console.warn("[Evolution API Send Error]:", res.error);
+                          toast.error(`Evolution API: ${res.error || 'No se pudo conectar a la instancia'}. Abriendo WhatsApp Web...`);
+                          const formattedPhone = cleanPhone.length === 10 ? '1' + cleanPhone : cleanPhone;
+                          const fallbackUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(msg)}`;
+                          window.open(fallbackUrl, '_blank');
+                        }
+                        
+                        setIsPoPreviewOpen(false);
+                      } catch (err: any) {
+                        console.error("[sendPo error]:", err);
+                        toast.error("Error al procesar el envío de la orden.");
+                      } finally {
+                        setIsSendingPo(false);
                       }
-                      
-                      const url = `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`;
-                      window.open(url, '_blank');
-                      setIsPoPreviewOpen(false);
                     }}
-                    className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-sm"
+                    className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-sm min-w-[140px]"
                   >
-                    Marcar & Enviar
+                    {isSendingPo ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" /> Enviando...
+                      </>
+                    ) : (
+                      "Marcar & Enviar"
+                    )}
                   </Button>
                 </div>
               </div>
