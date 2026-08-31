@@ -677,6 +677,24 @@ export async function deleteRecordFromSupabase(table: string, id: string): Promi
   if (error) console.error(`[sync] delete ${table} error:`, error);
 }
 
+export async function deleteUserFromSupabase(userId: string): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("tenant_users")
+      .delete()
+      .or(`user_id.eq.${userId},id.eq.${userId}`);
+    if (error) console.error("[sync] delete tenant_user error:", error);
+
+    try {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+    } catch {
+      // Ignore if user does not exist in auth
+    }
+  } catch (err) {
+    console.error("[sync] deleteUserFromSupabase error:", err);
+  }
+}
+
 
 export async function upsertCustomers(customers: Customer[]): Promise<void> {
   if (customers.length === 0) return;
@@ -808,8 +826,6 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     customer_id: t.customerId,
     mechanic_id: t.mechanicId,
     order_id: t.orderId || null,
-    discount: t.discount || null,
-    discount_type: t.discountType || null,
     items: t.items,
     created_at: t.createdAt,
     updated_at: t.updatedAt

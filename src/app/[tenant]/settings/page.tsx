@@ -746,11 +746,34 @@ export default function SettingsPage() {
     setIsInviting(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
-    deleteUser(deleteTarget.id);
-    toast.success(`Usuario "${deleteTarget.name}" eliminado`);
+    const target = deleteTarget;
     setDeleteTarget(null);
+
+    // 1. Eliminar inmediatamente del store local para feedback instantáneo
+    deleteUser(target.id);
+    toast.success(`Usuario "${target.name}" eliminado correctamente`);
+
+    // 2. Eliminar de Supabase (tabla tenant_users y Auth)
+    try {
+      const { error: dbError } = await supabaseAdmin
+        .from("tenant_users")
+        .delete()
+        .or(`user_id.eq.${target.id},id.eq.${target.id},email.eq.${target.email}`);
+
+      if (dbError) {
+        console.error("Error al eliminar tenant_user de Supabase:", dbError);
+      }
+
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(target.id);
+      } catch (authErr) {
+        // Usuario puede no existir en Auth si fue creado solo en tabla
+      }
+    } catch (err) {
+      console.error("Error inesperado al eliminar usuario de Supabase:", err);
+    }
   };
 
   const handleSavePin = async () => {

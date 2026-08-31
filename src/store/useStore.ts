@@ -368,11 +368,14 @@ export const useStore = create<AppState>()(
           if (user) state.addActivityLog({ action: 'updated_user', details: `Actualizó el usuario ${user.name}`, module: 'AJUSTES' });
           return { users: state.users.map((u) => (u.id === id ? { ...u, ...updates } : u)) };
         }),
-      deleteUser: (id) => set((state) => {
-        const user = state.users.find(u => u.id === id);
-        if (user) state.addActivityLog({ action: 'deleted_user', details: `Eliminó el usuario ${user.name}`, module: 'AJUSTES' });
-        return { users: state.users.filter((u) => u.id !== id) };
-      }),
+      deleteUser: (id) => {
+        set((state) => {
+          const user = state.users.find(u => u.id === id);
+          if (user) state.addActivityLog({ action: 'deleted_user', details: `Eliminó el usuario ${user.name}`, module: 'AJUSTES' });
+          return { users: state.users.filter((u) => u.id !== id) };
+        });
+        import("@/lib/supabaseSync").then(m => m.deleteUserFromSupabase(id));
+      },
 
       addTechnician: (tech) => set((state) => ({ technicians: [...state.technicians, tech] })),
       updateTechnician: (id, updates) =>
