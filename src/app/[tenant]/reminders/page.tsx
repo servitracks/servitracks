@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useStore, WhatsAppLog } from "@/store/useStore";
 import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
-import { supabaseAdmin } from "@/lib/supabase";
 import { waSendText } from "@/lib/wasender";
 import {
   fetchConnectionState,

@@ -28,7 +28,7 @@ import { AlertsPanel } from "@/components/maintenance/AlertsPanel";
 import { MessagesPanel } from "@/components/maintenance/MessagesPanel";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 interface TopBarProps {
   onMenuClick?: () => void;
@@ -127,7 +127,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
   useEffect(() => {
     if (currentUserId && currentUserId !== 'admin' && !currentUser) {
       async function fetchMissingUser() {
-        const { data: rows, error } = await supabaseAdmin
+        const { data: rows, error } = await supabase
           .from("tenant_users")
           .select("*")
           .eq("user_id", currentUserId)
@@ -174,14 +174,14 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
     // Persist to Supabase (tenant_users table)
     try {
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from("tenant_users")
         .update({ name: profileForm.name, email: profileForm.email })
         .eq("user_id", currentUser.id);
 
       if (error) {
         // Fallback: try matching by email if user_id doesn't match
-        const { error: error2 } = await supabaseAdmin
+        const { error: error2 } = await supabase
           .from("tenant_users")
           .update({ name: profileForm.name })
           .eq("email", currentUser.email);

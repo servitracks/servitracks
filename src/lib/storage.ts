@@ -1,4 +1,4 @@
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { useStore } from "@/store/useStore";
 import type { Plan, PlanId, Tenant, GlobalConfig, LicenciaLocal, BankDetails } from "@/store/types";
 
@@ -83,7 +83,7 @@ function dbToTenant(row: any): Tenant {
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
 export async function getPlans(): Promise<Plan[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from("plans")
     .select("*")
     .order("precio_mensual", { ascending: true });
@@ -97,7 +97,7 @@ export async function getPlans(): Promise<Plan[]> {
 }
 
 export async function savePlan(plan: Plan): Promise<void> {
-  const { error } = await supabaseAdmin
+  const { error } = await supabase
     .from("plans")
     .upsert(planToDb(plan), { onConflict: "id" });
   if (error) { console.error("[storage] savePlan:", error); throw error; }
@@ -109,7 +109,7 @@ export async function savePlan(plan: Plan): Promise<void> {
 }
 
 export async function deletePlan(id: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("plans").delete().eq("id", id);
+  const { error } = await supabase.from("plans").delete().eq("id", id);
   if (error) { console.error("[storage] deletePlan:", error); throw error; }
   useStore.getState().deletePlan?.(id);
 }
@@ -117,7 +117,7 @@ export async function deletePlan(id: string): Promise<void> {
 // ─── Tenants ──────────────────────────────────────────────────────────────────
 
 export async function getTenants(): Promise<Tenant[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from("tenants")
     .select("*")
     .order("created_at", { ascending: false });
@@ -128,27 +128,27 @@ export async function getTenants(): Promise<Tenant[]> {
 }
 
 export async function deleteTenant(id: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("tenants").delete().eq("id", id);
+  const { error } = await supabase.from("tenants").delete().eq("id", id);
   if (error) { console.error("[storage] deleteTenant:", error); throw error; }
   useStore.getState().deleteTenant?.(id);
 }
 
 export async function updateTenantAdmin(id: string, email: string, password?: string): Promise<void> {
   const updates: any = { email };
-  const { error } = await supabaseAdmin.from("tenants").update(updates).eq("id", id);
+  const { error } = await supabase.from("tenants").update(updates).eq("id", id);
   if (error) console.error("[storage] updateTenantAdmin:", error);
   useStore.getState().updateTenant?.(id, { email });
 }
 
 export async function updateTenantPlan(id: string, planId: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("tenants").update({ plan_id: planId }).eq("id", id);
+  const { error } = await supabase.from("tenants").update({ plan_id: planId }).eq("id", id);
   if (error) console.error("[storage] updateTenantPlan:", error);
   useStore.getState().updateTenant?.(id, { plan_id: planId });
 }
 
 export async function updateTenantStatus(id: string, status: any): Promise<void> {
   const supaStatus = (status === 'ACTIVO' || status === 'TRIAL') ? 'active' : 'suspended';
-  const { error } = await supabaseAdmin
+  const { error } = await supabase
     .from("tenants")
     .update({ estado: status, status: supaStatus })
     .eq("id", id);
@@ -157,7 +157,7 @@ export async function updateTenantStatus(id: string, status: any): Promise<void>
 }
 
 export async function updateTenantConfig(id: string, config: any): Promise<void> {
-  const { error } = await supabaseAdmin
+  const { error } = await supabase
     .from("tenants")
     .update({ config })
     .eq("id", id);
@@ -166,13 +166,13 @@ export async function updateTenantConfig(id: string, config: any): Promise<void>
 }
 
 export async function updateTenantTrialHasta(id: string, trial_hasta: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("tenants").update({ trial_hasta }).eq("id", id);
+  const { error } = await supabase.from("tenants").update({ trial_hasta }).eq("id", id);
   if (error) console.error("[storage] updateTenantTrialHasta:", error);
   useStore.getState().updateTenant?.(id, { trial_hasta });
 }
 
 export async function updateTenantMaxSucursales(id: string, max_sucursales: number): Promise<void> {
-  const { error } = await supabaseAdmin.from("tenants").update({ max_sucursales }).eq("id", id);
+  const { error } = await supabase.from("tenants").update({ max_sucursales }).eq("id", id);
   if (error) console.error("[storage] updateTenantMaxSucursales:", error);
   useStore.getState().updateTenant?.(id, { max_sucursales: max_sucursales as any });
 }
@@ -183,13 +183,13 @@ export async function updateTenantModulosOverride(id: string, overrides: any): P
   let baseConfig = tenant?.config || {};
   
   if (!tenant) {
-    const { data: dbTenant } = await supabaseAdmin.from("tenants").select("config").eq("id", id).maybeSingle();
+    const { data: dbTenant } = await supabase.from("tenants").select("config").eq("id", id).maybeSingle();
     if (dbTenant?.config) baseConfig = dbTenant.config;
   }
 
   const newConfig = { ...baseConfig, modulos_override: overrides };
   
-  const { error } = await supabaseAdmin
+  const { error } = await supabase
     .from("tenants")
     .update({ config: newConfig })
     .eq("id", id);
@@ -201,7 +201,7 @@ export async function updateTenantModulosOverride(id: string, overrides: any): P
 
 export async function getOrdenes(tenantId: string) {
   // Try Supabase first
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from("work_orders")
     .select("id, total, status")
     .eq("tenant_id", tenantId);
@@ -224,7 +224,7 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
 // ─── Licencias Locales ────────────────────────────────────────────────────────
 
 export async function getLicenciasLocales(): Promise<LicenciaLocal[]> {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await supabase
     .from("licencias_locales")
     .select("*")
     .order("created_at", { ascending: false });
@@ -233,17 +233,17 @@ export async function getLicenciasLocales(): Promise<LicenciaLocal[]> {
 }
 
 export async function createLicenciaLocal(lic: Omit<LicenciaLocal, "id">): Promise<void> {
-  const { error } = await supabaseAdmin.from("licencias_locales").insert(lic);
+  const { error } = await supabase.from("licencias_locales").insert(lic);
   if (error) { console.error("[storage] createLicenciaLocal:", error); throw error; }
 }
 
 export async function updateLicenciaLocal(id: string, updates: Partial<LicenciaLocal>): Promise<void> {
-  const { error } = await supabaseAdmin.from("licencias_locales").update(updates).eq("id", id);
+  const { error } = await supabase.from("licencias_locales").update(updates).eq("id", id);
   if (error) { console.error("[storage] updateLicenciaLocal:", error); throw error; }
 }
 
 export async function deleteLicenciaLocal(id: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("licencias_locales").delete().eq("id", id);
+  const { error } = await supabase.from("licencias_locales").delete().eq("id", id);
   if (error) { console.error("[storage] deleteLicenciaLocal:", error); throw error; }
 }
 
@@ -272,7 +272,6 @@ export async function logout() {
   store.setCurrentUserId?.(null);
   store.setTenants?.([]);
   store.setAuthenticated?.(false);
-  await supabaseAdmin.auth.signOut().catch(() => {});
   await supabase.auth.signOut().catch(() => {});
 }
 

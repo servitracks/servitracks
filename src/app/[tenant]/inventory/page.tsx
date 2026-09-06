@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from "react";
 import { useParams } from "@/lib/next-compat";
 import { useStore, Product } from "@/store/useStore";
+import { InventoryMovement, PurchaseOrder, AccountPayable } from "@/store/types";
 import {
   Plus,
   Search,
@@ -819,12 +820,12 @@ export default function InventoryPage() {
       toast.error("Completa todos los campos");
       return;
     }
-    const qty = Number(adjustQty);
-    const currentStock = selectedProduct.stock;
+    const qty = Math.max(0, Number(adjustQty) || 0);
+    const currentStock = Math.max(0, selectedProduct.stock || 0);
     let newStock = currentStock;
     if (adjustType === "in") newStock = currentStock + qty;
     else if (adjustType === "out") newStock = Math.max(0, currentStock - qty);
-    else newStock = qty;
+    else newStock = Math.max(0, qty);
 
     updateProduct(selectedProduct.id, { stock: newStock });
     addMovement({
@@ -867,126 +868,229 @@ export default function InventoryPage() {
     toast.success(`${products.length} productos exportados`);
   };
 
-  const handleImport = (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => {
-    let imported = 0;
-    let totalPurchaseCost = 0;
-    let totalPurchaseTax = 0;
-    
-    // Preparar items para la orden de compra
-    const purchaseOrderItems: any[] = [];
-    rows.forEach((row) => {
-      if (!row.name.trim()) return;
-      
-      const existingProduct = products.find(p => 
-        (row.sku && p.sku === row.sku) || 
-        p.name.toLowerCase() === row.name.trim().toLowerCase()
-      );
-      
-      let productId = "";
-      let productName = row.name.trim();
-
-      if (existingProduct) {
-        productId = existingProduct.id;
-        productName = existingProduct.name;
-        updateProduct(existingProduct.id, {
-          stock: existingProduct.stock + (Number(row.quantity) || 0),
-          costPrice: row.costPrice > 0 ? row.costPrice : existingProduct.costPrice,
-          salePrice: row.salePrice > 0 ? row.salePrice : existingProduct.salePrice,
-        });
-      } else {
-        const newProduct: Product = {
-          id: `p${Date.now()}-${imported}`,
-          tenantId: tenantId,
-          name: row.name.trim(),
-          sku: row.sku || `SKU-${Date.now()}-${imported}`,
-          barcode: "",
-          category: row.category || "Otros",
-          brand: row.brand || "",
-          supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",
-          costPrice: row.costPrice || 0,
-          salePrice: row.salePrice || 0,
-          stock: (Number(row.stock) || 0) + (Number(row.quantity) || 0),
-          minStock: row.minStock || 5,
-          tax: row.tax || 18,
-          location: row.location || "",
-        };
-        productId = newProduct.id;
-        addProduct(newProduct);
-      }
-      
-      if (row.quantity > 0) {
-        const itemCost = Number(row.costPrice) || 0;
-        const itemQty = Number(row.quantity);
-        const itemTaxPct = Number(row.tax) || 18;
-        
-        const lineTotalCost = itemCost * itemQty;
-        const lineTax = Math.round(lineTotalCost * (itemTaxPct / 100));
-        
-        totalPurchaseCost += lineTotalCost;
-        totalPurchaseTax += lineTax;
-        addMovement({
-          id: `m${Date.now()}-${imported}`,
-          tenantId: tenantId,
-          productId: productId,
-          productName: productName,
-          type: "in",
-          quantity: row.quantity,
-          reason: "Importación de compra",
-          date: new Date().toISOString(),
-        });
-        
-        purchaseOrderItems.push({
-          id: `po_item_${Date.now()}-${imported}`,
-          productId: productId,
-          productName: productName,
-          quantity: itemQty,
-          unitPrice: itemCost,
-          salePrice: row.salePrice || 0,
-          receivedQuantity: itemQty
-        });
-      }
-      imported++;
-    });
-
-    if (supplierId && totalPurchaseCost > 0) {
-      const selectedSupplier = suppliers.find(s => s.id === supplierId);
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + (selectedSupplier?.creditDays || 30));
-
-      addAccountPayable({
-        id: `ap_${Date.now()}`,
-        tenantId,
-        supplierId,
-        invoiceNumber: invoiceNumber?.trim() || `IMPORT-${Date.now().toString().slice(-6)}`,
-        amount: totalPurchaseCost + totalPurchaseTax,
-        paidAmount: 0,
-        dueDate: dueDate.toISOString(),
-        status: "pendiente",
-        createdAt: new Date().toISOString(),
-        notes: `Importación masiva de ${imported} productos.`,
-      });
-
-      addPurchaseOrder({
-        id: `po_${Date.now()}`,
-        tenantId,
-        supplierId,
-        number: `OC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-        invoiceNumber: invoiceNumber?.trim() || `IMPORT-${Date.now().toString().slice(-6)}`,
-        paymentStatus: "pending",
-        status: "recibida_completa",
-        items: purchaseOrderItems,
-        subtotal: totalPurchaseCost,
-        tax: totalPurchaseTax,
-        total: totalPurchaseCost + totalPurchaseTax,
-        notes: `Generada automáticamente por importación de inventario.`,
-        createdBy: currentUserId || "admin",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        expectedDelivery: new Date().toISOString(),
-      });
+  const handleImport = async (
+    rows: ImportRow[],
+    supplierId?: string,
+    invoiceNumber?: string,
+    createPayable: boolean = true
+  ) => {
+    if (!rows || rows.length === 0) {
+      toast.error("No hay productos válidos para importar");
+      return;
     }
 
-    toast.success(`✓ ${imported} producto${imported !== 1 ? "s" : ""} importado${imported !== 1 ? "s" : ""} al inventario`);
+    const toastId = toast.loading("Guardando e integrando productos con Supabase...");
+
+    try {
+      let newlyCreated = 0;
+      let updatedCount = 0;
+      let totalPurchaseCost = 0;
+      let totalPurchaseTax = 0;
+
+      const productsToUpsert: Product[] = [];
+      const movementsToCreate: InventoryMovement[] = [];
+      const purchaseOrderItems: any[] = [];
+      const timestamp = Date.now();
+
+      // Mapa en memoria para resolver productos existentes sin duplicación
+      const workingProductsMap = new Map<string, Product>();
+      products.forEach((p) => workingProductsMap.set(p.id, { ...p }));
+
+      const selectedSupplier = supplierId ? suppliers.find((s) => s.id === supplierId) : undefined;
+      const supplierCommercialName = selectedSupplier?.commercialName || "";
+
+      rows.forEach((row, index) => {
+        const trimmedName = row.name.trim();
+        if (!trimmedName) return;
+
+        // Buscar producto existente por SKU o Nombre (insensible a mayúsculas)
+        const existingProduct = Array.from(workingProductsMap.values()).find((p) =>
+          (row.sku && p.sku && p.sku.toLowerCase() === row.sku.trim().toLowerCase()) ||
+          p.name.toLowerCase() === trimmedName.toLowerCase()
+        );
+
+        const qtyToImport = Math.max(0, Number(row.quantity) || 0);
+        const costPrice = Math.max(0, Number(row.costPrice) || 0);
+        const salePrice = Math.max(0, Number(row.salePrice) || 0);
+        const taxRate = row.tax !== undefined && row.tax !== null ? Number(row.tax) : 18;
+
+        let finalProductId = "";
+        let finalProductName = trimmedName;
+
+        if (existingProduct) {
+          finalProductId = existingProduct.id;
+          finalProductName = existingProduct.name;
+          const updatedStock = existingProduct.stock + qtyToImport;
+          const updatedProduct: Product = {
+            ...existingProduct,
+            stock: updatedStock,
+            costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
+            salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
+            category: row.category && row.category !== "Otros" ? row.category : existingProduct.category,
+            brand: row.brand ? row.brand : existingProduct.brand,
+            supplier: supplierCommercialName || row.supplier || existingProduct.supplier,
+            location: row.location ? row.location : existingProduct.location,
+          };
+          workingProductsMap.set(existingProduct.id, updatedProduct);
+          productsToUpsert.push(updatedProduct);
+          updatedCount++;
+        } else {
+          const newProductId = `p${timestamp}-${index}`;
+          finalProductId = newProductId;
+          // Corrección del bug de stock: NO duplicar stock y cantidad
+          const initialStock = qtyToImport > 0 ? qtyToImport : Math.max(0, Number(row.stock) || 0);
+          const newProduct: Product = {
+            id: newProductId,
+            tenantId: tenantId,
+            name: trimmedName,
+            sku: row.sku?.trim() || `SKU-${timestamp.toString().slice(-4)}-${index + 1}`,
+            barcode: "",
+            category: row.category?.trim() || "Otros",
+            brand: row.brand?.trim() || "",
+            supplier: supplierCommercialName || row.supplier?.trim() || "",
+            costPrice: costPrice,
+            salePrice: salePrice,
+            stock: initialStock,
+            minStock: Math.max(1, Number(row.minStock) || 5),
+            tax: taxRate,
+            location: row.location?.trim() || "",
+          };
+          workingProductsMap.set(newProductId, newProduct);
+          productsToUpsert.push(newProduct);
+          newlyCreated++;
+        }
+
+        // Registrar movimiento de entrada si viene con unidades a ingresar
+        if (qtyToImport > 0) {
+          const lineTotalCost = costPrice * qtyToImport;
+          const lineTax = Math.round(lineTotalCost * (taxRate / 100));
+          totalPurchaseCost += lineTotalCost;
+          totalPurchaseTax += lineTax;
+
+          const movementReason = supplierCommercialName
+            ? `Importación de compra: ${supplierCommercialName} ${invoiceNumber ? `(Fact. ${invoiceNumber})` : ""}`.trim()
+            : "Carga inicial de inventario / Importación masiva";
+
+          movementsToCreate.push({
+            id: `m${timestamp}-${index}`,
+            tenantId: tenantId,
+            productId: finalProductId,
+            productName: finalProductName,
+            type: "in",
+            quantity: qtyToImport,
+            reason: movementReason,
+            date: new Date().toISOString(),
+            userId: currentUserId || undefined,
+          });
+
+          purchaseOrderItems.push({
+            id: `po_item_${timestamp}-${index}`,
+            productId: finalProductId,
+            productName: finalProductName,
+            quantity: qtyToImport,
+            unitPrice: costPrice,
+            salePrice: salePrice,
+            receivedQuantity: qtyToImport,
+          });
+        }
+      });
+
+      // Orden de Compra y Cuenta por Pagar vinculadas
+      let generatedPo: PurchaseOrder | undefined = undefined;
+      let generatedAp: AccountPayable | undefined = undefined;
+
+      if (supplierId && createPayable && totalPurchaseCost > 0) {
+        const poId = `po_${timestamp}`;
+        const apId = `ap_${timestamp}`;
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + (selectedSupplier?.creditDays || 30));
+        const finalInvNumber = invoiceNumber?.trim() || `IMPORT-${timestamp.toString().slice(-6)}`;
+        const totalAmount = totalPurchaseCost + totalPurchaseTax;
+
+        generatedPo = {
+          id: poId,
+          tenantId,
+          supplierId,
+          number: `OC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+          invoiceNumber: finalInvNumber,
+          paymentStatus: "pending",
+          status: "recibida_completa",
+          items: purchaseOrderItems,
+          subtotal: totalPurchaseCost,
+          tax: totalPurchaseTax,
+          total: totalAmount,
+          notes: `Generada automáticamente por importación de inventario (${newlyCreated + updatedCount} productos).`,
+          createdBy: currentUserId || "admin",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          expectedDelivery: new Date().toISOString(),
+        };
+
+        generatedAp = {
+          id: apId,
+          tenantId,
+          supplierId,
+          purchaseOrderId: poId, // Clave foránea vinculada
+          invoiceNumber: finalInvNumber,
+          amount: totalAmount,
+          paidAmount: 0,
+          dueDate: dueDate.toISOString(),
+          status: "pendiente",
+          createdAt: new Date().toISOString(),
+          notes: `Importación masiva de inventario (${newlyCreated + updatedCount} productos) vinculada a orden ${generatedPo.number}.`,
+        };
+      }
+
+      // 1. Guardar de forma directa y verificada en Supabase
+      const { batchImportInventoryToSupabase } = await import("@/lib/supabaseSync");
+      const result = await batchImportInventoryToSupabase({
+        tenantId,
+        productsToUpsert,
+        movementsToCreate,
+        purchaseOrder: generatedPo,
+        accountPayable: generatedAp,
+        activityLog: {
+          id: `log_${timestamp}`,
+          tenantId,
+          userId: currentUserId || "system",
+          userName: "Usuario",
+          userRole: "admin",
+          action: "inventory_import",
+          details: `Importación masiva: ${newlyCreated} nuevos, ${updatedCount} actualizados.`,
+          module: "INVENTARIO",
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      if (!result.success) {
+        toast.dismiss(toastId);
+        toast.error(`Error al persistir en Supabase: ${result.error}`);
+        return;
+      }
+
+      // 2. Actualizar estado de Zustand en lote en una sola mutación
+      useStore.setState((state) => {
+        const existingMap = new Map(state.products.map(p => [p.id, p]));
+        productsToUpsert.forEach(p => existingMap.set(p.id, p));
+
+        return {
+          products: Array.from(existingMap.values()),
+          movements: [...movementsToCreate, ...state.movements],
+          purchaseOrders: generatedPo ? [generatedPo, ...state.purchaseOrders] : state.purchaseOrders,
+          accountsPayable: generatedAp ? [generatedAp, ...state.accountsPayable] : state.accountsPayable,
+        };
+      });
+
+      toast.dismiss(toastId);
+      const totalImported = newlyCreated + updatedCount;
+      toast.success(
+        `✓ ${totalImported} producto${totalImported !== 1 ? "s" : ""} importado${totalImported !== 1 ? "s" : ""} e integrado${totalImported !== 1 ? "s" : ""} con Supabase (${newlyCreated} nuevos, ${updatedCount} actualizados)`
+      );
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      console.error("Error en handleImport:", err);
+      toast.error(`Fallo durante la importación: ${err?.message || "Error desconocido"}`);
+    }
   };
 
   return (
@@ -1303,10 +1407,10 @@ export default function InventoryPage() {
                       </TableCell>
                       <TableCell className="py-2 whitespace-nowrap">
                         <div>
-                          <span className={cn("font-bold text-xs", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
-                            {product.stock}
+                          <span className={cn("font-bold text-xs", (product.stock ?? 0) <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
+                            {Math.max(0, product.stock ?? 0)}
                           </span>
-                          <span className="text-neutral-400 text-[10px] font-medium"> / mín {product.minStock}</span>
+                          <span className="text-neutral-400 text-[10px] font-medium"> / mín {Math.max(0, product.minStock ?? 0)}</span>
                         </div>
                       </TableCell>
                       {isOwner && (

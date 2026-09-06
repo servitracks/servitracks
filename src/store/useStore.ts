@@ -435,11 +435,31 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('orders', id));
       },
 
-      addProduct: (product) => set((state) => ({ products: [...state.products, product] })),
+      addProduct: (product) => {
+        const sanitized: Product = {
+          ...product,
+          stock: Math.max(0, Number(product.stock) || 0),
+          minStock: Math.max(0, Number(product.minStock) || 0),
+        };
+        set((state) => ({ products: [...state.products, sanitized] }));
+        import("@/lib/supabaseSync").then(m => m.upsertProducts([sanitized]));
+      },
       updateProduct: (id, updates) =>
-        set((state) => ({
-          products: state.products.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-        })),
+        set((state) => {
+          const sanitizedUpdates = { ...updates };
+          if (sanitizedUpdates.stock !== undefined) {
+            sanitizedUpdates.stock = Math.max(0, Number(sanitizedUpdates.stock) || 0);
+          }
+          if (sanitizedUpdates.minStock !== undefined) {
+            sanitizedUpdates.minStock = Math.max(0, Number(sanitizedUpdates.minStock) || 0);
+          }
+          const updated = state.products.map((p) => (p.id === id ? { ...p, ...sanitizedUpdates } : p));
+          const prodToSync = updated.find((p) => p.id === id);
+          if (prodToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertProducts([prodToSync]));
+          }
+          return { products: updated };
+        }),
       deleteProduct: (id) => {
         set((state) => ({ products: state.products.filter((p) => p.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id));
@@ -541,6 +561,15 @@ export const useStore = create<AppState>()(
         
         get().addActivityLog({ action: 'created_invoice', details: `Creó la factura #${invoice.id.slice(-6).toUpperCase()} por RD$ ${invoice.total}`, module: 'POS' });
 
+        import("@/lib/supabaseSync").then(m => {
+          m.upsertInvoices([invoice]);
+          if (invoice.status !== 'cancelled') {
+            const affectedProductIds = new Set(invoice.items.map(i => i.productId).filter(Boolean));
+            const prodsToSync = (get() as AppState).products.filter(p => affectedProductIds.has(p.id));
+            if (prodsToSync.length > 0) m.upsertProducts(prodsToSync);
+          }
+        });
+
         // Disparador Automático de Pedidos (Revisar niveles de stock bajos)
         if (invoice.status !== 'cancelled') {
           setTimeout(() => {
@@ -632,6 +661,15 @@ export const useStore = create<AppState>()(
             products: updatedProducts,
             movements: newMovements
           };
+        });
+
+        import("@/lib/supabaseSync").then(m => {
+          const invToSync = (get() as AppState).invoices.find(inv => inv.id === id);
+          if (invToSync) m.upsertInvoices([invToSync]);
+          if (updates.status === 'cancelled') {
+            const prodsToSync = (get() as AppState).products;
+            m.upsertProducts(prodsToSync.filter(p => p.tenantId === (invToSync?.tenantId || '')));
+          }
         });
       },
 

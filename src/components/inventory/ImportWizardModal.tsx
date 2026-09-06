@@ -15,17 +15,18 @@ import { cn } from "@/lib/utils";
 import { Supplier } from "@/store/types";
 
 export type SourceType = "csv" | "pdf" | "image";
+export type ImportMode = "general" | "supplier";
 
 interface ImportWizardModalProps {
   open: boolean;
   onClose: () => void;
-  onImport: (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => void;
+  onImport: (rows: ImportRow[], supplierId?: string, invoiceNumber?: string, createPayable?: boolean) => void;
   suppliers: Supplier[];
 }
 
 const STEP_LABELS = [
   "Fuente",
-  "Proveedor",
+  "Modalidad",
   "Subir archivo",
   "Revisar & Editar",
   "Confirmar",
@@ -42,16 +43,20 @@ export default function ImportWizardModal({
 
   const [step, setStep] = useState(1);
   const [sourceType, setSourceType] = useState<SourceType>("csv");
+  const [importMode, setImportMode] = useState<ImportMode>("general");
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [createPayable, setCreatePayable] = useState(true);
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [rows, setRows] = useState<ImportRow[]>([]);
 
   const handleReset = () => {
     setStep(1);
     setSourceType("csv");
+    setImportMode("general");
     setSelectedSupplierId("");
     setInvoiceNumber("");
+    setCreatePayable(true);
     setIsSupplierModalOpen(false);
     setRows([]);
   };
@@ -63,7 +68,9 @@ export default function ImportWizardModal({
 
   const handleConfirmImport = () => {
     const validRows = rows.filter((r) => r.name.trim() !== "");
-    onImport(validRows, selectedSupplierId, invoiceNumber);
+    const finalSupplierId = importMode === "supplier" ? selectedSupplierId : undefined;
+    const finalCreatePayable = importMode === "supplier" && createPayable;
+    onImport(validRows, finalSupplierId, invoiceNumber, finalCreatePayable);
     handleReset();
     onClose();
   };
@@ -142,52 +149,130 @@ export default function ImportWizardModal({
             />
           )}
           {step === 2 && (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-8 animate-in fade-in zoom-in-95">
-              <div className="text-center space-y-2">
-                <div className="h-16 w-16 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-2xl">🏢</span>
-                </div>
-                <h2 className="text-2xl font-black text-neutral-900">¿A qué proveedor le compraste?</h2>
-                <p className="text-neutral-500 text-sm max-w-sm mx-auto">Selecciona el proveedor para enlazar esta mercancía, así se registrará automáticamente en tus Cuentas por Pagar.</p>
+            <div className="flex-1 flex flex-col p-6 max-w-xl mx-auto space-y-6 animate-in fade-in zoom-in-95 overflow-y-auto">
+              <div className="text-center space-y-1.5">
+                <h2 className="text-2xl font-black text-neutral-900">¿Cómo deseas registrar esta importación?</h2>
+                <p className="text-neutral-500 text-xs sm:text-sm max-w-md mx-auto">
+                  Elige si es un catálogo/inventario inicial o una compra a crédito/contado a un proveedor específico.
+                </p>
               </div>
-              <div className="w-full max-w-md">
-                <div className="space-y-3">
-                  <select
-                    value={selectedSupplierId}
-                    onChange={(e) => setSelectedSupplierId(e.target.value)}
-                    className="w-full h-14 px-4 rounded-xl border border-neutral-200 bg-white shadow-sm font-medium focus:outline-none focus:ring-2 focus:ring-black focus:border-black transition-all"
-                  >
-                    <option value="" disabled>Selecciona un proveedor...</option>
-                    {suppliers.map(s => (
-                      <option key={s.id} value={s.id}>{s.commercialName}</option>
-                    ))}
-                    {suppliers.length === 0 && (
-                      <option value="none" disabled>No tienes proveedores registrados</option>
-                    )}
-                  </select>
-                  {selectedSupplierId && selectedSupplierId !== "none" && (
-                    <div className="animate-in fade-in slide-in-from-top-4 duration-300 pt-2 space-y-1.5">
-                      <label className="text-xs font-semibold text-neutral-600 uppercase tracking-wider ml-1">
-                        Número de Factura o Recibo (Opcional)
-                      </label>
-                      <input
-                        type="text"
-                        value={invoiceNumber}
-                        onChange={(e) => setInvoiceNumber(e.target.value)}
-                        placeholder="Ej: FAC-100234 o NCF..."
-                        className="w-full h-12 px-4 rounded-xl border border-neutral-200 bg-white shadow-sm font-medium focus:outline-none focus:ring-2 focus:ring-black focus:border-black transition-all"
-                      />
+
+              {/* Mode Selection Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setImportMode("general")}
+                  className={cn(
+                    "relative text-left p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between",
+                    importMode === "general"
+                      ? "border-neutral-900 bg-neutral-50/70 shadow-sm ring-1 ring-neutral-900"
+                      : "border-neutral-200 hover:border-neutral-300 bg-white"
+                  )}
+                >
+                  {importMode === "general" && (
+                    <div className="absolute top-3 right-3 h-5 w-5 rounded-full bg-neutral-900 text-white flex items-center justify-center text-[10px] font-black">
+                      ✓
                     </div>
                   )}
+                  <div>
+                    <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5 text-lg font-bold">
+                      📦
+                    </div>
+                    <h3 className="font-bold text-sm text-neutral-900">Inventario Inicial / Catálogo</h3>
+                    <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                      Carga masiva sin generar Cuentas por Pagar. Mantiene el proveedor individual de cada producto si viene en el archivo.
+                    </p>
+                  </div>
+                  <span className="mt-3 text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full w-fit">
+                    Sin compromisos de pago
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportMode("supplier")}
+                  className={cn(
+                    "relative text-left p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between",
+                    importMode === "supplier"
+                      ? "border-neutral-900 bg-neutral-50/70 shadow-sm ring-1 ring-neutral-900"
+                      : "border-neutral-200 hover:border-neutral-300 bg-white"
+                  )}
+                >
+                  {importMode === "supplier" && (
+                    <div className="absolute top-3 right-3 h-5 w-5 rounded-full bg-neutral-900 text-white flex items-center justify-center text-[10px] font-black">
+                      ✓
+                    </div>
+                  )}
+                  <div>
+                    <div className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2.5 text-lg font-bold">
+                      🏢
+                    </div>
+                    <h3 className="font-bold text-sm text-neutral-900">Compra a Proveedor</h3>
+                    <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
+                      Vincula los productos a un proveedor registrado, con factura opcional y registro en Cuentas por Pagar.
+                    </p>
+                  </div>
+                  <span className="mt-3 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full w-fit">
+                    Orden & Factura
+                  </span>
+                </button>
+              </div>
+
+              {/* Supplier Details (only in supplier mode) */}
+              {importMode === "supplier" && (
+                <div className="space-y-3.5 bg-neutral-50/80 border border-neutral-200 p-4 rounded-2xl animate-in fade-in duration-200">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700">Proveedor *</label>
+                    <select
+                      value={selectedSupplierId}
+                      onChange={(e) => setSelectedSupplierId(e.target.value)}
+                      className="w-full h-11 px-3 rounded-xl border border-neutral-300 bg-white shadow-xs font-medium text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    >
+                      <option value="" disabled>Selecciona un proveedor...</option>
+                      {suppliers.map(s => (
+                        <option key={s.id} value={s.id}>{s.commercialName}</option>
+                      ))}
+                      {suppliers.length === 0 && (
+                        <option value="none" disabled>No tienes proveedores registrados</option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-700">
+                      Número de Factura o Recibo (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      placeholder="Ej: FAC-100234 o NCF..."
+                      className="w-full h-11 px-3 rounded-xl border border-neutral-300 bg-white shadow-xs font-medium text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-black"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="createPayableCheckbox"
+                      checked={createPayable}
+                      onChange={(e) => setCreatePayable(e.target.checked)}
+                      className="h-4 w-4 rounded border-neutral-300 text-black focus:ring-black cursor-pointer"
+                    />
+                    <label htmlFor="createPayableCheckbox" className="text-xs font-medium text-neutral-700 cursor-pointer select-none">
+                      Generar Orden de Compra y Cuenta por Pagar automáticamente
+                    </label>
+                  </div>
+
                   <button
                     type="button"
                     onClick={() => setIsSupplierModalOpen(true)}
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 flex items-center justify-center w-full mt-2"
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 flex items-center pt-1 cursor-pointer"
                   >
-                    + Agregar un nuevo proveedor
+                    + Registrar un nuevo proveedor
                   </button>
                 </div>
-              </div>
+              )}
             </div>
           )}
           {step === 3 && (
@@ -195,7 +280,7 @@ export default function ImportWizardModal({
               <StepUploadProcess
                 sourceType={sourceType}
                 suppliers={suppliers}
-                selectedSupplierId={selectedSupplierId}
+                selectedSupplierId={importMode === "supplier" ? selectedSupplierId : ""}
                 onParsed={(parsedRows) => {
                   setRows(parsedRows);
                   setStep(4);
@@ -208,7 +293,13 @@ export default function ImportWizardModal({
           )}
           {step === 5 && (
             <div className="overflow-y-auto flex-1 h-full pr-2">
-              <StepConfirm rows={rows} />
+              <StepConfirm
+                rows={rows}
+                importMode={importMode}
+                supplierName={suppliers.find(s => s.id === selectedSupplierId)?.commercialName}
+                invoiceNumber={invoiceNumber}
+                createPayable={importMode === "supplier" && createPayable}
+              />
             </div>
           )}
         </div>
@@ -224,7 +315,7 @@ export default function ImportWizardModal({
                 setStep((s) => s - 1);
               }
             }}
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             disabled={step === 4 && rows.length > 0} // Si ya cargó filas, deshabilitar mientras procesa
           >
             {step === 1 ? "Cancelar" : "Atrás"}
@@ -232,7 +323,7 @@ export default function ImportWizardModal({
 
           {step === 1 && (
             <Button
-              className="rounded-xl bg-black text-white hover:bg-neutral-800"
+              className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer"
               onClick={() => setStep(2)}
             >
               Continuar →
@@ -240,16 +331,16 @@ export default function ImportWizardModal({
           )}
           {step === 2 && (
             <Button
-              className="rounded-xl bg-black text-white hover:bg-neutral-800"
+              className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer"
               onClick={() => setStep(3)}
-              disabled={!selectedSupplierId}
+              disabled={importMode === "supplier" && (!selectedSupplierId || selectedSupplierId === "none")}
             >
               Continuar →
             </Button>
           )}
           {step === 4 && (
             <Button
-              className="rounded-xl bg-black text-white hover:bg-neutral-800"
+              className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer"
               onClick={() => setStep(5)}
               disabled={rows.filter((r) => r.name.trim()).length === 0}
             >
@@ -258,7 +349,7 @@ export default function ImportWizardModal({
           )}
           {step === 5 && (
             <Button
-              className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 gap-2"
+              className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 gap-2 cursor-pointer font-bold"
               onClick={handleConfirmImport}
               disabled={rows.filter((r) => r.name.trim()).length === 0}
             >

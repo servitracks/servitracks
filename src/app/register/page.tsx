@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import type { Tenant, TenantUser } from "@/store/types";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { getPlans } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 
@@ -286,12 +286,10 @@ export default function RegisterPage() {
     setSlugAvailable(null);
     const timer = setTimeout(async () => {
       try {
-        const { data: rows, error } = await supabaseAdmin
-          .from("tenants")
-          .select("id")
-          .eq("slug", form.slug)
-          .limit(1);
-        setSlugAvailable(!error && (!rows || rows.length === 0));
+        const { data: isAvailable, error } = await supabase.rpc("check_slug_available", {
+          p_slug: form.slug,
+        });
+        setSlugAvailable(!error && isAvailable === true);
       } catch {
         setSlugAvailable(true); // optimistic on network error
       } finally {
@@ -342,136 +340,67 @@ export default function RegisterPage() {
     setProvisioningStep(0);
 
     try {
-      // 1. Crear usuario en Supabase Auth con confirmación automática (sin necesidad de email SMTP)
-      setProvisioningStep(0);
-      let userId = "";
+      setProvisioningStep(1);
 
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      // 1. Aprovisionamiento atómico vía RPC en Supabase
+      const { data: result, error: rpcError } = await supabase.rpc("register_tenant_account", {
+        p_company_name: form.nombre,
+        p_slug: form.slug,
+        p_admin_email: form.admin_email,
+        p_admin_password: form.admin_password,
+        p_admin_name: form.admin_nombre,
+        p_phone: form.telefono,
+        p_plan_id: form.plan_id || "pro",
+        p_address: `Provincia ${form.provincia}, República Dominicana`,
+        p_logo: form.logo_url || "",
+      });
+
+      if (rpcError) {
+        throw new Error(rpcError.message || "Error al registrar el taller.");
+      }
+      if (!result?.success) {
+        throw new Error(result?.error || "No se pudo completar el registro.");
+      }
+
+      const tenantId = result.tenant_id;
+      const userId = result.user_id;
+
+      setProvisioningStep(2);
+
+      // 2. Establecer sesión autenticada con JWT
+      setProvisioningStep(3);
+      const { error: authError } = await supabase.auth.signInWithPassword({
         email: form.admin_email,
         password: form.admin_password,
-        email_confirm: true, // ← confirma automáticamente sin requerir correo
-        user_metadata: { name: form.admin_nombre }
       });
 
       if (authError) {
-        if (authError.message.toLowerCase().includes("already registered") ||
-            authError.message.toLowerCase().includes("already exists") ||
-            authError.message.toLowerCase().includes("already been registered")) {
-          
-          // INTENTO DE RECICLAJE: El usuario existe en auth.users pero posiblemente no tiene taller (fue eliminado)
-          const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = usersData?.users?.find(u => u.email === form.admin_email);
-          
-          if (existingUser) {
-            // Actualizamos su contraseña para que pueda iniciar sesión con la que acaba de ingresar
-            await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
-              password: form.admin_password,
-              user_metadata: { name: form.admin_nombre }
-            });
-            userId = existingUser.id;
-          } else {
-            throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
-          }
-        } else {
-          throw new Error(`Error de autenticación: ${authError.message}`);
-        }
-      } else {
-        if (!authData.user) {
-          throw new Error("No se pudo crear el usuario.");
-        }
-        userId = authData.user.id;
+        console.warn("Inicio de sesión post-registro falló:", authError.message);
       }
 
-      // 2. Insertar Tenant usando supabaseAdmin (bypasea RLS con service_role)
-      setProvisioningStep(1);
-      // Calcular fecha de fin de prueba (7 días desde ahora)
-      const TRIAL_DAYS = 7;
-      const trialEndDate = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-      const { data: tenantData, error: tenantError } = await supabaseAdmin
-        .from("tenants")
-        .insert({
-          name: form.nombre,
-          slug: form.slug,
-          logo: form.logo_url || null,
-          phone: form.telefono,
-          address: `Provincia ${form.provincia}, República Dominicana`,
-          email: form.admin_email,
-          status: "active",
-          config: {
-            umbral_diferencia_caja: 500,
-            formato_ticket: "80mm",
-            formato_ticket_default: "80mm"
-          },
-          plan_id: form.plan_id,
-          estado: "TRIAL",
-          trial_hasta: trialEndDate
-        })
-        .select()
-        .single();
-
-      if (tenantError) {
-        throw new Error(`Error al crear el taller: ${tenantError.message}`);
-      }
-
-      const tenantId = tenantData.id;
-
-      // 3. Vincular usuario al tenant (supabaseAdmin)
-      setProvisioningStep(2);
-      const { error: tenantUserError } = await supabaseAdmin
-        .from("tenant_users")
-        .insert({
-          tenant_id: tenantId,
-          user_id: userId,
-          name: form.admin_nombre,
-          email: form.admin_email,
-          role: "owner",
-          status: "active"
-        });
-
-      if (tenantUserError) {
-        throw new Error(`Error de vinculación de usuario: ${tenantUserError.message}`);
-      }
-
-      // 4. Crear empleado principal (supabaseAdmin)
-      setProvisioningStep(3);
-      const { error: empleadoError } = await supabaseAdmin
-        .from("empleados")
-        .insert({
-          tenant_id: tenantId,
-          nombre: form.admin_nombre.split(" ")[0],
-          apellido: form.admin_nombre.split(" ").slice(1).join(" ") || "",
-          rol: "ADMIN",
-          pin: "1234"
-        });
-
-      if (empleadoError) {
-        throw new Error(`Error al crear empleado: ${empleadoError.message}`);
-      }
-
-      // 5. Iniciar sesión para establecer JWT en el cliente (best-effort)
       setProvisioningStep(4);
-      await supabase.auth.signInWithPassword({
-        email: form.admin_email,
-        password: form.admin_password,
-      });
+      await new Promise((r) => setTimeout(r, 600));
 
-      await new Promise((r) => setTimeout(r, 800));
+      const trialEndDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
       // Actualizar store local de Zustand
       const localTenant: Tenant = {
         id: tenantId,
-        name: tenantData.name,
-        slug: tenantData.slug,
-        logo: tenantData.logo || undefined,
-        phone: tenantData.phone || undefined,
-        address: tenantData.address || undefined,
-        email: tenantData.email || undefined,
+        name: form.nombre,
+        slug: form.slug,
+        logo: form.logo_url || undefined,
+        phone: form.telefono || undefined,
+        address: `Provincia ${form.provincia}, República Dominicana`,
+        email: form.admin_email,
         status: "active",
-        config: tenantData.config,
-        plan_id: tenantData.plan_id || undefined,
-        estado: tenantData.estado || "TRIAL",
-        trial_hasta: tenantData.trial_hasta || trialEndDate
+        config: {
+          umbral_diferencia_caja: 500,
+          formato_ticket: "80mm",
+          formato_ticket_default: "80mm"
+        },
+        plan_id: form.plan_id,
+        estado: "TRIAL",
+        trial_hasta: trialEndDate
       };
 
       const localUser: TenantUser = {

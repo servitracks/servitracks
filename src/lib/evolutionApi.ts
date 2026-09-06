@@ -283,7 +283,8 @@ export async function setEvolutionWebhook(
   try {
     const cleanUrl = cleanBaseUrl(baseUrl);
     const cleanKey = cleanApiKey(apiKey);
-    const webhookUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/evolution-webhook?tenant_id=${tenantId}`;
+    const serverUrl = (import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "");
+    const webhookUrl = `${serverUrl}/functions/v1/evolution-webhook?tenant_id=${tenantId}`;
 
     const res = await fetch(`${cleanUrl}/webhook/set/${instanceName}`, {
       method: "POST",

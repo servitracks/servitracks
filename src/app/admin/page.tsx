@@ -67,7 +67,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { formatPolarUrl } from "@/lib/plans";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 function Logo() {
   return (
@@ -96,17 +96,23 @@ export default function AdminPage() {
   const user = useRequireAuth();
   const navigate = useNavigate();
   
-  // Validar que sea super admin e inicializar título
+  // Validar que sea super admin con sesión real en Supabase Auth
   useEffect(() => {
     document.title = "Super Admin — ServiTracks";
     
-    if (user && user.empleado.id !== '__loading__') {
-      if (!ADMIN_EMAILS.includes(user.empleado.email.toLowerCase())) {
+    async function verifyAdminSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      const sessionEmail = session?.user?.email?.toLowerCase();
+      const isAuthorized = sessionEmail && ADMIN_EMAILS.map(e => e.toLowerCase()).includes(sessionEmail);
+
+      if (!isAuthorized) {
         toast.error("No tienes permisos para acceder al panel central");
+        logout();
         navigate('/login');
       }
     }
-  }, [user, navigate]);
+    verifyAdminSession();
+  }, [navigate]);
 
   const [tick, setTick] = useState(0);
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -261,49 +267,19 @@ export default function AdminPage() {
 
     setIsCreatingTenant(true);
     try {
-      // 1. Crear usuario en Auth
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email: newTenantForm.email.trim(),
-        password: newTenantForm.adminPassword,
-        email_confirm: true,
-        user_metadata: { name: newTenantForm.adminName || newTenantForm.name }
+      const cleanSlug = newTenantForm.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, "-");
+      const { data: result, error: rpcError } = await supabase.rpc("register_tenant_account", {
+        p_company_name: newTenantForm.name.trim(),
+        p_slug: cleanSlug,
+        p_admin_email: newTenantForm.email.trim(),
+        p_admin_password: newTenantForm.adminPassword,
+        p_admin_name: newTenantForm.adminName || newTenantForm.name,
+        p_phone: newTenantForm.phone.trim() || "",
+        p_plan_id: newTenantForm.planId || "pro",
       });
 
-      if (authError) throw authError;
-
-      // 2. Insertar Tenant
-      const newTenantId = crypto.randomUUID();
-      const trialEndDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
-
-      const { data: tenantData, error: tenantError } = await supabaseAdmin
-        .from("tenants")
-        .insert({
-          id: newTenantId,
-          name: newTenantForm.name.trim(),
-          slug: newTenantForm.slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, "-"),
-          email: newTenantForm.email.trim(),
-          phone: newTenantForm.phone.trim() || undefined,
-          plan_id: newTenantForm.planId,
-          estado: "ACTIVO",
-          status: "active",
-          trial_hasta: trialEndDate,
-          config: {}
-        })
-        .select()
-        .single();
-
-      if (tenantError) throw tenantError;
-
-      // 3. Vincular Usuario
-      await supabaseAdmin.from("tenant_users").insert({
-        id: crypto.randomUUID(),
-        tenant_id: newTenantId,
-        user_id: authData.user.id,
-        name: newTenantForm.adminName || "Administrador",
-        email: newTenantForm.email.trim(),
-        role: "owner",
-        status: "active"
-      });
+      if (rpcError) throw new Error(rpcError.message);
+      if (!result?.success) throw new Error(result?.error || "Error al crear el taller");
 
       toast.success(`Taller "${newTenantForm.name}" creado con éxito`);
       setOpenNewTenantModal(false);

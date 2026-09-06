@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import type { EmpleadoNomina, NominaPeriodo } from "@/store/useNominaStore";
 
 function dbToEmpleado(row: any): EmpleadoNomina {
@@ -16,24 +16,24 @@ function nominaToDb(n: NominaPeriodo) {
 }
 
 export async function loadEmpleadosFromSupabase(tenantId: string): Promise<EmpleadoNomina[]> {
-  const { data, error } = await supabaseAdmin.from("empleados_nomina").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("empleados_nomina").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] empleados_nomina:", error); return []; }
   return (data || []).map(dbToEmpleado);
 }
 export async function loadNominasFromSupabase(tenantId: string): Promise<NominaPeriodo[]> {
-  const { data, error } = await supabaseAdmin.from("nominas_periodos").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("nominas_periodos").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] nominas_periodos:", error); return []; }
   return (data || []).map(dbToNomina);
 }
 
 export async function upsertEmpleados(items: EmpleadoNomina[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("empleados_nomina").upsert(items.map(empleadoToDb), { onConflict: "id" });
+  const { error } = await supabase.from("empleados_nomina").upsert(items.map(empleadoToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert empleados_nomina:", error);
 }
 export async function upsertNominas(items: NominaPeriodo[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("nominas_periodos").upsert(items.map(nominaToDb), { onConflict: "id" });
+  const { error } = await supabase.from("nominas_periodos").upsert(items.map(nominaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert nominas_periodos:", error);
 }
 

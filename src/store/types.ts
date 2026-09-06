@@ -273,6 +273,8 @@ export interface Invoice {
   signatureDate?: string;
   notes?: string;
   isCommissionPaid?: boolean;
+  syncStatus?: 'synced' | 'pending_dgii' | 'error';
+  contingencyPayload?: any;
   createdAt: string;
 }
 

@@ -2,7 +2,7 @@
  * Supabase ↔ Zustand sync service for maintenance-related data.
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab } from "@/store/types";
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
@@ -137,110 +137,110 @@ export async function loadMaintenanceItemsFromSupabase(tenantId: string): Promis
 }
 
 export async function loadServicesFromSupabase(tenantId: string): Promise<Service[]> {
-  const { data, error } = await supabaseAdmin.from("services").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("services").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] services:", error); return []; }
   return (data || []).map(dbToService);
 }
 
 export async function loadProductsFromSupabase(tenantId: string): Promise<Product[]> {
-  const { data, error } = await supabaseAdmin.from("products").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("products").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] products:", error); return []; }
   return (data || []).map(dbToProduct);
 }
 
 export async function loadOrdersFromSupabase(tenantId: string): Promise<WorkOrder[]> {
-  const { data, error } = await supabaseAdmin.from("orders").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("orders").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] orders:", error); return []; }
   return (data || []).map(dbToWorkOrder);
 }
 
 export async function loadQuotesFromSupabase(tenantId: string): Promise<Quote[]> {
-  const { data, error } = await supabaseAdmin.from("quotes").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("quotes").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] quotes:", error); return []; }
   return (data || []).map(dbToQuote);
 }
 
 export async function loadInvoicesFromSupabase(tenantId: string): Promise<Invoice[]> {
-  const { data, error } = await supabaseAdmin.from("invoices").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("invoices").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] invoices:", error); return []; }
   return (data || []).map(dbToInvoice);
 }
 
 
 export async function loadCajasFromSupabase(tenantId: string): Promise<Caja[]> {
-  const { data, error } = await supabaseAdmin.from("cajas").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("cajas").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] cajas:", error); return []; }
   return (data || []).map(dbToCaja);
 }
 export async function loadMovimientosCajaFromSupabase(tenantId: string): Promise<MovimientoCaja[]> {
-  const { data, error } = await supabaseAdmin.from("movimientos_caja").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("movimientos_caja").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] movimientos_caja:", error); return []; }
   return (data || []).map(dbToMovimientoCaja);
 }
 export async function loadTechniciansFromSupabase(tenantId: string): Promise<Technician[]> {
-  const { data, error } = await supabaseAdmin.from("technicians").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("technicians").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] technicians:", error); return []; }
   return (data || []).map(dbToTechnician);
 }
 export async function loadInventoryMovementsFromSupabase(tenantId: string): Promise<InventoryMovement[]> {
-  const { data, error } = await supabaseAdmin.from("movements").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("movements").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] movements:", error); return []; }
   return (data || []).map(dbToInventoryMovement);
 }
 export async function loadInspectionsFromSupabase(tenantId: string): Promise<Inspection[]> {
-  const { data, error } = await supabaseAdmin.from("inspections").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("inspections").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] inspections:", error); return []; }
   return (data || []).map(dbToInspection);
 }
 export async function loadMaintenanceAlertsFromSupabase(tenantId: string): Promise<MaintenanceAlert[]> {
-  const { data, error } = await supabaseAdmin.from("maintenance_alerts").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("maintenance_alerts").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] maintenance_alerts:", error); return []; }
   return (data || []).map(dbToMaintenanceAlert);
 }
 export async function loadMaintenanceHistoryFromSupabase(tenantId: string): Promise<MaintenanceHistoryItem[]> {
-  const { data, error } = await supabaseAdmin.from("maintenance_history").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("maintenance_history").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] maintenance_history:", error); return []; }
   return (data || []).map(dbToMaintenanceHistoryItem);
 }
 export async function loadSuppliersFromSupabase(tenantId: string): Promise<Supplier[]> {
-  const { data, error } = await supabaseAdmin.from("suppliers").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("suppliers").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] suppliers:", error); return []; }
   return (data || []).map(dbToSupplier);
 }
 export async function loadSupplierProductsFromSupabase(tenantId: string): Promise<SupplierProduct[]> {
-  const { data, error } = await supabaseAdmin.from("supplier_products").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("supplier_products").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] supplier_products:", error); return []; }
   return (data || []).map(dbToSupplierProduct);
 }
 export async function loadPurchaseOrdersFromSupabase(tenantId: string): Promise<PurchaseOrder[]> {
-  const { data, error } = await supabaseAdmin.from("purchase_orders").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("purchase_orders").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] purchase_orders:", error); return []; }
   return (data || []).map(dbToPurchaseOrder);
 }
 export async function loadGoodsReceiptsFromSupabase(tenantId: string): Promise<GoodsReceipt[]> {
-  const { data, error } = await supabaseAdmin.from("goods_receipts").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("goods_receipts").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] goods_receipts:", error); return []; }
   return (data || []).map(dbToGoodsReceipt);
 }
 export async function loadAccountsPayableFromSupabase(tenantId: string): Promise<AccountPayable[]> {
-  const { data, error } = await supabaseAdmin.from("accounts_payable").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("accounts_payable").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] accounts_payable:", error); return []; }
   return (data || []).map(dbToAccountPayable);
 }
 export async function loadQuoteRequestsFromSupabase(tenantId: string): Promise<QuoteRequest[]> {
-  const { data, error } = await supabaseAdmin.from("quote_requests").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("quote_requests").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] quote_requests:", error); return []; }
   return (data || []).map(dbToQuoteRequest);
 }
 
 export async function loadActivityLogsFromSupabase(tenantId: string): Promise<ActivityLog[]> {
-  const { data, error } = await supabaseAdmin.from("activity_logs").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000);
+  const { data, error } = await supabase.from("activity_logs").select("*").eq("tenant_id", tenantId).order("created_at", { ascending: false }).limit(1000);
   if (error) { console.error("[sync] activity_logs:", error); return []; }
   return (data || []).map(dbToActivityLog);
 }
 
 export async function loadUsersFromSupabase(tenantId: string) {
-  const { data, error } = await supabaseAdmin.from("tenant_users").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("tenant_users").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] users:", error); return []; }
   return (data || []).map((row: any) => ({
     id: row.user_id || row.id,
@@ -255,7 +255,7 @@ export async function loadUsersFromSupabase(tenantId: string) {
 }
 
 export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTab[]> {
-  const { data, error } = await supabaseAdmin.from("open_tabs").select("*").eq("tenant_id", tenantId);
+  const { data, error } = await supabase.from("open_tabs").select("*").eq("tenant_id", tenantId);
   if (error) { console.error("[sync] open_tabs:", error); return []; }
   return (data || []).map((row: any) => ({
     id: row.id,
@@ -458,12 +458,12 @@ function dbToProduct(row: any): Product {
     category: row.category,
     brand: row.brand || undefined,
     type: row.type || undefined,
-    costPrice: row.cost_price,
-    salePrice: row.sale_price,
-    laborPrice: row.labor_price || undefined,
-    stock: row.stock,
-    minStock: row.min_stock,
-    tax: row.tax,
+    costPrice: Math.max(0, Number(row.cost_price) || 0),
+    salePrice: Math.max(0, Number(row.sale_price) || 0),
+    laborPrice: row.labor_price !== undefined && row.labor_price !== null ? Number(row.labor_price) || undefined : undefined,
+    stock: Math.max(0, Number(row.stock) || 0),
+    minStock: Math.max(0, Number(row.min_stock) || 0),
+    tax: row.tax !== undefined && row.tax !== null ? Number(row.tax) || 0 : 18,
     image: row.image || undefined,
     supplier: row.supplier || undefined,
     location: row.location || undefined,
@@ -488,15 +488,15 @@ function productToDb(p: Product) {
     name: p.name,
     sku: p.sku,
     barcode: p.barcode || null,
-    category: p.category,
+    category: p.category || "Otros",
     brand: p.brand || null,
     type: p.type || null,
-    cost_price: p.costPrice,
-    sale_price: p.salePrice,
-    labor_price: p.laborPrice || null,
-    stock: p.stock,
-    min_stock: p.minStock,
-    tax: p.tax,
+    cost_price: Math.max(0, Number(p.costPrice) || 0),
+    sale_price: Math.max(0, Number(p.salePrice) || 0),
+    labor_price: p.laborPrice !== undefined && p.laborPrice !== null ? Number(p.laborPrice) || null : null,
+    stock: Math.max(0, Number(p.stock) || 0),
+    min_stock: Math.max(0, Number(p.minStock) || 0),
+    tax: p.tax !== undefined && p.tax !== null ? Number(p.tax) || 0 : 18,
     image: p.image || null,
     supplier: p.supplier || null,
     location: p.location || null,
@@ -559,9 +559,10 @@ function workOrderToDb(o: WorkOrder) {
 
 function dbToQuote(row: any): Quote {
   let notes: string | undefined = row.notes || undefined;
-  let observation: string | undefined = undefined;
+  let observation: string | undefined = row.observation || undefined;
 
-  if (notes && notes.includes("[OBS]:")) {
+  // Retrocompatibilidad con observaciones antiguas concatenadas en notes
+  if (!observation && notes && notes.includes("[OBS]:")) {
     const parts = notes.split("[OBS]:");
     notes = parts[0].trim() || undefined;
     observation = parts[1].trim() || undefined;
@@ -588,11 +589,6 @@ function dbToQuote(row: any): Quote {
 }
 
 function quoteToDb(q: Quote) {
-  let combinedNotes = q.notes || "";
-  if (q.observation) {
-    combinedNotes = combinedNotes ? `${combinedNotes}\n[OBS]: ${q.observation}` : `[OBS]: ${q.observation}`;
-  }
-
   return {
     id: q.id,
     tenant_id: q.tenantId,
@@ -605,7 +601,8 @@ function quoteToDb(q: Quote) {
     tax: q.tax,
     discount: q.discount || null,
     total: q.total,
-    notes: combinedNotes || null,
+    notes: q.notes || null,
+    observation: q.observation || null,
     items: q.items || [],
     created_at: q.createdAt || new Date().toISOString(),
     updated_at: q.updatedAt || new Date().toISOString(),
@@ -637,6 +634,8 @@ function dbToInvoice(row: any): Invoice {
     signatureDate: row.signature_date || undefined,
     notes: row.notes || undefined,
     isCommissionPaid: row.is_commission_paid || undefined,
+    syncStatus: row.sync_status || undefined,
+    contingencyPayload: row.contingency_payload || undefined,
     createdAt: row.created_at,
   };
 }
@@ -666,6 +665,8 @@ function invoiceToDb(i: Invoice) {
     signature_date: i.signatureDate || null,
     notes: i.notes || null,
     is_commission_paid: i.isCommissionPaid || null,
+    sync_status: i.syncStatus || 'synced',
+    contingency_payload: i.contingencyPayload || null,
     created_at: i.createdAt,
   };
 }
@@ -673,23 +674,17 @@ function invoiceToDb(i: Invoice) {
 // ─── Upsert to Supabase ───────────────────────────────────────────────────────
 
 export async function deleteRecordFromSupabase(table: string, id: string): Promise<void> {
-  const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
+  const { error } = await supabase.from(table).delete().eq("id", id);
   if (error) console.error(`[sync] delete ${table} error:`, error);
 }
 
 export async function deleteUserFromSupabase(userId: string): Promise<void> {
   try {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from("tenant_users")
       .delete()
       .or(`user_id.eq.${userId},id.eq.${userId}`);
     if (error) console.error("[sync] delete tenant_user error:", error);
-
-    try {
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-    } catch {
-      // Ignore if user does not exist in auth
-    }
   } catch (err) {
     console.error("[sync] deleteUserFromSupabase error:", err);
   }
@@ -698,123 +693,123 @@ export async function deleteUserFromSupabase(userId: string): Promise<void> {
 
 export async function upsertCustomers(customers: Customer[]): Promise<void> {
   if (customers.length === 0) return;
-  const { error } = await supabaseAdmin.from("customers").upsert(customers.map(customerToDb), { onConflict: "id" });
+  const { error } = await supabase.from("customers").upsert(customers.map(customerToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert customers:", error);
 }
 
 export async function upsertVehicles(vehicles: Vehicle[]): Promise<void> {
   if (vehicles.length === 0) return;
-  const { error } = await supabaseAdmin.from("vehicles").upsert(vehicles.map(vehicleToDb), { onConflict: "id" });
+  const { error } = await supabase.from("vehicles").upsert(vehicles.map(vehicleToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert vehicles:", error);
 }
 
 export async function upsertMaintenanceItems(items: MaintenanceItem[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("maintenance_items").upsert(items.map(maintenanceItemToDb), { onConflict: "id" });
+  const { error } = await supabase.from("maintenance_items").upsert(items.map(maintenanceItemToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_items:", error);
 }
 
 export async function upsertServices(items: Service[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("services").upsert(items.map(serviceToDb), { onConflict: "id" });
+  const { error } = await supabase.from("services").upsert(items.map(serviceToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert services:", error);
 }
 
 export async function upsertProducts(items: Product[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("products").upsert(items.map(productToDb), { onConflict: "id" });
+  const { error } = await supabase.from("products").upsert(items.map(productToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert products:", error);
 }
 
 export async function upsertOrders(items: WorkOrder[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("orders").upsert(items.map(workOrderToDb), { onConflict: "id" });
+  const { error } = await supabase.from("orders").upsert(items.map(workOrderToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert orders:", error);
 }
 
 export async function upsertQuotes(items: Quote[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("quotes").upsert(items.map(quoteToDb), { onConflict: "id" });
+  const { error } = await supabase.from("quotes").upsert(items.map(quoteToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert quotes:", error);
 }
 
 export async function upsertInvoices(items: Invoice[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("invoices").upsert(items.map(invoiceToDb), { onConflict: "id" });
+  const { error } = await supabase.from("invoices").upsert(items.map(invoiceToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert invoices:", error);
 }
 
 
 export async function upsertCajas(items: Caja[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("cajas").upsert(items.map(cajaToDb), { onConflict: "id" });
+  const { error } = await supabase.from("cajas").upsert(items.map(cajaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert cajas:", error);
 }
 export async function upsertMovimientosCaja(items: MovimientoCaja[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("movimientos_caja").upsert(items.map(movimientoCajaToDb), { onConflict: "id" });
+  const { error } = await supabase.from("movimientos_caja").upsert(items.map(movimientoCajaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert movimientos_caja:", error);
 }
 export async function upsertTechnicians(items: Technician[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("technicians").upsert(items.map(technicianToDb), { onConflict: "id" });
+  const { error } = await supabase.from("technicians").upsert(items.map(technicianToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert technicians:", error);
 }
 export async function upsertInventoryMovements(items: InventoryMovement[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("movements").upsert(items.map(inventoryMovementToDb), { onConflict: "id" });
+  const { error } = await supabase.from("movements").upsert(items.map(inventoryMovementToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert movements:", error);
 }
 export async function upsertInspections(items: Inspection[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("inspections").upsert(items.map(inspectionToDb), { onConflict: "id" });
+  const { error } = await supabase.from("inspections").upsert(items.map(inspectionToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert inspections:", error);
 }
 export async function upsertMaintenanceAlerts(items: MaintenanceAlert[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("maintenance_alerts").upsert(items.map(maintenanceAlertToDb), { onConflict: "id" });
+  const { error } = await supabase.from("maintenance_alerts").upsert(items.map(maintenanceAlertToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_alerts:", error);
 }
 export async function upsertMaintenanceHistory(items: MaintenanceHistoryItem[]): Promise<void> {
   // Ignorar items viejos con IDs cortos (Math.random) para no romper el tipo uuid en postgres
   const validItems = items.filter(i => i.id && i.id.length === 36);
   if (validItems.length === 0) return;
-  const { error } = await supabaseAdmin.from("maintenance_history").upsert(validItems.map(maintenanceHistoryItemToDb), { onConflict: "id" });
+  const { error } = await supabase.from("maintenance_history").upsert(validItems.map(maintenanceHistoryItemToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_history:", error);
 }
 export async function upsertSuppliers(items: Supplier[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("suppliers").upsert(items.map(supplierToDb), { onConflict: "id" });
+  const { error } = await supabase.from("suppliers").upsert(items.map(supplierToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert suppliers:", error);
 }
 export async function upsertSupplierProducts(items: SupplierProduct[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("supplier_products").upsert(items.map(supplierProductToDb), { onConflict: "id" });
+  const { error } = await supabase.from("supplier_products").upsert(items.map(supplierProductToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert supplier_products:", error);
 }
 export async function upsertPurchaseOrders(items: PurchaseOrder[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("purchase_orders").upsert(items.map(purchaseOrderToDb), { onConflict: "id" });
+  const { error } = await supabase.from("purchase_orders").upsert(items.map(purchaseOrderToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert purchase_orders:", error);
 }
 export async function upsertGoodsReceipts(items: GoodsReceipt[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("goods_receipts").upsert(items.map(goodsReceiptToDb), { onConflict: "id" });
+  const { error } = await supabase.from("goods_receipts").upsert(items.map(goodsReceiptToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert goods_receipts:", error);
 }
 export async function upsertAccountsPayable(items: AccountPayable[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("accounts_payable").upsert(items.map(accountPayableToDb), { onConflict: "id" });
+  const { error } = await supabase.from("accounts_payable").upsert(items.map(accountPayableToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert accounts_payable:", error);
 }
 export async function upsertQuoteRequests(items: QuoteRequest[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("quote_requests").upsert(items.map(quoteRequestToDb), { onConflict: "id" });
+  const { error } = await supabase.from("quote_requests").upsert(items.map(quoteRequestToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert quote_requests:", error);
 }
 export async function upsertActivityLogs(items: ActivityLog[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("activity_logs").upsert(items.map(activityLogToDb), { onConflict: "id" });
+  const { error } = await supabase.from("activity_logs").upsert(items.map(activityLogToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert activity_logs:", error);
 }
 export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
@@ -830,11 +825,91 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     created_at: t.createdAt,
     updated_at: t.updatedAt
   }));
-  const { error } = await supabaseAdmin.from("open_tabs").upsert(dbItems, { onConflict: "id" });
+  const { error } = await supabase.from("open_tabs").upsert(dbItems, { onConflict: "id" });
   if (error) console.error("[sync] upsert open_tabs:", error);
 }
 
+export interface BatchImportInventoryPayload {
+  tenantId: string;
+  productsToUpsert: Product[];
+  movementsToCreate: InventoryMovement[];
+  purchaseOrder?: PurchaseOrder;
+  accountPayable?: AccountPayable;
+  activityLog?: ActivityLog;
+}
+
+export async function batchImportInventoryToSupabase(
+  payload: BatchImportInventoryPayload
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { productsToUpsert, movementsToCreate, purchaseOrder, accountPayable, activityLog } = payload;
+
+    // 1. Upsert Products in chunks of 50
+    if (productsToUpsert.length > 0) {
+      const chunkSize = 50;
+      for (let i = 0; i < productsToUpsert.length; i += chunkSize) {
+        const chunk = productsToUpsert.slice(i, i + chunkSize);
+        const { error: pErr } = await supabaseAdmin
+          .from("products")
+          .upsert(chunk.map(productToDb), { onConflict: "id" });
+        if (pErr) {
+          console.error("[batchImportInventory] Error upserting products chunk:", pErr);
+          throw new Error(`Error guardando productos en Supabase: ${pErr.message}`);
+        }
+      }
+    }
+
+    // 2. Upsert Movements in chunks of 50
+    if (movementsToCreate.length > 0) {
+      const chunkSize = 50;
+      for (let i = 0; i < movementsToCreate.length; i += chunkSize) {
+        const chunk = movementsToCreate.slice(i, i + chunkSize);
+        const { error: mErr } = await supabaseAdmin
+          .from("movements")
+          .upsert(chunk.map(inventoryMovementToDb), { onConflict: "id" });
+        if (mErr) {
+          console.error("[batchImportInventory] Error upserting movements chunk:", mErr);
+          throw new Error(`Error guardando movimientos de inventario en Supabase: ${mErr.message}`);
+        }
+      }
+    }
+
+    // 3. Upsert Purchase Order if provided
+    if (purchaseOrder) {
+      const { error: poErr } = await supabaseAdmin
+        .from("purchase_orders")
+        .upsert([purchaseOrderToDb(purchaseOrder)], { onConflict: "id" });
+      if (poErr) {
+        console.error("[batchImportInventory] Error upserting purchase order:", poErr);
+        throw new Error(`Error guardando orden de compra en Supabase: ${poErr.message}`);
+      }
+    }
+
+    // 4. Upsert Account Payable if provided
+    if (accountPayable) {
+      const { error: apErr } = await supabaseAdmin
+        .from("accounts_payable")
+        .upsert([accountPayableToDb(accountPayable)], { onConflict: "id" });
+      if (apErr) {
+        console.error("[batchImportInventory] Error upserting account payable:", apErr);
+        throw new Error(`Error guardando cuenta por pagar en Supabase: ${apErr.message}`);
+      }
+    }
+
+    // 5. Activity log
+    if (activityLog) {
+      await supabase.from("activity_logs").upsert([activityLogToDb(activityLog)], { onConflict: "id" });
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("[batchImportInventoryToSupabase] Fatal error:", err);
+    return { success: false, error: err?.message || "Error desconocido al importar en Supabase" };
+  }
+}
+
 // ─── Full sync: store → Supabase ──────────────────────────────────────────────
+
 
 export async function syncStoreToSupabase(
   tenantId: string,

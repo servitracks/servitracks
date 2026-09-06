@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { Input } from "@/components/ui/input";
-import { Trash2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Trash2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -64,11 +64,35 @@ export default function StepPreviewEditor({
     }
   };
 
+  const addRow = () => {
+    const newRow: ImportRow = {
+      _id: `row-manual-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: "",
+      sku: "",
+      brand: "",
+      category: "Otros",
+      supplier: "",
+      costPrice: 0,
+      salePrice: 0,
+      quantity: 1,
+      stock: 1,
+      minStock: 5,
+      tax: 18,
+      location: "",
+      _hasError: true,
+    };
+    setRows([newRow, ...rows]);
+  };
+
   const updateRow = (id: string, field: keyof ImportRow, value: string | number) => {
     setRows(
       rows.map((r) => {
         if (r._id !== id) return r;
-        const updated = { ...r, [field]: value };
+        let sanitizedValue = value;
+        if (typeof value === "number") {
+          sanitizedValue = isNaN(value) ? 0 : Math.max(0, value);
+        }
+        const updated = { ...r, [field]: sanitizedValue };
         updated._hasError = validateRow(updated);
         return updated;
       })
@@ -98,7 +122,7 @@ export default function StepPreviewEditor({
             Revisar y Editar Productos ({rows.length})
           </h2>
           <p className="text-xs text-neutral-500 mt-0.5">
-            Vista previa editable de tu inventario. Usa las flechas ◀ ▶ o la tecla Tab para desplazarte.
+            Vista previa editable de tu inventario. Puedes modificar valores o agregar productos antes de confirmar.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -108,18 +132,18 @@ export default function StepPreviewEditor({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-lg hover:bg-white hover:shadow-2xs text-neutral-700"
+              className="h-7 w-7 rounded-lg hover:bg-white hover:shadow-2xs text-neutral-700 cursor-pointer"
               onClick={() => scrollTable("left")}
               title="Desplazar tabla a la izquierda"
             >
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-[10px] font-extrabold uppercase text-neutral-500 px-1">Ver Columnas</span>
+            <span className="text-[10px] font-extrabold uppercase text-neutral-500 px-1">Columnas</span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-lg hover:bg-white hover:shadow-2xs text-neutral-700"
+              className="h-7 w-7 rounded-lg hover:bg-white hover:shadow-2xs text-neutral-700 cursor-pointer"
               onClick={() => scrollTable("right")}
               title="Desplazar tabla a la derecha"
             >
@@ -127,11 +151,22 @@ export default function StepPreviewEditor({
             </Button>
           </div>
 
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addRow}
+            className="h-9 rounded-xl gap-1.5 text-xs font-bold border-dashed border-neutral-300 hover:border-black cursor-pointer shadow-2xs"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            + Agregar Fila
+          </Button>
+
           <Input
             placeholder="Buscar por nombre o SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-9 w-52 rounded-xl border-neutral-200 text-xs bg-white shadow-2xs"
+            className="h-9 w-44 rounded-xl border-neutral-200 text-xs bg-white shadow-2xs"
           />
           <div className="flex items-center gap-1.5 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1.5">
             <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />

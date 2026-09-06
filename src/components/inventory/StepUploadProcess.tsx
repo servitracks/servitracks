@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback } from "react";
 import { SourceType } from "./ImportWizardModal";
 import { ImportRow } from "./StepPreviewEditor";
-import { Upload, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle } from "lucide-react";
+import { Upload, Download, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import { extractProductsWithAI } from "@/lib/import-ai";
@@ -62,8 +62,31 @@ interface StepUploadProcessProps {
 function parseNumber(val: unknown): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
   if (!val) return 0;
-  // Convert text, strip currency symbols, replace commas used as thousand separators
-  const str = String(val).replace(/[^0-9.-]/g, "").trim();
+  let str = String(val).trim();
+  // Strip currency symbols and letters, keeping digits, commas, dots and minus
+  str = str.replace(/[^0-9.,-]/g, "");
+  if (!str) return 0;
+
+  const hasComma = str.includes(",");
+  const hasDot = str.includes(".");
+  if (hasComma && hasDot) {
+    if (str.lastIndexOf(",") > str.lastIndexOf(".")) {
+      // e.g. 1.250,50 (European/Dominican comma decimal)
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      // e.g. 1,250.50 (Standard comma thousands separator)
+      str = str.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    const parts = str.split(",");
+    if (parts.length === 2 && parts[1].length <= 2) {
+      // Decimal like 12,50 or 5,5
+      str = parts[0] + "." + parts[1];
+    } else {
+      // Multiple commas or thousands separator like 1,000
+      str = str.replace(/,/g, "");
+    }
+  }
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
 }
@@ -113,55 +136,59 @@ function autoExtractSku(name: string, explicitSku?: string): string {
 function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   const nameVal = String(getVal(raw, [
     "name", "nombre", "producto", "descripcion", "descripción", 
-    "articulo", "artículo", "item", "detalle"
+    "articulo", "artículo", "item", "detalle", "concepto"
   ]) ?? "").trim();
 
   const explicitSku = String(getVal(raw, [
-    "sku", "codigo", "código", "referencia", "ref", "noparte", 
+    "sku", "codigo", "código", "cod", "referencia", "ref", "noparte", 
     "no.parte", "numparte", "parte", "id"
   ]) ?? "").trim();
 
   const sku = autoExtractSku(nameVal, explicitSku);
 
   const brand = String(getVal(raw, [
-    "brand", "marca", "fabricante"
+    "brand", "marca", "fabricante", "maker"
   ]) ?? "").trim();
 
   const rawCat = String(getVal(raw, [
-    "category", "categoria", "categoría", "grupo", "linea", "línea"
+    "category", "categoria", "categoría", "grupo", "linea", "línea", "rubro", "familia"
   ]) ?? "");
 
   const category = autoDetectCategory(nameVal, rawCat);
 
   const supplier = String(getVal(raw, [
-    "supplier", "proveedor", "distribuidor", "suplidor"
+    "supplier", "proveedor", "distribuidor", "suplidor", "vendor"
   ]) ?? "").trim();
 
   // Costo: Costo Unit., Costo Unitario, Precio Costo, Con ITBIS Unit., Costo Total, Costo
   const rawCost = getVal(raw, [
-    "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto", 
-    "conitbisunit", "costo", "costototal"
+    "costPrice", "costo", "cost", "costounit", "costounitario", "preciocosto", "p.costo", "pcosto",
+    "costodecosto", "conitbisunit", "costototal", "c/u", "valorcosto"
   ]);
-  const costPrice = parseNumber(rawCost);
+  const costPrice = Math.max(0, parseNumber(rawCost));
 
   // Precio Venta: Precio Unit., Precio Unitario, Precio Venta, Precio, Precio Total
   const rawSale = getVal(raw, [
-    "salePrice", "preciounit", "preciounitario", "precioventa", "preciodeventa", 
-    "precio", "preciototal"
+    "salePrice", "precio", "precioventa", "preciodeventa", "p.venta", "pventa", "pvp",
+    "preciounit", "preciounitario", "precio_publico", "preciototal"
   ]);
-  const salePrice = parseNumber(rawSale);
+  const salePrice = Math.max(0, parseNumber(rawSale));
 
-  // Cantidad / Stock: Inv.Total, Inv Total, Cantidad, Stock, Qty, Existencia
+  // Cantidad / Stock: Inv.Total, Inv Total, Cantidad, Stock, Qty, Existencia, Und
   const rawQty = getVal(raw, [
-    "invtotal", "invtotal.", "inv total", "quantity", "cantidad", "qty", 
-    "stock", "existencia", "existencias", "unidades"
+    "quantity", "cantidad", "cant", "cant.", "qty", "und", "unds", "unidades",
+    "stock", "existencia", "existencias", "invtotal", "invtotal.", "inv total", 
+    "inventario", "balance"
   ]);
-  const quantity = parseNumber(rawQty) || 1;
-  const stock = parseNumber(getVal(raw, ["stock", "existencia"])) || quantity;
+  const parsedQty = rawQty !== undefined && rawQty !== null ? parseNumber(rawQty) : 1;
+  const quantity = Math.max(0, parsedQty);
 
-  const minStock = parseNumber(getVal(raw, ["minstock", "stockminimo", "stockmínimo"])) || 5;
-  const tax = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18;
-  const location = String(getVal(raw, ["location", "ubicacion", "ubicación", "estante", "tramo"]) ?? "").trim();
+  const rawStock = getVal(raw, ["stock", "existencia", "existencias", "invtotal", "inventario"]);
+  const stock = rawStock !== undefined && rawStock !== null ? Math.max(0, parseNumber(rawStock)) : quantity;
+
+  const minStock = Math.max(1, parseNumber(getVal(raw, ["minstock", "stockmin", "stockminimo", "stockmínimo", "minimo"])) || 5);
+  const tax = Math.max(0, parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18);
+  const location = String(getVal(raw, ["location", "ubicacion", "ubicación", "estante", "tramo", "almacen", "almacén", "pasillo", "gaveta"]) ?? "").trim();
 
   return {
     _id: `row-${index}-${Date.now()}`,
@@ -284,9 +311,13 @@ export default function StepUploadProcess({
           return;
         }
 
-        const supplierObj = suppliers.find(s => s.id === selectedSupplierId);
-        const supplierName = supplierObj ? supplierObj.commercialName : "";
-        rows = rows.map(r => ({ ...r, supplier: supplierName }));
+        if (selectedSupplierId) {
+          const supplierObj = suppliers.find(s => s.id === selectedSupplierId);
+          const supplierName = supplierObj ? supplierObj.commercialName : "";
+          if (supplierName) {
+            rows = rows.map(r => ({ ...r, supplier: supplierName }));
+          }
+        }
 
         setTimeout(() => onParsed(rows), 300);
       } catch (err: unknown) {
@@ -296,8 +327,26 @@ export default function StepUploadProcess({
         setIsProcessing(false);
       }
     },
-    [sourceType, onParsed]
+    [sourceType, onParsed, selectedSupplierId, suppliers]
   );
+
+  const downloadExampleTemplate = () => {
+    const headers = ["Nombre", "SKU", "Marca", "Categoria", "Proveedor", "Precio Costo", "Precio Venta", "Cantidad", "Stock Minimo", "ITBIS %", "Ubicacion"];
+    const sampleRows = [
+      ["Aceite Sintético 10W-30", "OIL-10W30-SYN", "Castrol", "Lubricantes", "Distribuidora Total", "450.00", "750.00", "24", "5", "18", "Estante A-1"],
+      ["Filtro de Aceite PH-4967", "FILT-PH4967", "Fram", "Filtros", "AutoPartes Express", "180.00", "320.00", "15", "4", "18", "Estante B-2"],
+      ["Pastillas de Freno Delanteras", "BRK-D1002", "Brembo", "Frenos", "Frenos del Caribe", "1200.00", "2100.00", "8", "2", "18", "Estante C-3"],
+      ["Bujía Iridium IX", "NGK-BKR6EIX", "NGK", "Eléctrico", "Importadora Eléctrica", "250.00", "480.00", "30", "10", "18", "Gaveta E-4"],
+    ];
+    const csvContent = [headers, ...sampleRows].map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "plantilla_inventario_servitracks.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -313,15 +362,27 @@ export default function StepUploadProcess({
 
   return (
     <div className="space-y-4 py-2">
-      <div>
-        <h2 className="text-base font-bold text-neutral-900">
-          Sube tu {config.label}
-        </h2>
-        <p className="text-sm text-neutral-500 mt-1">
-          {sourceType === "csv"
-            ? "El archivo se procesará localmente en tu dispositivo de forma instantánea."
-            : "El archivo se enviará de forma segura a la IA para extraer los productos."}
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-base font-bold text-neutral-900">
+            Sube tu {config.label}
+          </h2>
+          <p className="text-sm text-neutral-500 mt-1">
+            {sourceType === "csv"
+              ? "El archivo se procesará localmente en tu dispositivo de forma instantánea."
+              : "El archivo se enviará de forma segura a la IA para extraer los productos."}
+          </p>
+        </div>
+        {sourceType === "csv" && (
+          <button
+            type="button"
+            onClick={downloadExampleTemplate}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-bold border border-emerald-200 transition-all shadow-2xs cursor-pointer"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Descargar plantilla de ejemplo
+          </button>
+        )}
       </div>
 
       {/* Drop Zone */}
@@ -348,6 +409,7 @@ export default function StepUploadProcess({
           ref={fileRef}
           type="file"
           accept={config.accept}
+          capture={sourceType === "image" ? "environment" : undefined}
           className="hidden"
           onChange={handleFileChange}
         />

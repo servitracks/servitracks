@@ -10,7 +10,7 @@ import { useParams } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
 import { useNominaStore } from "@/store/useNominaStore";
 import { useHydration } from "@/store/useHydration";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import React from "react";
 
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone, Megaphone } from "lucide-react";
@@ -104,7 +104,7 @@ export default function DashboardLayout() {
   useEffect(() => {
     if (currentUserId && currentUserId !== 'admin' && !currentUser) {
       async function fetchMissingUser() {
-        const { data: rows, error } = await supabaseAdmin
+        const { data: rows, error } = await supabase
           .from("tenant_users")
           .select("*")
           .eq("user_id", currentUserId)
@@ -134,7 +134,7 @@ export default function DashboardLayout() {
 
     async function refreshTenantStatus() {
       try {
-        const { data, error } = await supabaseAdmin
+        const { data, error } = await supabase
           .from("tenants")
           .select("estado, trial_hasta, plan_id, status")
           .eq("id", currentTenant!.id)
@@ -377,17 +377,134 @@ export default function DashboardLayout() {
     }
 
     // ── Debounce para la descarga remota (400ms) ──
-    function scheduleRemoteRefresh() {
+    const pendingTables = new Set<string>();
+
+    async function refreshPendingTables() {
+      if (pendingTables.size === 0) return;
+      const tablesToRefresh = Array.from(pendingTables);
+      pendingTables.clear();
+
+      try {
+        const syncModule = await import("@/lib/supabaseSync");
+        const updates: any = {};
+
+        for (const table of tablesToRefresh) {
+          switch (table) {
+            case "orders":
+              updates.orders = await syncModule.loadOrdersFromSupabase(currentTenant!.id);
+              break;
+            case "invoices":
+              updates.invoices = await syncModule.loadInvoicesFromSupabase(currentTenant!.id);
+              break;
+            case "quotes":
+              updates.quotes = await syncModule.loadQuotesFromSupabase(currentTenant!.id);
+              break;
+            case "products":
+              updates.products = await syncModule.loadProductsFromSupabase(currentTenant!.id);
+              break;
+            case "services":
+              updates.services = await syncModule.loadServicesFromSupabase(currentTenant!.id);
+              break;
+            case "customers":
+              updates.customers = await syncModule.loadCustomersFromSupabase(currentTenant!.id);
+              break;
+            case "vehicles":
+              updates.vehicles = await syncModule.loadVehiclesFromSupabase(currentTenant!.id);
+              break;
+            case "cajas":
+              updates.cajas = await syncModule.loadCajasFromSupabase(currentTenant!.id);
+              break;
+            case "movimientos_caja":
+              updates.cajaMovements = await syncModule.loadMovimientosCajaFromSupabase(currentTenant!.id);
+              break;
+            case "technicians":
+              updates.technicians = await syncModule.loadTechniciansFromSupabase(currentTenant!.id);
+              break;
+            case "movements":
+              updates.movements = await syncModule.loadInventoryMovementsFromSupabase(currentTenant!.id);
+              break;
+            case "inspections":
+              updates.inspections = await syncModule.loadInspectionsFromSupabase(currentTenant!.id);
+              break;
+            case "maintenance_items":
+              updates.maintenanceItems = await syncModule.loadMaintenanceItemsFromSupabase(currentTenant!.id);
+              break;
+            case "maintenance_alerts":
+              updates.maintenanceAlerts = await syncModule.loadMaintenanceAlertsFromSupabase(currentTenant!.id);
+              break;
+            case "maintenance_history":
+              updates.maintenanceHistory = await syncModule.loadMaintenanceHistoryFromSupabase(currentTenant!.id);
+              break;
+            case "suppliers":
+              updates.suppliers = await syncModule.loadSuppliersFromSupabase(currentTenant!.id);
+              break;
+            case "supplier_products":
+              updates.supplierProducts = await syncModule.loadSupplierProductsFromSupabase(currentTenant!.id);
+              break;
+            case "purchase_orders":
+              updates.purchaseOrders = await syncModule.loadPurchaseOrdersFromSupabase(currentTenant!.id);
+              break;
+            case "goods_receipts":
+              updates.goodsReceipts = await syncModule.loadGoodsReceiptsFromSupabase(currentTenant!.id);
+              break;
+            case "accounts_payable":
+              updates.accountsPayable = await syncModule.loadAccountsPayableFromSupabase(currentTenant!.id);
+              break;
+            case "quote_requests":
+              updates.quoteRequests = await syncModule.loadQuoteRequestsFromSupabase(currentTenant!.id);
+              break;
+            case "activity_logs":
+              updates.activityLogs = await syncModule.loadActivityLogsFromSupabase(currentTenant!.id);
+              break;
+            case "tenant_users":
+              updates.users = await syncModule.loadUsersFromSupabase(currentTenant!.id);
+              break;
+            case "open_tabs":
+              updates.openTabs = await syncModule.loadOpenTabsFromSupabase(currentTenant!.id);
+              break;
+            case "empleados_nomina":
+            case "nominas_periodos": {
+              const { loadEmpleadosFromSupabase, loadNominasFromSupabase } = await import("@/lib/nominaSync");
+              const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
+              const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
+              useNominaStore.setState({ empleados: dbEmpleados, nominas: dbNominas });
+              break;
+            }
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          syncDisabledRef.current = true;
+          useStore.setState(updates);
+          setTimeout(() => { syncDisabledRef.current = false; }, 500);
+          console.log(`[RT Sync] ✅ Tablas actualizadas selectivamente:`, Object.keys(updates));
+        }
+      } catch (err) {
+        console.error("[RT Sync] ❌ Error en refresco selectivo:", err);
+        syncDisabledRef.current = false;
+      }
+    }
+
+    function scheduleTableRefresh(tableName: string) {
+      pendingTables.add(tableName);
       if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
       remoteRefreshTimer = setTimeout(() => {
         remoteRefreshTimer = null;
-        applyRemoteState();
-      }, 400);
+        refreshPendingTables();
+      }, 300);
+    }
+
+    function scheduleRemoteRefresh() {
+      TABLES_WITH_TENANT.forEach((t) => pendingTables.add(t));
+      pendingTables.add("movimientos_caja");
+      if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
+      remoteRefreshTimer = setTimeout(() => {
+        remoteRefreshTimer = null;
+        refreshPendingTables();
+      }, 300);
     }
 
     // 1. Tablas a escuchar en tiempo real
-    //    movimientos_caja aparece solo una vez, sin filtro de tenant_id
-    //    porque su FK es caja_id, no tenant_id
     const TABLES_WITH_TENANT = [
       "orders", "invoices", "products", "customers", "vehicles",
       "movements", "cajas", "quotes", "inspections",
@@ -405,7 +522,7 @@ export default function DashboardLayout() {
         { event: "*", schema: "public", table, filter: `tenant_id=eq.${currentTenant.id}` },
         (payload: any) => {
           console.log(`[RT Sync] 📡 Cambio remoto en '${table}':`, payload.eventType);
-          scheduleRemoteRefresh();
+          scheduleTableRefresh(table);
         }
       );
     });
@@ -416,7 +533,7 @@ export default function DashboardLayout() {
       { event: "*", schema: "public", table: "movimientos_caja" },
       (payload: any) => {
         console.log("[RT Sync] 📡 Cambio remoto en 'movimientos_caja':", payload.eventType);
-        scheduleRemoteRefresh();
+        scheduleTableRefresh("movimientos_caja");
       }
     );
 
@@ -571,48 +688,47 @@ export default function DashboardLayout() {
       loadData();
     }
     
-    // 3. Espía de Cambios Locales → sube a Supabase y notifica otros dispositivos
+    // 3. Espía de Cambios Locales con Detección Granular (Diff)
     const unsubscribe = useStore.subscribe((state, prevState) => {
-      if (syncDisabledRef.current) return; // Ignorar cambios que vinieron de la DB (evitar loop)
+      if (syncDisabledRef.current) return; // Ignorar cambios que vinieron de la DB
 
-      const changed =
-        state.orders !== prevState.orders ||
-        state.invoices !== prevState.invoices ||
-        state.quotes !== prevState.quotes ||
-        state.products !== prevState.products ||
-        state.services !== prevState.services ||
-        state.customers !== prevState.customers ||
-        state.vehicles !== prevState.vehicles ||
-        state.maintenanceItems !== prevState.maintenanceItems ||
-        state.cajas !== prevState.cajas ||
-        state.cajaMovements !== prevState.cajaMovements ||
-        state.technicians !== prevState.technicians ||
-        state.movements !== prevState.movements ||
-        state.inspections !== prevState.inspections ||
-        state.maintenanceAlerts !== prevState.maintenanceAlerts ||
-        state.maintenanceHistory !== prevState.maintenanceHistory ||
-        state.suppliers !== prevState.suppliers ||
-        state.supplierProducts !== prevState.supplierProducts ||
-        state.purchaseOrders !== prevState.purchaseOrders ||
-        state.goodsReceipts !== prevState.goodsReceipts ||
-        state.accountsPayable !== prevState.accountsPayable ||
-        state.quoteRequests !== prevState.quoteRequests ||
-        state.activityLogs !== prevState.activityLogs ||
-        state.users !== prevState.users ||
-        state.openTabs !== prevState.openTabs;
+      const diff: any = {};
+      if (state.orders !== prevState.orders) diff.orders = state.orders;
+      if (state.invoices !== prevState.invoices) diff.invoices = state.invoices;
+      if (state.quotes !== prevState.quotes) diff.quotes = state.quotes;
+      if (state.products !== prevState.products) diff.products = state.products;
+      if (state.services !== prevState.services) diff.services = state.services;
+      if (state.customers !== prevState.customers) diff.customers = state.customers;
+      if (state.vehicles !== prevState.vehicles) diff.vehicles = state.vehicles;
+      if (state.maintenanceItems !== prevState.maintenanceItems) diff.maintenanceItems = state.maintenanceItems;
+      if (state.cajas !== prevState.cajas) diff.cajas = state.cajas;
+      if (state.cajaMovements !== prevState.cajaMovements) diff.cajaMovements = state.cajaMovements;
+      if (state.technicians !== prevState.technicians) diff.technicians = state.technicians;
+      if (state.movements !== prevState.movements) diff.movements = state.movements;
+      if (state.inspections !== prevState.inspections) diff.inspections = state.inspections;
+      if (state.maintenanceAlerts !== prevState.maintenanceAlerts) diff.maintenanceAlerts = state.maintenanceAlerts;
+      if (state.maintenanceHistory !== prevState.maintenanceHistory) diff.maintenanceHistory = state.maintenanceHistory;
+      if (state.suppliers !== prevState.suppliers) diff.suppliers = state.suppliers;
+      if (state.supplierProducts !== prevState.supplierProducts) diff.supplierProducts = state.supplierProducts;
+      if (state.purchaseOrders !== prevState.purchaseOrders) diff.purchaseOrders = state.purchaseOrders;
+      if (state.goodsReceipts !== prevState.goodsReceipts) diff.goodsReceipts = state.goodsReceipts;
+      if (state.accountsPayable !== prevState.accountsPayable) diff.accountsPayable = state.accountsPayable;
+      if (state.quoteRequests !== prevState.quoteRequests) diff.quoteRequests = state.quoteRequests;
+      if (state.activityLogs !== prevState.activityLogs) diff.activityLogs = state.activityLogs;
+      if (state.openTabs !== prevState.openTabs) diff.openTabs = state.openTabs;
 
-      if (!changed) return;
+      if (Object.keys(diff).length === 0) return;
 
       // Debounce de 500ms para el upload local (timer independiente del remoteRefreshTimer)
       if (localUploadTimer) clearTimeout(localUploadTimer);
       localUploadTimer = setTimeout(() => {
         localUploadTimer = null;
-        console.log("[Background Sync] ⬆️ Cambio local detectado → subiendo a Supabase...");
+        console.log("[Background Sync] ⬆️ Subiendo cambios granulares a Supabase:", Object.keys(diff));
         import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
-          syncStoreToSupabase(currentTenant.id, state)
+          syncStoreToSupabase(currentTenant.id, diff)
             .then(() => {
               // Notificar al resto de dispositivos vía Broadcast
-              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now() } })
+              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { tables: Object.keys(diff), ts: Date.now() } })
                 .then(resp => console.log("[Broadcast] Envío ack:", resp))
                 .catch(err => console.error("[Broadcast] Error al enviar:", err));
             })

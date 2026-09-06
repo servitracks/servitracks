@@ -30,21 +30,15 @@ export default function LoginPage() {
       const trimmedEmail = email.trim().toLowerCase();
       const isAdminEmail = ADMIN_EMAILS.map(e => e.toLowerCase()).includes(trimmedEmail);
 
-      // ── Ruta Superadmin: primero intentar Supabase Auth, con fallback local ──
+      // ── Ruta Superadmin: Autenticación estricta con Supabase Auth ──
       if (isAdminEmail) {
-        // Intentar con Supabase Auth
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
+          email: trimmedEmail,
           password,
         });
 
-        // Si Supabase Auth falla (cuenta no existe), usar contraseña local de env
-        const adminOk = !authError && authData.user
-          ? true
-          : (import.meta.env.VITE_ADMIN_PASSWORD && password === import.meta.env.VITE_ADMIN_PASSWORD);
-
-        if (!adminOk) {
-          toast.error("Contraseña de administrador incorrecta");
+        if (authError || !authData.user) {
+          toast.error("Credenciales de administrador incorrectas");
           setIsLoading(false);
           return;
         }

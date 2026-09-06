@@ -106,7 +106,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     updateOrder(order.id, { parts: newParts });
 
     // 2. Descontar inventario
-    updateProduct(product.id, { stock: product.stock - partQuantity });
+    updateProduct(product.id, { stock: Math.max(0, (product.stock || 0) - partQuantity) });
 
     // 3. Registrar movimiento
     addMovement({
@@ -136,7 +136,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
 
     // 2. Reversar inventario si el producto existe
     if (product) {
-      updateProduct(product.id, { stock: product.stock + quantityToRemove });
+      updateProduct(product.id, { stock: Math.max(0, (product.stock || 0) + quantityToRemove) });
       addMovement({
         id: `mov-rev-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         tenantId: order.tenantId,

@@ -49,13 +49,25 @@ export async function extractProductsWithAI(
   mimeType: string,
   fileName: string
 ): Promise<ExtractedProduct[]> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
+  const apiKey = (import.meta.env.VITE_GEMINI_API_KEY || (import.meta.env as Record<string, string | undefined>).GEMINI_API_KEY) as string | undefined;
   if (!apiKey) {
-    throw new Error("VITE_GEMINI_API_KEY no está configurada en el entorno.");
+    throw new Error("La clave API de Gemini no está configurada en el entorno (VITE_GEMINI_API_KEY).");
+  }
+
+  // Pre-validate file data length (~20MB max in base64)
+  if (fileData.length > 28 * 1024 * 1024) {
+    throw new Error("El archivo seleccionado excede el tamaño máximo permitido de 20MB.");
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+  // Force pure JSON output format via generationConfig
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-flash-latest",
+    generationConfig: {
+      responseMimeType: "application/json",
+      temperature: 0.1,
+    }
+  });
 
   const prompt =
     SYSTEM_PROMPT +
@@ -73,25 +85,67 @@ export async function extractProductsWithAI(
 
   const responseText = result.response.text().trim();
 
-  // Strip markdown code fences if Gemini adds them
-  const cleaned = responseText
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  let products: ExtractedProduct[];
+  let parsed: unknown;
   try {
-    products = JSON.parse(cleaned);
+    // 1. Direct parse (expected when responseMimeType is application/json)
+    parsed = JSON.parse(responseText);
   } catch {
-    throw new Error(
-      `La IA no devolvió JSON válido. Respuesta: ${responseText.slice(0, 200)}`
-    );
+    // 2. Resilient fallback: extract JSON array using regex
+    const arrayMatch = responseText.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+      try {
+        parsed = JSON.parse(arrayMatch[0]);
+      } catch {
+        // Continue to strip fences fallback
+      }
+    }
+    
+    if (!parsed) {
+      // 3. Strip code fences fallback
+      const cleaned = responseText
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        throw new Error(
+          `La IA no devolvió un formato JSON reconocible. Respuesta: ${responseText.slice(0, 180)}...`
+        );
+      }
+    }
   }
 
-  if (!Array.isArray(products)) {
-    throw new Error("La respuesta de la IA no es un array de productos.");
+  // Handle if the model wrapped it in an object like { "products": [...] } or { "items": [...] }
+  let productsArray: unknown[] = [];
+  if (Array.isArray(parsed)) {
+    productsArray = parsed;
+  } else if (parsed && typeof parsed === "object") {
+    const obj = parsed as Record<string, unknown>;
+    const candidate = obj.products || obj.items || obj.articulos || obj.datos || Object.values(obj).find(v => Array.isArray(v));
+    if (Array.isArray(candidate)) {
+      productsArray = candidate;
+    }
   }
 
-  return products;
+  if (!Array.isArray(productsArray) || productsArray.length === 0) {
+    throw new Error("No se detectaron productos estructurados en el documento analizado.");
+  }
+
+  // Map and sanitize fields
+  return productsArray.map((p: any) => ({
+    name: String(p?.name || p?.nombre || p?.descripcion || "").trim(),
+    sku: String(p?.sku || p?.codigo || p?.referencia || "").trim(),
+    brand: String(p?.brand || p?.marca || "").trim(),
+    category: String(p?.category || p?.categoria || "Otros").trim(),
+    supplier: String(p?.supplier || p?.proveedor || "").trim(),
+    costPrice: Math.max(0, Number(p?.costPrice ?? p?.costo ?? p?.precio_costo) || 0),
+    salePrice: Math.max(0, Number(p?.salePrice ?? p?.venta ?? p?.precio_venta) || 0),
+    quantity: Math.max(0, Number(p?.quantity ?? p?.cantidad ?? 0) || 0),
+    stock: Math.max(0, Number(p?.stock ?? p?.existencia ?? 0) || 0),
+    minStock: Math.max(1, Number(p?.minStock ?? p?.stock_minimo) || 5),
+    tax: Math.max(0, Number(p?.tax ?? p?.itbis ?? p?.impuesto) || 18),
+    location: String(p?.location || p?.ubicacion || "").trim(),
+  })).filter((p) => p.name.length > 0);
 }

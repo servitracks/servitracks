@@ -6,6 +6,10 @@ import { cn } from "@/lib/utils";
 
 interface StepConfirmProps {
   rows: ImportRow[];
+  importMode?: "general" | "supplier";
+  supplierName?: string;
+  invoiceNumber?: string;
+  createPayable?: boolean;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -19,15 +23,22 @@ const CATEGORY_COLORS: Record<string, string> = {
   Otros: "bg-neutral-100 text-neutral-600",
 };
 
-export default function StepConfirm({ rows }: StepConfirmProps) {
+export default function StepConfirm({
+  rows,
+  importMode = "general",
+  supplierName,
+  invoiceNumber,
+  createPayable = false,
+}: StepConfirmProps) {
   const validRows = rows.filter((r) => r.name.trim() !== "");
   const invalidRows = rows.filter((r) => !r.name.trim());
+  const totalQty = validRows.reduce((acc, r) => acc + (Number(r.quantity) || Number(r.stock) || 0), 0);
   const totalCostValue = validRows.reduce(
-    (acc, r) => acc + r.costPrice * r.stock,
+    (acc, r) => acc + (Number(r.costPrice) || 0) * (Number(r.quantity) || Number(r.stock) || 0),
     0
   );
   const totalSaleValue = validRows.reduce(
-    (acc, r) => acc + r.salePrice * r.stock,
+    (acc, r) => acc + (Number(r.salePrice) || 0) * (Number(r.quantity) || Number(r.stock) || 0),
     0
   );
 
@@ -56,8 +67,33 @@ export default function StepConfirm({ rows }: StepConfirmProps) {
         </h2>
         <p className="text-sm text-neutral-500 mt-1">
           Revisa el resumen antes de confirmar. Una vez importados, los
-          productos aparecerán en tu inventario.
+          productos aparecerán en tu inventario y se guardarán en Supabase.
         </p>
+      </div>
+
+      {/* Mode Banner */}
+      <div className={cn(
+        "rounded-2xl p-4 border flex items-center justify-between flex-wrap gap-2 text-xs",
+        importMode === "supplier"
+          ? "bg-emerald-50/70 border-emerald-200 text-emerald-900"
+          : "bg-blue-50/70 border-blue-200 text-blue-900"
+      )}>
+        <div className="space-y-0.5">
+          <p className="font-bold flex items-center gap-1.5 text-sm">
+            {importMode === "supplier" ? "🏢 Factura de Compra" : "📦 Carga Inicial / Catálogo"}
+            {supplierName && <span className="font-semibold text-xs text-neutral-700">— {supplierName}</span>}
+          </p>
+          <p className="text-xs text-neutral-600">
+            {importMode === "supplier"
+              ? createPayable
+                ? `Se registrará una Orden de Compra y una Cuenta por Pagar ${invoiceNumber ? `con factura #${invoiceNumber}` : ""}.`
+                : "Se actualizará el inventario vinculado al proveedor sin generar Cuentas por Pagar."
+              : "Se importarán los artículos al inventario sin generar compromisos de pago."}
+          </p>
+        </div>
+        <span className="font-bold px-2.5 py-1 rounded-full text-[11px] bg-white border border-neutral-200 shadow-2xs text-neutral-800">
+          {totalQty} unidades en total
+        </span>
       </div>
 
       {/* Main KPIs */}

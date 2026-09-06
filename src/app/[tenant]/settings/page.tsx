@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
 import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown, QrCode, Smartphone, Wrench, ReceiptText, Lock, ChevronDown, ChevronRight } from "lucide-react";
 import { fetchConnectionState, connectInstance, logoutInstance, sendEvolutionTestMessage, setEvolutionWebhook, DEFAULT_EVOLUTION_URL, DEFAULT_EVOLUTION_API_KEY, cleanBaseUrl, cleanApiKey } from "@/lib/evolutionApi";
@@ -685,51 +685,26 @@ export default function SettingsPage() {
 
     setIsInviting(true);
 
-    // 1. Crear usuario en Supabase Auth directamente (sin email de confirmación)
-    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: inviteForm.email,
-      password: inviteForm.password,
-      email_confirm: true,
-      user_metadata: { name: inviteForm.name },
+    // 1. Crear usuario atómicamente vía RPC en Supabase
+    const { data: teamRes, error: teamErr } = await supabase.rpc("create_team_member", {
+      p_tenant_id: taller.id,
+      p_email: inviteForm.email.trim(),
+      p_password: inviteForm.password,
+      p_name: inviteForm.name.trim(),
+      p_role: inviteForm.role,
     });
 
-    if (authError) {
-      console.error("Error creating user in Supabase:", authError);
-      
-      let errorMessage = authError.message;
-      if (errorMessage.includes("already been registered") || errorMessage.includes("User already registered")) {
-        errorMessage = "Ya existe un empleado registrado con este correo electrónico.";
-      } else if (errorMessage.includes("Password should be at least")) {
-        errorMessage = "La contraseña es muy débil o corta.";
-      } else if (errorMessage.includes("Email rate limit exceeded")) {
-        errorMessage = "Demasiados intentos. Por favor, intenta de nuevo más tarde.";
-      }
-
+    if (teamErr || !teamRes?.success) {
+      console.error("Error creating user in Supabase:", teamErr || teamRes?.error);
+      const errorMessage = teamErr?.message || teamRes?.error || "Error al crear empleado";
       toast.error(`Error al crear usuario: ${errorMessage}`);
       setIsInviting(false);
       return;
     }
 
-    const newUserId = authData.user.id;
+    const newUserId = teamRes.user_id;
 
-    // 2. Insertar en tenant_users
-    const { error: dbError } = await supabaseAdmin
-      .from("tenant_users")
-      .insert({
-        user_id: newUserId,
-        tenant_id: taller.id,
-        name: inviteForm.name,
-        email: inviteForm.email,
-        role: inviteForm.role,
-        status: "active"
-      });
-
-    if (dbError) {
-      console.error("Error inserting tenant_user:", dbError);
-      // Fallback a solo local si la DB falla
-    }
-
-    // 3. Guardar en store local
+    // 2. Guardar en store local
     addUser({ 
       id: newUserId, 
       tenantId: taller.id, 
@@ -737,10 +712,10 @@ export default function SettingsPage() {
       createdAt: new Date().toISOString(), 
       name: inviteForm.name,
       email: inviteForm.email,
-      role: inviteForm.role
+      role: inviteForm.role as any
     });
 
-    toast.success(`Usuario "${inviteForm.name}" creado con éxito. Ya puede iniciar sesión.`);
+    toast.success(`Empleado "${inviteForm.name}" creado y vinculado correctamente`);
     setInviteOpen(false);
     setInviteForm({ name: "", email: "", password: "", role: "mechanic" });
     setIsInviting(false);
@@ -755,22 +730,12 @@ export default function SettingsPage() {
     deleteUser(target.id);
     toast.success(`Usuario "${target.name}" eliminado correctamente`);
 
-    // 2. Eliminar de Supabase (tabla tenant_users y Auth)
+    // 2. Eliminar de Supabase (tabla tenant_users y Auth) vía RPC
     try {
-      const { error: dbError } = await supabaseAdmin
-        .from("tenant_users")
-        .delete()
-        .or(`user_id.eq.${target.id},id.eq.${target.id},email.eq.${target.email}`);
-
-      if (dbError) {
-        console.error("Error al eliminar tenant_user de Supabase:", dbError);
-      }
-
-      try {
-        await supabaseAdmin.auth.admin.deleteUser(target.id);
-      } catch (authErr) {
-        // Usuario puede no existir en Auth si fue creado solo en tabla
-      }
+      await supabase.rpc("delete_team_member", {
+        p_tenant_id: taller.id,
+        p_user_id: target.id,
+      });
     } catch (err) {
       console.error("Error inesperado al eliminar usuario de Supabase:", err);
     }
@@ -821,20 +786,13 @@ export default function SettingsPage() {
 
     setIsDeletingAccount(true);
     try {
-      // 1. Delete from Supabase Auth
-      const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(currentUser.id);
-      if (authError) {
-        console.error("Error deleting auth user:", authError);
-        // Continue anyway — clean up local data
-      }
+      // 1. Delete user mapping via RPC
+      await supabase.rpc("delete_team_member", {
+        p_tenant_id: taller.id,
+        p_user_id: currentUser.id,
+      });
 
-      // 2. Delete from tenant_users table
-      await supabaseAdmin
-        .from("tenant_users")
-        .delete()
-        .eq("user_id", currentUser.id);
-
-      // 3. Clean up local store
+      // 2. Clean up local store
       deleteUser(currentUser.id);
 
       // 4. Clear session and redirect
@@ -1549,13 +1507,13 @@ export default function SettingsPage() {
                       <Input 
                         readOnly 
                         className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
-                        value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/evolution-webhook?tenant_id=${taller.id}`} 
+                        value={`${(import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "")}/functions/v1/evolution-webhook?tenant_id=${taller.id}`} 
                       />
                       <Button 
                         variant="outline" 
                         className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 hover:bg-neutral-50 font-bold"
                         onClick={() => {
-                          navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/evolution-webhook?tenant_id=${taller.id}`);
+                          navigator.clipboard.writeText(`${(import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "")}/functions/v1/evolution-webhook?tenant_id=${taller.id}`);
                           toast.success("URL de Webhook copiada");
                         }}
                       >
@@ -1618,13 +1576,13 @@ export default function SettingsPage() {
                     <Input 
                       readOnly 
                       className="h-10 rounded-xl border-neutral-200 bg-neutral-50 font-mono text-[10px] text-neutral-600" 
-                      value={`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`} 
+                      value={`${(import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "")}/functions/v1/wasender-webhook?tenant_id=${taller.id}`} 
                     />
                     <Button 
                       variant="outline" 
                       className="rounded-xl cursor-pointer h-10 px-4 whitespace-nowrap border-neutral-200 font-bold hover:bg-neutral-50"
                       onClick={() => {
-                        navigator.clipboard.writeText(`${import.meta.env.VITE_SUPABASE_URL || "https://vbigrtifoxsehgbapxtc.supabase.co"}/functions/v1/wasender-webhook?tenant_id=${taller.id}`);
+                        navigator.clipboard.writeText(`${(import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "")}/functions/v1/wasender-webhook?tenant_id=${taller.id}`);
                         toast.success("URL copiada al portapapeles");
                       }}
                     >

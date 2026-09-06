@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
 import { SERVICE_CATEGORY_TO_PRODUCT_CATEGORIES, Service } from "@/store/useStore";
 import { Ticket } from "@/components/pos/Ticket";
+import { supabase } from "@/lib/supabase";
 
 // Lazy-load dialogs
 const LazyCheckout = lazy(() => import("./POSDialogs").then(m => ({ default: m.CheckoutDialog })));
@@ -53,7 +54,7 @@ export default function POSPage() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab } = useStore();
+  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab, currentUserId } = useStore();
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
@@ -409,12 +410,31 @@ export default function POSPage() {
     const ecfConfig = currentTenantConfig?.ecfConfig;
     const isEcfEnabled = Boolean(ecfConfig?.rnc && (ecfConfig?.certUploaded || ecfConfig?.environment === 'sandbox' || true));
     
-    let finalNcf = `B02-${String(Date.now()).slice(-8)}`;
+    const isCreditFiscal = customerData.type === 'credito_fiscal' || (posCustomerId && posCustomerId !== "walk-in" && customers.find(c => c.id === posCustomerId)?.rnc);
+    const ncfType = isCreditFiscal ? "B01" : "B02";
+
+    // 1. Obtener NCF secuencial oficial desde PostgreSQL
+    let finalNcf = "";
+    try {
+      const { data: seqNcf, error: ncfErr } = await supabase.rpc("get_next_ncf", {
+        p_tenant_id: tenantId,
+        p_ncf_type: ncfType,
+      });
+      if (!ncfErr && seqNcf) {
+        finalNcf = seqNcf;
+      }
+    } catch (e) {
+      console.warn("Fallo al obtener NCF secuencial vía RPC:", e);
+    }
+    if (!finalNcf) {
+      finalNcf = `${ncfType}${String(Date.now()).slice(-8)}`;
+    }
+
     let securityCode = undefined;
     let qrUrl = undefined;
     let signatureDate = undefined;
-
-    const isCreditFiscal = customerData.type === 'credito_fiscal';
+    let syncStatus: 'synced' | 'pending_dgii' | 'error' = 'synced';
+    let contingencyPayload: any = undefined;
     
     // Lógica para asignar e-NCF según tipo de cliente
     if (isEcfEnabled) {
@@ -462,6 +482,7 @@ export default function POSPage() {
            securityCode = result.securityCode;
            qrUrl = result.documentStampUrl;
            signatureDate = result.signatureDate ? new Date(result.signatureDate).toISOString() : new Date().toISOString();
+           syncStatus = 'synced';
            toast.success("Factura Electrónica enviada exitosamente", { id: "ecf-submit" });
         } else if (result && result.contingencyMode) {
            // El SDK de Pronesoft manejó contingencia automáticamente
@@ -469,20 +490,19 @@ export default function POSPage() {
            securityCode = result.securityCode;
            qrUrl = result.documentStampUrl;
            signatureDate = new Date().toISOString();
-           toast.warning("Factura enviada en modo contingencia — será procesada por la DGII cuando se restablezca.", { id: "ecf-submit" });
+           syncStatus = 'pending_dgii';
+           contingencyPayload = docPayload;
+           toast.warning("Factura enviada en modo contingencia — guardada para confirmación por la DGII.", { id: "ecf-submit" });
         } else {
            throw new Error("Respuesta inválida del servidor ECF");
         }
       } catch (err: any) {
         console.error("Error DGII:", err);
-        // Factura SIN e-NCF — se guardará para reenvío posterior
-        finalNcf = isCreditFiscal ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
-        toast.error(`Error al enviar a la DGII: ${err.message || "Conexión fallida"}. Se generó comprobante local (NCF tradicional).`, { id: "ecf-submit", duration: 6000 });
+        // Factura en contingencia para reenvío posterior
+        syncStatus = 'pending_dgii';
+        contingencyPayload = { error: err.message, date: new Date().toISOString() };
+        toast.error(`Error al enviar a la DGII: ${err.message || "Conexión fallida"}. Guardada con NCF local ${finalNcf} para reenvío.`, { id: "ecf-submit", duration: 6000 });
       }
-    } else {
-      // Si no tiene e-CF, usa B01 o B02 normal
-      const isCreditFiscal = customerData.type === 'credito_fiscal' || (posCustomerId && posCustomerId !== "walk-in" && customers.find(c => c.id === posCustomerId)?.rnc);
-      finalNcf = isCreditFiscal ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
     }
 
     const finalCustomerId = currentOrder?.customerId || posCustomerId || "walk-in";
@@ -535,9 +555,37 @@ export default function POSPage() {
       securityCode: securityCode || undefined,
       qrUrl: qrUrl || undefined,
       signatureDate: signatureDate || undefined,
+      syncStatus,
+      contingencyPayload,
       createdAt: new Date().toISOString(),
     };
     addInvoice(inv);
+
+    // Deducción atómica de inventario en PostgreSQL
+    const itemsToDeduct = cart
+      .filter(i => !isServiceItem(i, tenantServices) && !i.id.startsWith("labor-") && i.sku !== "MANO-OBRA" && i.category !== "Servicios")
+      .map(i => ({ product_id: i.id, quantity: i.quantity }));
+
+    if (itemsToDeduct.length > 0) {
+      try {
+        const { data: deductResult, error: deductErr } = await supabase.rpc("deduct_inventory_stock", {
+          p_tenant_id: tenantId,
+          p_invoice_id: inv.id,
+          p_items: itemsToDeduct,
+          p_user_id: currentUserId || null,
+        });
+
+        if (deductErr) {
+          console.error("Error al deducir stock en Supabase:", deductErr);
+        } else if (deductResult?.success && Array.isArray(deductResult.updated_products)) {
+          deductResult.updated_products.forEach((up: any) => {
+            updateProduct(up.id, { stock: up.new_stock });
+          });
+        }
+      } catch (err) {
+        console.error("Fallo llamada deduct_inventory_stock:", err);
+      }
+    }
 
     if (activeCaja) {
       let laborTotal = 0;

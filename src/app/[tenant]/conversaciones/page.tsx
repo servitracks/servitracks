@@ -77,9 +77,9 @@ export default function Conversations() {
   const getProxiedUrl = (url: string) => {
     if (!url) return "";
     if (url.includes("wasenderapi.com")) {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const baseUrl = (import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "");
       const apiKey = currentTenant?.wasenderApiKey || "";
-      return `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy?action=media&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`;
+      return `${baseUrl}/functions/v1/wasender-proxy?action=media&url=${encodeURIComponent(url)}&api_key=${encodeURIComponent(apiKey)}`;
     }
     return url;
   };
@@ -360,7 +360,8 @@ export default function Conversations() {
       }
     } else if (currentTenant?.wasenderApiKey) {
       try {
-        const edgeFunctionUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy`;
+        const baseUrl = (import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "");
+        const edgeFunctionUrl = `${baseUrl}/functions/v1/wasender-proxy`;
         
         const payload = type === "text" 
           ? { 
@@ -842,7 +843,8 @@ export default function Conversations() {
                       reader.onload = async () => {
                         try {
                           const base64DataUrl = reader.result as string;
-                          const edgeFunctionUrl = `https://vbigrtifoxsehgbapxtc.supabase.co/functions/v1/wasender-proxy?action=upload`;
+                          const baseUrl = (import.meta.env.VITE_SUPABASE_URL || "https://api.servitracks.com").replace(/\/$/, "");
+                          const edgeFunctionUrl = `${baseUrl}/functions/v1/wasender-proxy?action=upload`;
                           
                           const res = await fetch(edgeFunctionUrl, {
                             method: "POST",
