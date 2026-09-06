@@ -103,11 +103,18 @@ export default function LoginPage() {
         const fallback = await supabaseAdmin
           .from("tenant_users")
           .select("id, tenant_id, user_id, name, email, role, status, tenants(*)")
-          .eq("email", userEmail)
+          .ilike("email", userEmail.trim())
           .limit(1);
         if (!fallback.error && fallback.data && fallback.data.length > 0) {
           tenantUsers = fallback.data;
           tenantUserError = null;
+          // Auto-vincular user_id para que RLS y consultas funcionen perfectamente
+          if (tenantUsers[0]?.id) {
+            await supabaseAdmin
+              .from("tenant_users")
+              .update({ user_id: userId })
+              .eq("id", tenantUsers[0].id);
+          }
         }
       }
 

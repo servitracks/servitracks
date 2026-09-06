@@ -122,7 +122,7 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
     const validContacts = form.contacts.filter((c) => c.name.trim());
 
     if (isEdit && editSupplier) {
-      updateSupplier(editSupplier.id, {
+      const updatedFields = {
         commercialName: form.commercialName.trim(),
         legalName: form.legalName.trim() || undefined,
         rnc: form.rnc.trim() || undefined,
@@ -141,6 +141,12 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         itbis: form.itbis !== "" ? Number(form.itbis) : undefined,
         currency: form.currency,
         notes: form.notes.trim() || undefined,
+      };
+      updateSupplier(editSupplier.id, updatedFields);
+      import("@/lib/supabaseSync").then(({ upsertSuppliers }) => {
+        upsertSuppliers([{ ...editSupplier, ...updatedFields }]).catch((err) =>
+          console.error("Error sincronizando proveedor editado:", err)
+        );
       });
       toast.success("Proveedor actualizado");
       if (onSuccess) onSuccess(editSupplier.id);
@@ -175,6 +181,11 @@ export default function SupplierFormDialog({ open, onOpenChange, tenantId, editS
         updatedAt: now,
       };
       addSupplier(newSupplier);
+      import("@/lib/supabaseSync").then(({ upsertSuppliers }) => {
+        upsertSuppliers([newSupplier]).catch((err) =>
+          console.error("Error sincronizando nuevo proveedor:", err)
+        );
+      });
       toast.success(`Proveedor ${newSupplier.code} creado`);
       if (onSuccess) onSuccess(newSupplier.id);
     }

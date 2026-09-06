@@ -41,7 +41,7 @@ export default function DashboardLayout() {
   // IMPORTANTE: No usar || tenants[0] como fallback para evitar que datos
   // de otros tenants (ej. "autocheck") aparezcan en nuevos usuarios.
   const currentTenant = tenantSlug
-    ? tenants.find((t) => t.slug === tenantSlug) ?? null
+    ? tenants.find((t) => t.slug?.toLowerCase() === tenantSlug.toLowerCase()) ?? null
     : null;
   const isPending = currentTenant?.status === "pending";
 
@@ -71,7 +71,7 @@ export default function DashboardLayout() {
       return;
     }
     // Si el slug en la URL no coincide con ningún tenant del usuario, redirigir a login
-    if (tenantSlug && tenants.length > 0 && !tenants.find((t) => t.slug === tenantSlug)) {
+    if (tenantSlug && tenants.length > 0 && !tenants.find((t) => t.slug?.toLowerCase() === tenantSlug.toLowerCase())) {
       navigate("/login");
     }
   }, [hydrated, currentUserId, tenantSlug, tenants, navigate]);

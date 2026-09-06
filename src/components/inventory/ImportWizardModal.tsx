@@ -22,6 +22,7 @@ interface ImportWizardModalProps {
   onClose: () => void;
   onImport: (rows: ImportRow[], supplierId?: string, invoiceNumber?: string, createPayable?: boolean) => void;
   suppliers: Supplier[];
+  tenantId?: string;
 }
 
 const STEP_LABELS = [
@@ -37,9 +38,11 @@ export default function ImportWizardModal({
   onClose,
   onImport,
   suppliers = [],
+  tenantId: tenantIdProp,
 }: ImportWizardModalProps) {
-  const tenantId = useStore(s => s.currentTenant?.id);
-  const addSupplier = useStore(s => s.addSupplier);
+  const storeTenant = useStore((s) => s.currentTenant);
+  const effectiveTenantId = tenantIdProp || storeTenant?.id || "";
+  const addSupplier = useStore((s) => s.addSupplier);
 
   const [step, setStep] = useState(1);
   const [sourceType, setSourceType] = useState<SourceType>("csv");
@@ -360,11 +363,11 @@ export default function ImportWizardModal({
       </DialogContent>
 
       {/* Supplier Form Modal */}
-      {tenantId && (
+      {effectiveTenantId && (
         <SupplierFormDialog
           open={isSupplierModalOpen}
           onOpenChange={setIsSupplierModalOpen}
-          tenantId={tenantId}
+          tenantId={effectiveTenantId}
           onSuccess={(id) => {
             setSelectedSupplierId(id);
             setIsSupplierModalOpen(false);

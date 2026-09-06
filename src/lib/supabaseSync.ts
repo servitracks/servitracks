@@ -339,7 +339,19 @@ function dbToInventoryMovement(row: any): InventoryMovement {
   return { id: row.id, tenantId: row.tenant_id, productId: row.product_id, productName: row.product_name, variantId: row.variant_id, type: row.type, quantity: row.quantity, reason: row.reason, date: row.date, userId: row.user_id };
 }
 function inventoryMovementToDb(m: InventoryMovement) {
-  return { id: m.id, tenant_id: m.tenantId, product_id: m.productId, product_name: m.productName, variant_id: m.variantId, type: m.type, quantity: m.quantity, reason: m.reason, date: m.date, user_id: m.userId };
+  const qty = Number(m.quantity);
+  return {
+    id: m.id,
+    tenant_id: m.tenantId,
+    product_id: m.productId,
+    product_name: m.productName,
+    variant_id: m.variantId || null,
+    type: m.type,
+    quantity: isNaN(qty) ? 0 : Math.max(0, qty),
+    reason: m.reason,
+    date: m.date,
+    user_id: m.userId || null,
+  };
 }
 
 function dbToInspection(row: any): Inspection {
@@ -381,7 +393,27 @@ function dbToPurchaseOrder(row: any): PurchaseOrder {
   return { id: row.id, tenantId: row.tenant_id, supplierId: row.supplier_id, number: row.number, invoiceNumber: row.invoice_number, paymentStatus: row.payment_status, status: row.status, items: row.items, subtotal: row.subtotal, tax: row.tax, total: row.total, notes: row.notes, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at, expectedDelivery: row.expected_delivery };
 }
 function purchaseOrderToDb(p: PurchaseOrder) {
-  return { id: p.id, tenant_id: p.tenantId, supplier_id: p.supplierId, number: p.number, invoice_number: p.invoiceNumber, payment_status: p.paymentStatus, status: p.status, items: p.items, subtotal: p.subtotal, tax: p.tax, total: p.total, notes: p.notes, created_by: p.createdBy, created_at: p.createdAt, updated_at: p.updatedAt, expected_delivery: p.expectedDelivery };
+  const sub = Number(p.subtotal);
+  const tx = Number(p.tax);
+  const tot = Number(p.total);
+  return {
+    id: p.id,
+    tenant_id: p.tenantId,
+    supplier_id: p.supplierId || null,
+    number: p.number,
+    invoice_number: p.invoiceNumber || null,
+    payment_status: p.paymentStatus,
+    status: p.status,
+    items: p.items,
+    subtotal: isNaN(sub) ? 0 : sub,
+    tax: isNaN(tx) ? 0 : tx,
+    total: isNaN(tot) ? 0 : tot,
+    notes: p.notes || null,
+    created_by: p.createdBy,
+    created_at: p.createdAt,
+    updated_at: p.updatedAt,
+    expected_delivery: p.expectedDelivery || null,
+  };
 }
 
 function dbToGoodsReceipt(row: any): GoodsReceipt {
@@ -395,7 +427,22 @@ function dbToAccountPayable(row: any): AccountPayable {
   return { id: row.id, tenantId: row.tenant_id, supplierId: row.supplier_id, purchaseOrderId: row.purchase_order_id, invoiceNumber: row.invoice_number, amount: row.amount, paidAmount: row.paid_amount, dueDate: row.due_date, status: row.status, createdAt: row.created_at, paidAt: row.paid_at, notes: row.notes };
 }
 function accountPayableToDb(a: AccountPayable) {
-  return { id: a.id, tenant_id: a.tenantId, supplier_id: a.supplierId, purchase_order_id: a.purchaseOrderId, invoice_number: a.invoiceNumber, amount: a.amount, paid_amount: a.paidAmount, due_date: a.dueDate, status: a.status, created_at: a.createdAt, paid_at: a.paidAt, notes: a.notes };
+  const amt = Number(a.amount);
+  const paid = Number(a.paidAmount);
+  return {
+    id: a.id,
+    tenant_id: a.tenantId,
+    supplier_id: a.supplierId || null,
+    purchase_order_id: a.purchaseOrderId || null,
+    invoice_number: a.invoiceNumber,
+    amount: isNaN(amt) ? 0 : amt,
+    paid_amount: isNaN(paid) ? 0 : paid,
+    due_date: a.dueDate,
+    status: a.status,
+    created_at: a.createdAt,
+    paid_at: a.paidAt || null,
+    notes: a.notes || null,
+  };
 }
 
 function dbToQuoteRequest(row: any): QuoteRequest {
@@ -482,6 +529,13 @@ function dbToProduct(row: any): Product {
 }
 
 function productToDb(p: Product) {
+  const cost = Number(p.costPrice);
+  const sale = Number(p.salePrice);
+  const labor = p.laborPrice !== undefined && p.laborPrice !== null ? Number(p.laborPrice) : null;
+  const stock = Number(p.stock);
+  const minStock = Number(p.minStock);
+  const tax = p.tax !== undefined && p.tax !== null ? Number(p.tax) : 18;
+
   return {
     id: p.id,
     tenant_id: p.tenantId,
@@ -491,12 +545,12 @@ function productToDb(p: Product) {
     category: p.category || "Otros",
     brand: p.brand || null,
     type: p.type || null,
-    cost_price: Math.max(0, Number(p.costPrice) || 0),
-    sale_price: Math.max(0, Number(p.salePrice) || 0),
-    labor_price: p.laborPrice !== undefined && p.laborPrice !== null ? Number(p.laborPrice) || null : null,
-    stock: Math.max(0, Number(p.stock) || 0),
-    min_stock: Math.max(0, Number(p.minStock) || 0),
-    tax: p.tax !== undefined && p.tax !== null ? Number(p.tax) || 0 : 18,
+    cost_price: isNaN(cost) ? 0 : Math.max(0, cost),
+    sale_price: isNaN(sale) ? 0 : Math.max(0, sale),
+    labor_price: labor !== null && !isNaN(labor) ? Math.max(0, labor) : null,
+    stock: isNaN(stock) ? 0 : Math.max(0, stock),
+    min_stock: isNaN(minStock) ? 0 : Math.max(0, minStock),
+    tax: isNaN(tax) ? 18 : Math.max(0, tax),
     image: p.image || null,
     supplier: p.supplier || null,
     location: p.location || null,
@@ -865,6 +919,7 @@ export interface BatchImportInventoryPayload {
   tenantId: string;
   productsToUpsert: Product[];
   movementsToCreate: InventoryMovement[];
+  supplier?: Supplier;
   purchaseOrder?: PurchaseOrder;
   accountPayable?: AccountPayable;
   activityLog?: ActivityLog;
@@ -872,14 +927,50 @@ export interface BatchImportInventoryPayload {
 
 export async function batchImportInventoryToSupabase(
   payload: BatchImportInventoryPayload
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; warning?: string; error?: string }> {
   try {
-    const { productsToUpsert, movementsToCreate, purchaseOrder, accountPayable, activityLog } = payload;
+    const { productsToUpsert, movementsToCreate, supplier, purchaseOrder, accountPayable, activityLog } = payload;
 
-    // Deduplicar productos y movimientos por ID para prevenir el error de Postgres
-    // "ON CONFLICT DO UPDATE command cannot affect row a second time"
-    const uniqueProducts = deduplicateById(productsToUpsert);
-    const uniqueMovements = deduplicateById(movementsToCreate);
+    const effectiveTenantId =
+      payload.tenantId?.trim() ||
+      productsToUpsert.find((p) => p.tenantId?.trim())?.tenantId?.trim() ||
+      movementsToCreate.find((m) => m.tenantId?.trim())?.tenantId?.trim() ||
+      "";
+
+    if (!effectiveTenantId) {
+      return {
+        success: false,
+        error: "No se identificó el identificador del taller (tenantId) para la importación. Recarga la página e intenta de nuevo.",
+      };
+    }
+
+    // Deduplicar productos y movimientos por ID y asegurar tenantId
+    const uniqueProducts = deduplicateById(
+      productsToUpsert.map((p) => ({
+        ...p,
+        tenantId: p.tenantId || effectiveTenantId,
+      }))
+    );
+    const uniqueMovements = deduplicateById(
+      movementsToCreate.map((m) => ({
+        ...m,
+        tenantId: m.tenantId || effectiveTenantId,
+      }))
+    );
+
+    // 0. Sincronizar proveedor si fue provisto para garantizar integridad referencial
+    if (supplier && supplier.id) {
+      try {
+        const { error: supErr } = await supabaseAdmin
+          .from("suppliers")
+          .upsert([supplierToDb({ ...supplier, tenantId: supplier.tenantId || effectiveTenantId })], { onConflict: "id" });
+        if (supErr) {
+          console.warn("[batchImportInventory] Advertencia al persistir proveedor:", supErr);
+        }
+      } catch (e) {
+        console.warn("[batchImportInventory] Error no bloqueante al guardar proveedor:", e);
+      }
+    }
 
     // 1. Upsert Products in chunks of 50
     if (uniqueProducts.length > 0) {
@@ -891,7 +982,7 @@ export async function batchImportInventoryToSupabase(
           .upsert(chunk.map(productToDb), { onConflict: "id" });
         if (pErr) {
           console.error("[batchImportInventory] Error upserting products chunk:", pErr);
-          throw new Error(`Error guardando productos en Supabase: ${pErr.message}`);
+          throw new Error(`Error guardando productos en la base de datos: ${pErr.message}`);
         }
       }
     }
@@ -906,42 +997,61 @@ export async function batchImportInventoryToSupabase(
           .upsert(chunk.map(inventoryMovementToDb), { onConflict: "id" });
         if (mErr) {
           console.error("[batchImportInventory] Error upserting movements chunk:", mErr);
-          throw new Error(`Error guardando movimientos de inventario en Supabase: ${mErr.message}`);
+          throw new Error(`Error guardando movimientos de inventario en la base de datos: ${mErr.message}`);
         }
       }
     }
 
-    // 3. Upsert Purchase Order if provided
+    let warningMsg = "";
+
+    // 3. Upsert Purchase Order if provided (de forma segura no bloqueante para productos)
     if (purchaseOrder) {
-      const { error: poErr } = await supabaseAdmin
-        .from("purchase_orders")
-        .upsert([purchaseOrderToDb(purchaseOrder)], { onConflict: "id" });
-      if (poErr) {
-        console.error("[batchImportInventory] Error upserting purchase order:", poErr);
-        throw new Error(`Error guardando orden de compra en Supabase: ${poErr.message}`);
+      try {
+        const { error: poErr } = await supabaseAdmin
+          .from("purchase_orders")
+          .upsert([purchaseOrderToDb({ ...purchaseOrder, tenantId: purchaseOrder.tenantId || effectiveTenantId })], { onConflict: "id" });
+        if (poErr) {
+          console.error("[batchImportInventory] Warning upserting purchase order:", poErr);
+          warningMsg = `Productos importados, pero la orden de compra no pudo registrarse (${poErr.message}).`;
+        }
+      } catch (poEx: any) {
+        console.error("[batchImportInventory] Exception upserting purchase order:", poEx);
+        warningMsg = `Productos importados, pero ocurrió un problema al registrar la orden de compra: ${poEx?.message}`;
       }
     }
 
-    // 4. Upsert Account Payable if provided
-    if (accountPayable) {
-      const { error: apErr } = await supabaseAdmin
-        .from("accounts_payable")
-        .upsert([accountPayableToDb(accountPayable)], { onConflict: "id" });
-      if (apErr) {
-        console.error("[batchImportInventory] Error upserting account payable:", apErr);
-        throw new Error(`Error guardando cuenta por pagar en Supabase: ${apErr.message}`);
+    // 4. Upsert Account Payable if provided (de forma segura no bloqueante para productos)
+    if (accountPayable && !warningMsg) {
+      try {
+        const { error: apErr } = await supabaseAdmin
+          .from("accounts_payable")
+          .upsert([accountPayableToDb({ ...accountPayable, tenantId: accountPayable.tenantId || effectiveTenantId })], { onConflict: "id" });
+        if (apErr) {
+          console.error("[batchImportInventory] Warning upserting account payable:", apErr);
+          warningMsg = `Productos importados, pero la cuenta por pagar no pudo registrarse (${apErr.message}).`;
+        }
+      } catch (apEx: any) {
+        console.error("[batchImportInventory] Exception upserting account payable:", apEx);
+        warningMsg = `Productos importados, pero ocurrió un problema al registrar la cuenta por pagar: ${apEx?.message}`;
       }
     }
 
     // 5. Activity log
     if (activityLog) {
-      await supabase.from("activity_logs").upsert([activityLogToDb(activityLog)], { onConflict: "id" });
+      try {
+        await supabase.from("activity_logs").upsert(
+          [activityLogToDb({ ...activityLog, tenantId: activityLog.tenantId || effectiveTenantId })],
+          { onConflict: "id" }
+        );
+      } catch (logErr) {
+        console.warn("[batchImportInventory] Error registrando activity log:", logErr);
+      }
     }
 
-    return { success: true };
+    return { success: true, warning: warningMsg || undefined };
   } catch (err: any) {
     console.error("[batchImportInventoryToSupabase] Fatal error:", err);
-    return { success: false, error: err?.message || "Error desconocido al importar en Supabase" };
+    return { success: false, error: err?.message || "Error desconocido al importar en la base de datos" };
   }
 }
 

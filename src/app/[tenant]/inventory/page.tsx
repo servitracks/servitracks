@@ -479,9 +479,13 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers, onB
 export default function InventoryPage() {
   const params = useParams();
   const tenantSlug = params?.tenant as string;
+  const storeCurrentTenant = useStore((s) => s.currentTenant);
   const tenants = useStore((s) => s.tenants);
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+  const currentTenant = 
+    (tenantSlug ? tenants.find((t) => t.slug?.toLowerCase() === tenantSlug.toLowerCase()) : null) ??
+    storeCurrentTenant ??
+    (tenants.length === 1 ? tenants[0] : null);
+  const tenantId = currentTenant?.id ?? storeCurrentTenant?.id ?? "";
 
   const currentUserId = useStore((s) => s.currentUserId);
   const users = useStore((s) => s.users);
@@ -882,6 +886,19 @@ export default function InventoryPage() {
     const toastId = toast.loading("Guardando e integrando productos con Supabase...");
 
     try {
+      const effectiveTenantId =
+        tenantId ||
+        currentTenant?.id ||
+        useStore.getState().currentTenant?.id ||
+        useStore.getState().tenants.find((t) => t.slug?.toLowerCase() === tenantSlug?.toLowerCase())?.id ||
+        "";
+
+      if (!effectiveTenantId) {
+        toast.dismiss(toastId);
+        toast.error("Error: No se pudo identificar el taller actual. Por favor recarga la página o verifica la conexión.");
+        return;
+      }
+
       let totalPurchaseCost = 0;
       let totalPurchaseTax = 0;
 
@@ -899,7 +916,7 @@ export default function InventoryPage() {
       const supplierCommercialName = selectedSupplier?.commercialName || "";
 
       rows.forEach((row, index) => {
-        const trimmedName = row.name.trim();
+        const trimmedName = (row.name || "").trim();
         if (!trimmedName) return;
 
         // Buscar producto existente por SKU o Nombre (insensible a mayúsculas)
@@ -908,10 +925,22 @@ export default function InventoryPage() {
           p.name.toLowerCase() === trimmedName.toLowerCase()
         );
 
-        const qtyToImport = Math.max(0, Number(row.quantity) || 0);
-        const costPrice = Math.max(0, Number(row.costPrice) || 0);
-        const salePrice = Math.max(0, Number(row.salePrice) || 0);
-        const taxRate = row.tax !== undefined && row.tax !== null ? Number(row.tax) : 18;
+        const rawQty = Number(String(row.quantity ?? "").replace(/[^0-9.-]/g, ""));
+        const qtyToImport = isNaN(rawQty) ? 0 : Math.max(0, rawQty);
+
+        const rawCost = Number(String(row.costPrice ?? "").replace(/[^0-9.-]/g, ""));
+        const costPrice = isNaN(rawCost) ? 0 : Math.max(0, rawCost);
+
+        const rawSale = Number(String(row.salePrice ?? "").replace(/[^0-9.-]/g, ""));
+        const salePrice = isNaN(rawSale) ? 0 : Math.max(0, rawSale);
+
+        let taxRate = 18;
+        if (row.tax !== undefined && row.tax !== null && (row.tax as any) !== "") {
+          const parsedTax = Number(String(row.tax).replace(/[^0-9.-]/g, ""));
+          if (!isNaN(parsedTax)) {
+            taxRate = Math.max(0, parsedTax);
+          }
+        }
 
         let finalProductId = "";
         let finalProductName = trimmedName;
@@ -919,27 +948,34 @@ export default function InventoryPage() {
         if (existingProduct) {
           finalProductId = existingProduct.id;
           finalProductName = existingProduct.name;
-          const updatedStock = existingProduct.stock + qtyToImport;
+          const currentStock = isNaN(Number(existingProduct.stock)) ? 0 : Number(existingProduct.stock);
+          const updatedStock = currentStock + qtyToImport;
           const updatedProduct: Product = {
             ...existingProduct,
+            tenantId: effectiveTenantId,
             stock: updatedStock,
-            costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
-            salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
-            category: row.category && row.category !== "Otros" ? row.category : existingProduct.category,
-            brand: row.brand ? row.brand : existingProduct.brand,
-            supplier: supplierCommercialName || row.supplier || existingProduct.supplier,
-            location: row.location ? row.location : existingProduct.location,
+            costPrice: costPrice > 0 ? costPrice : (isNaN(Number(existingProduct.costPrice)) ? 0 : Number(existingProduct.costPrice)),
+            salePrice: salePrice > 0 ? salePrice : (isNaN(Number(existingProduct.salePrice)) ? 0 : Number(existingProduct.salePrice)),
+            category: row.category && row.category !== "Otros" ? row.category : (existingProduct.category || "Otros"),
+            brand: row.brand ? row.brand : (existingProduct.brand || ""),
+            supplier: supplierCommercialName || row.supplier || (existingProduct.supplier || ""),
+            location: row.location ? row.location : (existingProduct.location || ""),
           };
           workingProductsMap.set(existingProduct.id, updatedProduct);
           productsToUpsertMap.set(existingProduct.id, updatedProduct);
         } else {
           const newProductId = `p${timestamp}-${index}`;
           finalProductId = newProductId;
-          // Corrección del bug de stock: NO duplicar stock y cantidad
-          const initialStock = qtyToImport > 0 ? qtyToImport : Math.max(0, Number(row.stock) || 0);
+          const rawStock = Number(String(row.stock ?? "").replace(/[^0-9.-]/g, ""));
+          const fallbackStock = isNaN(rawStock) ? 0 : Math.max(0, rawStock);
+          const initialStock = qtyToImport > 0 ? qtyToImport : fallbackStock;
+
+          const rawMin = Number(String(row.minStock ?? "").replace(/[^0-9.-]/g, ""));
+          const minStock = isNaN(rawMin) ? 5 : Math.max(1, rawMin);
+
           const newProduct: Product = {
             id: newProductId,
-            tenantId: tenantId,
+            tenantId: effectiveTenantId,
             name: trimmedName,
             sku: row.sku?.trim() || `SKU-${timestamp.toString().slice(-4)}-${index + 1}`,
             barcode: "",
@@ -949,7 +985,7 @@ export default function InventoryPage() {
             costPrice: costPrice,
             salePrice: salePrice,
             stock: initialStock,
-            minStock: Math.max(1, Number(row.minStock) || 5),
+            minStock: minStock,
             tax: taxRate,
             location: row.location?.trim() || "",
           };
@@ -961,8 +997,8 @@ export default function InventoryPage() {
         if (qtyToImport > 0) {
           const lineTotalCost = costPrice * qtyToImport;
           const lineTax = Math.round(lineTotalCost * (taxRate / 100));
-          totalPurchaseCost += lineTotalCost;
-          totalPurchaseTax += lineTax;
+          totalPurchaseCost += isNaN(lineTotalCost) ? 0 : lineTotalCost;
+          totalPurchaseTax += isNaN(lineTax) ? 0 : lineTax;
 
           const movementReason = supplierCommercialName
             ? `Importación de compra: ${supplierCommercialName} ${invoiceNumber ? `(Fact. ${invoiceNumber})` : ""}`.trim()
@@ -970,7 +1006,7 @@ export default function InventoryPage() {
 
           movementsToCreate.push({
             id: `m${timestamp}-${index}`,
-            tenantId: tenantId,
+            tenantId: effectiveTenantId,
             productId: finalProductId,
             productName: finalProductName,
             type: "in",
@@ -1010,16 +1046,16 @@ export default function InventoryPage() {
 
         generatedPo = {
           id: poId,
-          tenantId,
+          tenantId: effectiveTenantId,
           supplierId,
           number: `OC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
           invoiceNumber: finalInvNumber,
           paymentStatus: "pending",
           status: "recibida_completa",
           items: purchaseOrderItems,
-          subtotal: totalPurchaseCost,
-          tax: totalPurchaseTax,
-          total: totalAmount,
+          subtotal: isNaN(totalPurchaseCost) ? 0 : totalPurchaseCost,
+          tax: isNaN(totalPurchaseTax) ? 0 : totalPurchaseTax,
+          total: isNaN(totalAmount) ? 0 : totalAmount,
           notes: `Generada automáticamente por importación de inventario (${newlyCreated + updatedCount} productos).`,
           createdBy: currentUserId || "admin",
           createdAt: new Date().toISOString(),
@@ -1029,11 +1065,11 @@ export default function InventoryPage() {
 
         generatedAp = {
           id: apId,
-          tenantId,
+          tenantId: effectiveTenantId,
           supplierId,
           purchaseOrderId: poId, // Clave foránea vinculada
           invoiceNumber: finalInvNumber,
-          amount: totalAmount,
+          amount: isNaN(totalAmount) ? 0 : totalAmount,
           paidAmount: 0,
           dueDate: dueDate.toISOString(),
           status: "pendiente",
@@ -1045,17 +1081,18 @@ export default function InventoryPage() {
       // 1. Guardar de forma directa y verificada en Supabase
       const { batchImportInventoryToSupabase } = await import("@/lib/supabaseSync");
       const result = await batchImportInventoryToSupabase({
-        tenantId,
+        tenantId: effectiveTenantId,
         productsToUpsert,
         movementsToCreate,
+        supplier: selectedSupplier,
         purchaseOrder: generatedPo,
         accountPayable: generatedAp,
         activityLog: {
           id: `log_${timestamp}`,
-          tenantId,
+          tenantId: effectiveTenantId,
           userId: currentUserId || "system",
-          userName: "Usuario",
-          userRole: "admin",
+          userName: (currentUser as any)?.name || "Usuario",
+          userRole: activeRole,
           action: "inventory_import",
           details: `Importación masiva: ${newlyCreated} nuevos, ${updatedCount} actualizados.`,
           module: "INVENTARIO",
@@ -1084,6 +1121,9 @@ export default function InventoryPage() {
 
       toast.dismiss(toastId);
       const totalImported = newlyCreated + updatedCount;
+      if (result.warning) {
+        toast.warning(result.warning, { duration: 6000 });
+      }
       toast.success(
         `✓ ${totalImported} producto${totalImported !== 1 ? "s" : ""} importado${totalImported !== 1 ? "s" : ""} e integrado${totalImported !== 1 ? "s" : ""} con Supabase (${newlyCreated} nuevos, ${updatedCount} actualizados)`
       );
@@ -1791,6 +1831,7 @@ export default function InventoryPage() {
         onClose={() => setIsImportOpen(false)}
         onImport={handleImport}
         suppliers={suppliers}
+        tenantId={tenantId}
       />
 
       <QuoteRequestDialog
