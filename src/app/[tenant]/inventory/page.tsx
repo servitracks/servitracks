@@ -882,12 +882,10 @@ export default function InventoryPage() {
     const toastId = toast.loading("Guardando e integrando productos con Supabase...");
 
     try {
-      let newlyCreated = 0;
-      let updatedCount = 0;
       let totalPurchaseCost = 0;
       let totalPurchaseTax = 0;
 
-      const productsToUpsert: Product[] = [];
+      const productsToUpsertMap = new Map<string, Product>();
       const movementsToCreate: InventoryMovement[] = [];
       const purchaseOrderItems: any[] = [];
       const timestamp = Date.now();
@@ -895,6 +893,7 @@ export default function InventoryPage() {
       // Mapa en memoria para resolver productos existentes sin duplicación
       const workingProductsMap = new Map<string, Product>();
       products.forEach((p) => workingProductsMap.set(p.id, { ...p }));
+      const initialExistingProductIds = new Set(products.map((p) => p.id));
 
       const selectedSupplier = supplierId ? suppliers.find((s) => s.id === supplierId) : undefined;
       const supplierCommercialName = selectedSupplier?.commercialName || "";
@@ -932,8 +931,7 @@ export default function InventoryPage() {
             location: row.location ? row.location : existingProduct.location,
           };
           workingProductsMap.set(existingProduct.id, updatedProduct);
-          productsToUpsert.push(updatedProduct);
-          updatedCount++;
+          productsToUpsertMap.set(existingProduct.id, updatedProduct);
         } else {
           const newProductId = `p${timestamp}-${index}`;
           finalProductId = newProductId;
@@ -956,8 +954,7 @@ export default function InventoryPage() {
             location: row.location?.trim() || "",
           };
           workingProductsMap.set(newProductId, newProduct);
-          productsToUpsert.push(newProduct);
-          newlyCreated++;
+          productsToUpsertMap.set(newProductId, newProduct);
         }
 
         // Registrar movimiento de entrada si viene con unidades a ingresar
@@ -994,6 +991,10 @@ export default function InventoryPage() {
           });
         }
       });
+
+      const productsToUpsert = Array.from(productsToUpsertMap.values());
+      const newlyCreated = productsToUpsert.filter((p) => !initialExistingProductIds.has(p.id)).length;
+      const updatedCount = productsToUpsert.filter((p) => initialExistingProductIds.has(p.id)).length;
 
       // Orden de Compra y Cuenta por Pagar vinculadas
       let generatedPo: PurchaseOrder | undefined = undefined;

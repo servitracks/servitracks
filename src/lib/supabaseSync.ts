@@ -691,130 +691,162 @@ export async function deleteUserFromSupabase(userId: string): Promise<void> {
 }
 
 
+function deduplicateById<T extends { id?: any }>(items: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    if (item && item.id !== undefined && item.id !== null) {
+      map.set(String(item.id), item);
+    }
+  }
+  return Array.from(map.values());
+}
+
 export async function upsertCustomers(customers: Customer[]): Promise<void> {
-  if (customers.length === 0) return;
-  const { error } = await supabase.from("customers").upsert(customers.map(customerToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(customers);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("customers").upsert(uniqueItems.map(customerToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert customers:", error);
 }
 
 export async function upsertVehicles(vehicles: Vehicle[]): Promise<void> {
-  if (vehicles.length === 0) return;
-  const { error } = await supabase.from("vehicles").upsert(vehicles.map(vehicleToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(vehicles);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("vehicles").upsert(uniqueItems.map(vehicleToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert vehicles:", error);
 }
 
 export async function upsertMaintenanceItems(items: MaintenanceItem[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("maintenance_items").upsert(items.map(maintenanceItemToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("maintenance_items").upsert(uniqueItems.map(maintenanceItemToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_items:", error);
 }
 
 export async function upsertServices(items: Service[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("services").upsert(items.map(serviceToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("services").upsert(uniqueItems.map(serviceToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert services:", error);
 }
 
 export async function upsertProducts(items: Product[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("products").upsert(items.map(productToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("products").upsert(uniqueItems.map(productToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert products:", error);
 }
 
 export async function upsertOrders(items: WorkOrder[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("orders").upsert(items.map(workOrderToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("orders").upsert(uniqueItems.map(workOrderToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert orders:", error);
 }
 
 export async function upsertQuotes(items: Quote[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("quotes").upsert(items.map(quoteToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("quotes").upsert(uniqueItems.map(quoteToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert quotes:", error);
 }
 
 export async function upsertInvoices(items: Invoice[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("invoices").upsert(items.map(invoiceToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("invoices").upsert(uniqueItems.map(invoiceToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert invoices:", error);
 }
 
 
 export async function upsertCajas(items: Caja[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("cajas").upsert(items.map(cajaToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("cajas").upsert(uniqueItems.map(cajaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert cajas:", error);
 }
 export async function upsertMovimientosCaja(items: MovimientoCaja[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("movimientos_caja").upsert(items.map(movimientoCajaToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("movimientos_caja").upsert(uniqueItems.map(movimientoCajaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert movimientos_caja:", error);
 }
 export async function upsertTechnicians(items: Technician[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("technicians").upsert(items.map(technicianToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("technicians").upsert(uniqueItems.map(technicianToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert technicians:", error);
 }
 export async function upsertInventoryMovements(items: InventoryMovement[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("movements").upsert(items.map(inventoryMovementToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("movements").upsert(uniqueItems.map(inventoryMovementToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert movements:", error);
 }
 export async function upsertInspections(items: Inspection[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("inspections").upsert(items.map(inspectionToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("inspections").upsert(uniqueItems.map(inspectionToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert inspections:", error);
 }
 export async function upsertMaintenanceAlerts(items: MaintenanceAlert[]): Promise<void> {
-  if (items.length === 0) return;
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
   const { error } = await supabase.from("maintenance_alerts").upsert(items.map(maintenanceAlertToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_alerts:", error);
 }
 export async function upsertMaintenanceHistory(items: MaintenanceHistoryItem[]): Promise<void> {
   // Ignorar items viejos con IDs cortos (Math.random) para no romper el tipo uuid en postgres
-  const validItems = items.filter(i => i.id && i.id.length === 36);
+  const validItems = deduplicateById(items.filter(i => i.id && i.id.length === 36));
   if (validItems.length === 0) return;
   const { error } = await supabase.from("maintenance_history").upsert(validItems.map(maintenanceHistoryItemToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert maintenance_history:", error);
 }
 export async function upsertSuppliers(items: Supplier[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("suppliers").upsert(items.map(supplierToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("suppliers").upsert(uniqueItems.map(supplierToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert suppliers:", error);
 }
 export async function upsertSupplierProducts(items: SupplierProduct[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("supplier_products").upsert(items.map(supplierProductToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("supplier_products").upsert(uniqueItems.map(supplierProductToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert supplier_products:", error);
 }
 export async function upsertPurchaseOrders(items: PurchaseOrder[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("purchase_orders").upsert(items.map(purchaseOrderToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("purchase_orders").upsert(uniqueItems.map(purchaseOrderToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert purchase_orders:", error);
 }
 export async function upsertGoodsReceipts(items: GoodsReceipt[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("goods_receipts").upsert(items.map(goodsReceiptToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("goods_receipts").upsert(uniqueItems.map(goodsReceiptToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert goods_receipts:", error);
 }
 export async function upsertAccountsPayable(items: AccountPayable[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("accounts_payable").upsert(items.map(accountPayableToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("accounts_payable").upsert(uniqueItems.map(accountPayableToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert accounts_payable:", error);
 }
 export async function upsertQuoteRequests(items: QuoteRequest[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("quote_requests").upsert(items.map(quoteRequestToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("quote_requests").upsert(uniqueItems.map(quoteRequestToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert quote_requests:", error);
 }
 export async function upsertActivityLogs(items: ActivityLog[]): Promise<void> {
-  if (items.length === 0) return;
-  const { error } = await supabase.from("activity_logs").upsert(items.map(activityLogToDb), { onConflict: "id" });
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const { error } = await supabase.from("activity_logs").upsert(uniqueItems.map(activityLogToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert activity_logs:", error);
 }
 export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
-  if (items.length === 0) return;
-  const dbItems = items.map(t => ({
+  const uniqueItems = deduplicateById(items);
+  if (uniqueItems.length === 0) return;
+  const dbItems = uniqueItems.map(t => ({
     id: t.id,
     tenant_id: t.tenantId,
     tab_name: t.tabName,
@@ -844,11 +876,16 @@ export async function batchImportInventoryToSupabase(
   try {
     const { productsToUpsert, movementsToCreate, purchaseOrder, accountPayable, activityLog } = payload;
 
+    // Deduplicar productos y movimientos por ID para prevenir el error de Postgres
+    // "ON CONFLICT DO UPDATE command cannot affect row a second time"
+    const uniqueProducts = deduplicateById(productsToUpsert);
+    const uniqueMovements = deduplicateById(movementsToCreate);
+
     // 1. Upsert Products in chunks of 50
-    if (productsToUpsert.length > 0) {
+    if (uniqueProducts.length > 0) {
       const chunkSize = 50;
-      for (let i = 0; i < productsToUpsert.length; i += chunkSize) {
-        const chunk = productsToUpsert.slice(i, i + chunkSize);
+      for (let i = 0; i < uniqueProducts.length; i += chunkSize) {
+        const chunk = uniqueProducts.slice(i, i + chunkSize);
         const { error: pErr } = await supabaseAdmin
           .from("products")
           .upsert(chunk.map(productToDb), { onConflict: "id" });
@@ -860,10 +897,10 @@ export async function batchImportInventoryToSupabase(
     }
 
     // 2. Upsert Movements in chunks of 50
-    if (movementsToCreate.length > 0) {
+    if (uniqueMovements.length > 0) {
       const chunkSize = 50;
-      for (let i = 0; i < movementsToCreate.length; i += chunkSize) {
-        const chunk = movementsToCreate.slice(i, i + chunkSize);
+      for (let i = 0; i < uniqueMovements.length; i += chunkSize) {
+        const chunk = uniqueMovements.slice(i, i + chunkSize);
         const { error: mErr } = await supabaseAdmin
           .from("movements")
           .upsert(chunk.map(inventoryMovementToDb), { onConflict: "id" });
