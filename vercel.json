@@ -5,8 +5,8 @@
       "destination": "https://wasenderapi.com/api/send-message"
     },
     {
-      "source": "/api/dgii(.*)",
-      "destination": "https://dgii-rnc.pronesoft.com/get$1"
+      "source": "/api/ef2/(.*)",
+      "destination": "https://master.ef2.do/api2/$1"
     },
     {
       "source": "/(.*)",

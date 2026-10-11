@@ -19,16 +19,17 @@ export interface Tenant {
     formato_ticket_default?: '57mm' | '80mm';
     autoDeductInventory?: boolean;
     ecfConfig?: {
+      provider?: 'ef2';
+      token?: string;
+      username?: string;
+      environment: 'TesteCF' | 'CerteCF' | 'eCF' | 'sandbox' | 'production';
+      rnc?: string;
+      businessName?: string;
+      is_active?: boolean;
+      updatedAt?: string;
       useOwnCredentials?: boolean;
       clientId?: string;
       clientSecret?: string;
-      environment: 'sandbox' | 'production';
-      rnc?: string;
-      businessName?: string;
-      certFileName?: string;
-      certPassword?: string;
-      certUploaded?: boolean;
-      updatedAt?: string;
     };
     sidebarOrder?: Record<string, number>;
     modulos_override?: {
@@ -38,6 +39,11 @@ export interface Tenant {
       logistica?: boolean;
       procesos?: boolean;
     };
+    printSettings?: any;
+    barcodeSettings?: any;
+    whatsappAutomations?: any;
+    adminPin?: string;
+    [key: string]: any;
   };
   plan_id?: string;
   estado?: 'ACTIVO' | 'TRIAL' | 'SUSPENDIDO' | 'CANCELADO';
@@ -89,6 +95,9 @@ export interface Customer {
   phone: string;
   email?: string;
   rnc?: string;
+  type?: 'Persona' | 'Empresa';
+  taxReceiptType?: 'E31' | 'E32' | 'E44' | 'E45' | 'B01' | 'B02';
+  businessName?: string;
   address?: string;
   notes?: string;
   tags?: string[];
@@ -208,6 +217,10 @@ export interface WorkOrder {
   kmUnit?: 'km' | 'mi';
   status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced';
   description: string;
+  customerType?: 'consumidor_final' | 'credito_fiscal' | 'gubernamental' | 'regimen_especial';
+  ncfType?: string; // 'E31', 'E32', etc.
+  customerRnc?: string;
+  customerBusinessName?: string;
   serviceIds?: string[]; // Multiple services selected
   customServices?: { name: string; price: number }[]; // Ad-hoc labor imported from quotes
   customParts?: { name: string; price: number; quantity: number }[]; // External/custom parts imported from quotes
@@ -218,6 +231,25 @@ export interface WorkOrder {
   total: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface EcfSequence {
+  id: number | string;
+  tipo_ecf_id?: number;
+  prefijo: string;
+  desde: number;
+  hasta: number;
+  secuencia_actual: number;
+  total_secuencias?: number;
+  secuencias_usadas?: number;
+  secuencias_disponibles?: number;
+  porcentaje_uso?: number;
+  fecha_vencimiento?: string;
+  estado: boolean | number;
+  tipo_codigo?: string;
+  tipo_nombre?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface InvoiceItem {

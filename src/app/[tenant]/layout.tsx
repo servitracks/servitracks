@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { logout } from "@/lib/storage";
 import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
 
 export default function DashboardLayout() {
   const params = useParams();
@@ -44,6 +45,7 @@ export default function DashboardLayout() {
     ? tenants.find((t) => t.slug === tenantSlug) ?? null
     : null;
   const isPending = currentTenant?.status === "pending";
+  const isPosPage = location.pathname.endsWith("/pos") || location.pathname.includes("/pos");
 
   // Redirigir a login si no está autenticado o si el tenant no existe (una vez hidratado el store)
   useEffect(() => {
@@ -337,7 +339,16 @@ export default function DashboardLayout() {
           activityLogs: dbState.activityLogs,
           users: dbState.users,
           openTabs: dbState.openTabs,
+          inventorySessions: dbState.inventorySessions,
         });
+
+        // Aplicar configuraciones de impresión y código de barras si existen en el tenant
+        if (currentTenant?.config?.printSettings) {
+          useStore.setState({ printSettings: currentTenant.config.printSettings });
+        }
+        if (currentTenant?.config?.barcodeSettings) {
+          useStore.setState({ barcodeSettings: currentTenant.config.barcodeSettings });
+        }
         
         // Nomina Remote Sync
         const { loadEmpleadosFromSupabase, loadNominasFromSupabase } = await import("@/lib/nominaSync");
@@ -373,7 +384,7 @@ export default function DashboardLayout() {
       "movements", "cajas", "quotes", "inspections",
       "maintenance_items", "maintenance_alerts", "maintenance_history", "technicians",
       "suppliers", "purchase_orders", "goods_receipts", "accounts_payable", "quote_requests",
-      "empleados_nomina", "nominas_periodos", "activity_logs", "tenant_users", "open_tabs"
+      "empleados_nomina", "nominas_periodos", "activity_logs", "tenant_users", "open_tabs", "inventory_sessions"
     ];
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
@@ -439,7 +450,7 @@ export default function DashboardLayout() {
               "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
               "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
               "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
-              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "openTabs", "users"
+              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "openTabs", "users", "inventorySessions"
             ] as const;
 
             for (const key of entitiesToMerge) {
@@ -487,7 +498,8 @@ export default function DashboardLayout() {
               goodsReceipts: dbState.goodsReceipts,
               accountsPayable: dbState.accountsPayable,
               quoteRequests: dbState.quoteRequests,
-              activityLogs: dbState.activityLogs
+              activityLogs: dbState.activityLogs,
+              inventorySessions: dbState.inventorySessions
             });
             
             // Initial Nomina Sync
@@ -533,7 +545,8 @@ export default function DashboardLayout() {
               goodsReceipts: localState.goodsReceipts,
               accountsPayable: localState.accountsPayable,
               quoteRequests: localState.quoteRequests,
-              activityLogs: localState.activityLogs
+              activityLogs: localState.activityLogs,
+              inventorySessions: localState.inventorySessions
             });
             
             const { syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
@@ -579,7 +592,8 @@ export default function DashboardLayout() {
         state.quoteRequests !== prevState.quoteRequests ||
         state.activityLogs !== prevState.activityLogs ||
         state.users !== prevState.users ||
-        state.openTabs !== prevState.openTabs;
+        state.openTabs !== prevState.openTabs ||
+        state.inventorySessions !== prevState.inventorySessions;
 
       if (!changed) return;
 
@@ -1025,8 +1039,11 @@ export default function DashboardLayout() {
           </div>
         )}
         <HydrationGuard>
-          <main className="flex-1 overflow-y-auto p-4 sm:p-8">
-            <div className="mx-auto max-w-[1600px]">
+          <main className={cn(
+            "flex-1",
+            isPosPage ? "p-0 overflow-hidden flex flex-col" : "overflow-y-auto p-4 sm:p-8"
+          )}>
+            <div className={cn("mx-auto", isPosPage ? "w-full h-full flex flex-col flex-1" : "max-w-[1600px]")}>
               <Outlet />
             </div>
           </main>

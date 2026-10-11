@@ -1,369 +1,726 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "@/store/useStore";
 import { updateTenantConfig } from "@/lib/storage";
-import { getEcfToken, fetchTaxSequences, uploadDigitalCertificate, createTaxSequence, resolveEcfEnvironment } from "@/lib/ecf";
+import {
+  fetchEf2Sequences,
+  createEf2Sequence,
+  updateEf2Sequence,
+  deleteEf2Sequence,
+  verifyEf2Token,
+  fetchEf2Tipos,
+  resolveEcfEnvironment,
+  EF2_DEFAULT_TEST_TOKEN,
+  EF2_DEFAULT_TEST_USERNAME,
+  EF2_DEFAULT_TEST_RNC,
+  EF2_DEFAULT_TEST_EMPRESA,
+  type EF2SecuenciaRango,
+  type EF2TipoECF,
+  type EF2Environment,
+} from "@/lib/ecf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
-import { ShieldCheck, RefreshCw, AlertCircle, Plus, Eye, EyeOff, Check, Upload, FileCheck, Building2, FileKey, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+import {
+  ShieldCheck,
+  RefreshCw,
+  AlertCircle,
+  Plus,
+  Eye,
+  EyeOff,
+  Check,
+  Building2,
+  Sparkles,
+  ExternalLink,
+  Trash2,
+  Sliders,
+  CheckCircle2,
+  FileText,
+  Clock,
+  Layers,
+  Search,
+  HelpCircle,
+  Flame,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EcfSequenceDialog } from "./EcfSequenceDialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 export function EcfSettings({ tenant }: { tenant: any }) {
   const ecfConfig = tenant.config?.ecfConfig || {
-    environment: resolveEcfEnvironment(),
-    rnc: tenant.rnc || '',
-    businessName: tenant.name || '',
-    certFileName: '',
-    certPassword: '',
-    certUploaded: false,
+    environment: "TesteCF",
+    token: EF2_DEFAULT_TEST_TOKEN,
+    username: EF2_DEFAULT_TEST_USERNAME,
+    rnc: tenant.rnc || EF2_DEFAULT_TEST_RNC,
+    businessName: tenant.name || EF2_DEFAULT_TEST_EMPRESA,
+    is_active: false,
   };
 
-  const [env, setEnv] = useState<'sandbox' | 'production'>(resolveEcfEnvironment(ecfConfig.environment));
-  const [rnc, setRnc] = useState(ecfConfig.rnc || tenant.rnc || '');
-  const [businessName, setBusinessName] = useState(ecfConfig.businessName || tenant.name || '');
-  const [certPassword, setCertPassword] = useState(ecfConfig.certPassword || '');
-  const [showPassword, setShowPassword] = useState(false);
-  
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [certFileName, setCertFileName] = useState(ecfConfig.certFileName || '');
-  const [certUploaded, setCertUploaded] = useState(ecfConfig.certUploaded || false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [env, setEnv] = useState<EF2Environment>(resolveEcfEnvironment(ecfConfig.environment));
+  const [token, setToken] = useState(ecfConfig.token || EF2_DEFAULT_TEST_TOKEN);
+  const [username, setUsername] = useState(ecfConfig.username || EF2_DEFAULT_TEST_USERNAME);
+  const [rnc, setRnc] = useState(ecfConfig.rnc || tenant.rnc || EF2_DEFAULT_TEST_RNC);
+  const [businessName, setBusinessName] = useState(ecfConfig.businessName || tenant.name || EF2_DEFAULT_TEST_EMPRESA);
+  const [isActive, setIsActive] = useState<boolean>(ecfConfig.is_active ?? false);
+  const [showToken, setShowToken] = useState(false);
 
-  const [isUploading, setIsUploading] = useState(false);
-  const [sequences, setSequences] = useState<any[]>([]);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isTokenVerified, setIsTokenVerified] = useState<boolean | null>(null);
+
+  const [sequences, setSequences] = useState<EF2SecuenciaRango[]>([]);
+  const [availableTipos, setAvailableTipos] = useState<EF2TipoECF[]>([]);
   const [isLoadingSequences, setIsLoadingSequences] = useState(false);
-  const [showDialog, setShowDialog] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
+  // Modal para ajustar secuencia_actual
+  const [adjustSequenceItem, setAdjustSequenceItem] = useState<EF2SecuenciaRango | null>(null);
+  const [newActualSeq, setNewActualSeq] = useState<number>(0);
+  const [isAdjusting, setIsAdjusting] = useState(false);
+
+  // Cargar secuencias al montar o al cambiar token
   useEffect(() => {
-    if (rnc) {
+    if (token) {
       loadSequences();
+      loadTipos();
     }
-  }, [rnc, env]);
+  }, [token]);
+
+  const loadTipos = async () => {
+    try {
+      const res = await fetchEf2Tipos(token);
+      if (res.success && Array.isArray(res.data)) {
+        setAvailableTipos(res.data);
+      }
+    } catch {
+      // Ignorar error secundario
+    }
+  };
 
   const loadSequences = async () => {
     setIsLoadingSequences(true);
     try {
-      const token = await getEcfToken(undefined, undefined, env);
-      const data = await fetchTaxSequences(token, env);
-      setSequences(data.data || []);
+      const res = await fetchEf2Sequences(token);
+      if (res.success && Array.isArray(res.data)) {
+        setSequences(res.data);
+        setIsTokenVerified(true);
+      } else {
+        setSequences([]);
+      }
     } catch (err: any) {
-      console.error(err);
+      console.error("Error al cargar secuencias EF2:", err);
+      setIsTokenVerified(false);
     } finally {
       setIsLoadingSequences(false);
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.name.toLowerCase().endsWith('.p12') && !file.name.toLowerCase().endsWith('.pfx')) {
-      toast.error("El archivo debe ser un certificado digital en formato .p12 o .pfx");
+  const handleVerifyToken = async () => {
+    if (!token.trim()) {
+      toast.error("Ingresa el Bearer Token de EF2");
       return;
     }
-
-    setSelectedFile(file);
-    setCertFileName(file.name);
-    toast.success(`Archivo "${file.name}" seleccionado`);
+    setIsVerifying(true);
+    try {
+      const res = await verifyEf2Token(token);
+      if (res.success) {
+        setIsTokenVerified(true);
+        toast.success("¡Conexión exitosa con EF2! Token autenticado correctamente.");
+        loadSequences();
+        loadTipos();
+      } else {
+        setIsTokenVerified(false);
+        toast.error(res.message || "EF2 rechazó las credenciales ingresadas.");
+      }
+    } catch (err: any) {
+      setIsTokenVerified(false);
+      toast.error(err.message || "Error al verificar conexión con EF2.");
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
-  const handleSaveAndUpload = async () => {
+  const handleUseOfficialTestCredentials = () => {
+    setToken(EF2_DEFAULT_TEST_TOKEN);
+    setUsername(EF2_DEFAULT_TEST_USERNAME);
+    setRnc(EF2_DEFAULT_TEST_RNC);
+    setBusinessName(EF2_DEFAULT_TEST_EMPRESA);
+    setEnv("TesteCF");
+    setIsTokenVerified(true);
+    toast.info("Credenciales oficiales de prueba de EF2 cargadas. Haz clic en 'Guardar Configuración'.");
+  };
+
+  const handleSaveConfig = async () => {
     if (!rnc.trim()) {
-      toast.error("Ingresa el RNC de la empresa");
+      toast.error("Ingresa el RNC emisor");
       return;
     }
-    if (!businessName.trim()) {
-      toast.error("Ingresa el Nombre o Razón Social");
+    if (!token.trim()) {
+      toast.error("Ingresa el token de EF2");
       return;
     }
 
-    setIsUploading(true);
     try {
-      let isUploaded = certUploaded;
-
-      if (selectedFile && certPassword) {
-        toast.info("Conectando con Pronesoft SDK y registrando Certificado Digital...");
-        const token = await getEcfToken(undefined, undefined, env);
-        await uploadDigitalCertificate(token, env, rnc.replace(/\D/g, ''), selectedFile, certPassword);
-        isUploaded = true;
-        setCertUploaded(true);
-        toast.success("¡Certificado Digital (.p12) cargado y validado correctamente con la DGII!");
-      }
-
       const newConfig = {
         ...tenant.config,
         ecfConfig: {
+          provider: "ef2" as const,
+          token: token.trim(),
+          username: username.trim(),
           environment: env,
-          rnc,
-          businessName,
-          certFileName: certFileName || (selectedFile ? selectedFile.name : ''),
-          certPassword,
-          certUploaded: isUploaded,
+          rnc: rnc.replace(/\D/g, ""),
+          businessName: businessName.trim(),
+          is_active: isActive,
           updatedAt: new Date().toISOString(),
-        }
+        },
       };
 
       await updateTenantConfig(tenant.id, newConfig);
-      toast.success("Configuración e-CF guardada exitosamente");
+      toast.success("Configuración de Facturación Electrónica guardada exitosamente");
       loadSequences();
     } catch (e: any) {
-      console.error("Error e-CF config:", e);
-      toast.error(e.message || "Error al procesar el certificado digital con Pronesoft");
-    } finally {
-      setIsUploading(false);
+      console.error("Error al guardar config e-CF:", e);
+      toast.error(e.message || "Error al guardar la configuración");
     }
   };
 
   const handleCreateSequence = async (data: any) => {
     try {
-      const token = await getEcfToken(undefined, undefined, env);
-      await createTaxSequence(token, env, data);
-      toast.success("Secuencia e-NCF creada correctamente");
+      await createEf2Sequence(token, data);
+      toast.success(`Secuencia ${data.prefijo} creada exitosamente en EF2`);
       loadSequences();
     } catch (e: any) {
-      toast.error(e.message || "Error al crear la secuencia");
+      toast.error(e.message || "Error al registrar la secuencia en EF2");
+      throw e;
     }
   };
 
+  const handleToggleState = async (seq: EF2SecuenciaRango) => {
+    const nextState = !(seq.estado === true || seq.estado === 1);
+    try {
+      toast.info(`Actualizando estado de ${seq.prefijo} en EF2...`, { id: "toggle-seq" });
+      await updateEf2Sequence(token, { id: seq.id, estado: nextState });
+      toast.success(`Secuencia ${seq.prefijo} ${nextState ? "activada" : "desactivada"} en EF2`, { id: "toggle-seq" });
+      loadSequences();
+    } catch (err: any) {
+      toast.error(err.message || "No se pudo actualizar el estado de la secuencia", { id: "toggle-seq" });
+    }
+  };
+
+  const handleOpenAdjust = (seq: EF2SecuenciaRango) => {
+    setAdjustSequenceItem(seq);
+    setNewActualSeq(seq.secuencia_actual || 0);
+  };
+
+  const handleSaveAdjust = async () => {
+    if (!adjustSequenceItem) return;
+    setIsAdjusting(true);
+    try {
+      await updateEf2Sequence(token, {
+        id: adjustSequenceItem.id,
+        secuencia_actual: Number(newActualSeq),
+      });
+      toast.success(`Secuencia actual de ${adjustSequenceItem.prefijo} ajustada a ${newActualSeq} en EF2`);
+      setAdjustSequenceItem(null);
+      loadSequences();
+    } catch (err: any) {
+      toast.error(err.message || "Error al ajustar la secuencia");
+    } finally {
+      setIsAdjusting(false);
+    }
+  };
+
+  const handleDeleteSequence = async (seq: EF2SecuenciaRango) => {
+    if (!confirm(`¿Estás seguro de eliminar el rango ${seq.prefijo} (${seq.desde}-${seq.hasta}) en EF2? Solo se pueden eliminar rangos inactivos.`)) {
+      return;
+    }
+    try {
+      toast.info(`Eliminando rango ${seq.prefijo} en EF2...`, { id: "del-seq" });
+      await deleteEf2Sequence(token, seq.id);
+      toast.success(`Rango ${seq.prefijo} eliminado correctamente de EF2`, { id: "del-seq" });
+      loadSequences();
+    } catch (err: any) {
+      toast.error(err.message || "Error al eliminar el rango en EF2", { id: "del-seq" });
+    }
+  };
+
+  // Cálculos estadísticos
+  const totalDisponibles = sequences
+    .filter((s) => s.estado === true || s.estado === 1)
+    .reduce((acc, s) => acc + (s.secuencias_disponibles ?? s.disponibles ?? Math.max(0, s.hasta - s.secuencia_actual)), 0);
+
+  const activeRangesCount = sequences.filter((s) => s.estado === true || s.estado === 1).length;
+
   return (
     <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
-      {/* Principal Header & Status */}
+      {/* ── 1. HEADER & ESTADO PRINCIPAL EF2 ── */}
       <Card className="border-neutral-200 shadow-sm rounded-2xl overflow-hidden">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 pb-4">
-          <div className="flex items-start justify-between">
+        <CardHeader className="bg-gradient-to-r from-neutral-50 via-sky-50/30 to-blue-50/40 border-b border-neutral-100 pb-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-lg font-black flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                Facturación Electrónica DGII (e-CF)
+              <CardTitle className="text-lg font-black flex items-center gap-2 text-neutral-900">
+                <ShieldCheck className="h-5 w-5 text-[#0051A8]" />
+                Facturación Electrónica DGII con EF2 API
               </CardTitle>
-              <CardDescription className="mt-1.5 text-neutral-500">
-                Emisión oficial de comprobantes fiscales electrónicos firmados con Certificado Digital (.p12 / .pfx) vía Pronesoft SDK.
+              <CardDescription className="mt-1 text-neutral-500 text-xs">
+                Emisión oficial de comprobantes e-CF (E31, E32, E34, E44, etc.) y administración directa de secuencias fiscales vía EF2.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-100">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-bold text-emerald-700 uppercase tracking-widest">
-                Pronesoft SDK Directo
-              </span>
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold uppercase tracking-wider",
+                  isTokenVerified
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : isTokenVerified === false
+                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                    : "bg-blue-50 text-blue-700 border-blue-200"
+                )}
+              >
+                <span className="relative flex h-2 w-2">
+                  <span
+                    className={cn(
+                      "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                      isTokenVerified ? "bg-emerald-400" : isTokenVerified === false ? "bg-rose-400" : "bg-blue-400"
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      isTokenVerified ? "bg-emerald-500" : isTokenVerified === false ? "bg-rose-500" : "bg-blue-500"
+                    )}
+                  />
+                </span>
+                <span>
+                  {isTokenVerified ? "EF2 Conectado" : isTokenVerified === false ? "Sin Conexión" : "EF2 API Directa"}
+                </span>
+              </div>
+              <a
+                href="https://doc.ef2.do/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] font-bold text-[#0051A8] hover:underline flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-neutral-200"
+              >
+                Docs EF2 <ExternalLink className="h-3 w-3" />
+              </a>
             </div>
           </div>
         </CardHeader>
-        
-        <CardContent className="p-6 space-y-6">
-          {/* Toggle Sandbox / Producción */}
+
+        <CardContent className="p-6 space-y-5">
+          {/* Switch de activación global */}
           <div className="flex items-center justify-between p-4 rounded-xl border border-neutral-200 bg-neutral-50/50">
-            <div className="space-y-0.5">
-              <Label className="text-base font-bold flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-500" />
-                Modo Sandbox (Ambiente de Pruebas DGII)
-              </Label>
-              <p className="text-xs text-neutral-500">
-                Activa esta opción para emitir e-CF en el ambiente de pruebas sin enviar comprobantes reales a la DGII.
-              </p>
+            <div>
+              <div className="font-bold text-sm text-neutral-900">Activar Emisión de Comprobantes Electrónicos</div>
+              <div className="text-xs text-neutral-500 mt-0.5">
+                Al activar, las ventas del POS generarán comprobantes e-CF timbrados ante la DGII con e-NCF y código QR oficial.
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className={cn("text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full",
-                env === 'sandbox' ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800")}>
-                {env === 'sandbox' ? 'Pruebas (Sandbox)' : 'Producción Real'}
-              </span>
-              <Switch
-                checked={env === 'sandbox'}
-                onCheckedChange={(checked) => setEnv(checked ? 'sandbox' : 'production')}
-              />
-            </div>
+            <Switch checked={isActive} onCheckedChange={setIsActive} />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* RNC */}
+          {/* Formulario de Credenciales EF2 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="font-bold flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-neutral-500" />
-                RNC de la Empresa *
-              </Label>
+              <Label className="text-xs font-bold text-neutral-700">Ambiente de Operación</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["TesteCF", "CerteCF", "eCF"] as EF2Environment[]).map((envOption) => (
+                  <button
+                    key={envOption}
+                    type="button"
+                    onClick={() => setEnv(envOption)}
+                    className={cn(
+                      "py-2 px-3 rounded-xl border text-xs font-bold transition-all text-center",
+                      env === envOption
+                        ? "bg-[#0051A8] text-white border-[#0051A8] shadow-sm"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"
+                    )}
+                  >
+                    {envOption === "TesteCF" ? "🧪 Pruebas" : envOption === "CerteCF" ? "📋 Certificación" : "🚀 Producción"}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[10px] text-neutral-400">
+                TesteCF para pruebas locales, CerteCF para homologación DGII, eCF para facturas reales.
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-neutral-700">Usuario de API en EF2</Label>
+              <Input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="api_2buy_mliec4sb"
+                className="h-10 rounded-xl border-neutral-200 text-xs font-semibold"
+              />
+            </div>
+
+            <div className="space-y-1.5 md:col-span-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-neutral-700">Token de Autenticación EF2 (Bearer Token)</Label>
+                <button
+                  type="button"
+                  onClick={handleUseOfficialTestCredentials}
+                  className="text-[11px] font-bold text-[#0051A8] hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Sparkles className="h-3 w-3" /> Cargar Credenciales de Prueba Oficiales
+                </button>
+              </div>
+              <div className="relative">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="tok_..."
+                  className="h-10 rounded-xl border-neutral-200 text-xs font-mono pr-20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowToken(!showToken)}
+                  className="absolute inset-y-0 right-3 flex items-center text-neutral-400 hover:text-neutral-700 text-xs font-semibold"
+                >
+                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <span className="text-[10px] text-neutral-400">
+                Los tokens que inician con <code>tok_</code> se autentican directamente sin requerir login manual.
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-bold text-neutral-700">RNC Emisor de la Empresa</Label>
               <Input
                 value={rnc}
                 onChange={(e) => setRnc(e.target.value)}
-                className="h-11 rounded-xl font-bold bg-white"
-                placeholder="Ej: 133190907 (o prefijo SBX...)"
+                placeholder="132596161"
+                className="h-10 rounded-xl border-neutral-200 text-xs font-semibold"
               />
             </div>
 
-            {/* Nombre o Razón Social */}
             <div className="space-y-1.5">
-              <Label className="font-bold flex items-center gap-2">
-                <FileCheck className="h-4 w-4 text-neutral-500" />
-                Nombre o Razón Social *
-              </Label>
+              <Label className="text-xs font-bold text-neutral-700">Razón Social Emisor</Label>
               <Input
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
-                className="h-11 rounded-xl font-bold bg-white"
-                placeholder="Ej: LUBRIMART SRL"
+                placeholder="Nombre legal de la empresa"
+                className="h-10 rounded-xl border-neutral-200 text-xs font-semibold"
               />
             </div>
           </div>
 
-          {/* Certificado Digital Section */}
-          <div className="p-5 border border-dashed border-neutral-300 rounded-2xl bg-neutral-50/30 space-y-4">
-            <div className="flex items-start justify-between">
-              <div>
-                <h4 className="font-bold text-neutral-900 flex items-center gap-2 text-base">
-                  <FileKey className="h-5 w-5 text-blue-600" />
-                  Certificado Digital (.p12 / .pfx)
-                </h4>
-                <p className="text-xs text-neutral-500 mt-1">
-                  Sube el archivo de tu firma digital emitido por una entidad de certificación autorizada por la DGII.
-                </p>
-              </div>
-              {certUploaded && (
-                <Badge className="bg-emerald-100 text-emerald-800 font-bold border-none px-3 py-1 text-xs">
-                  <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Certificado Activo
-                </Badge>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {/* File Selector */}
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs text-neutral-700">Archivo del Certificado (.p12 / .pfx)</Label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".p12,.pfx"
-                  className="hidden"
-                  onChange={handleFileSelect}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full h-11 rounded-xl justify-start font-medium text-xs bg-white border-neutral-200"
-                >
-                  <Upload className="h-4 w-4 mr-2 text-neutral-500" />
-                  <span className="truncate">{certFileName || selectedFile?.name || "Seleccionar certificado .p12..."}</span>
-                </Button>
-              </div>
-
-              {/* Password Input */}
-              <div className="space-y-1.5">
-                <Label className="font-semibold text-xs text-neutral-700">Contraseña del Certificado</Label>
-                <div className="relative">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={certPassword}
-                    onChange={(e) => setCertPassword(e.target.value)}
-                    className="h-11 rounded-xl font-mono text-sm bg-white pr-10"
-                    placeholder="••••••••••••"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 flex justify-end">
+          <div className="flex flex-wrap gap-2 pt-2 justify-end">
             <Button
-              onClick={handleSaveAndUpload}
-              disabled={isUploading}
-              className="h-12 px-8 rounded-xl font-bold bg-black text-white hover:bg-neutral-800 shadow-sm cursor-pointer"
+              type="button"
+              variant="outline"
+              onClick={handleVerifyToken}
+              disabled={isVerifying}
+              className="h-10 rounded-xl text-xs font-bold border-neutral-300"
             >
-              {isUploading ? (
+              {isVerifying ? (
                 <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Registrando Certificado...
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  Verificando...
                 </>
               ) : (
                 <>
-                  <Check className="h-4 w-4 mr-2" /> Guardar Configuración e-CF
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-[#0051A8]" />
+                  Verificar Conexión EF2
                 </>
               )}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveConfig}
+              className="h-10 rounded-xl text-xs font-bold bg-[#0051A8] hover:bg-[#003d7e] text-white shadow-sm"
+            >
+              Guardar Configuración
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Secuencias e-NCF */}
+      {/* ── 2. GESTIÓN DE SECUENCIAS DIRECTAMENTE DESDE EF2 ── */}
       <Card className="border-neutral-200 shadow-sm rounded-2xl overflow-hidden">
-        <CardHeader className="bg-neutral-50/50 border-b border-neutral-100 pb-4">
-          <div className="flex items-center justify-between">
+        <CardHeader className="bg-neutral-50/60 border-b border-neutral-100 pb-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-lg font-black">Secuencias e-NCF</CardTitle>
-              <CardDescription className="text-neutral-500">
-                Rangos de comprobantes fiscales electrónicos autorizados por la DGII.
+              <CardTitle className="text-base font-black flex items-center gap-2 text-neutral-900">
+                <Layers className="h-4 w-4 text-[#0051A8]" />
+                Secuencias e-NCF Autorizadas en EF2
+              </CardTitle>
+              <CardDescription className="text-xs text-neutral-500 mt-0.5">
+                Rangos de comprobantes autorizados por la DGII y registrados en EF2 para asignación automática.
               </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button onClick={loadSequences} variant="outline" size="sm" className="h-9 rounded-lg font-bold">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadSequences}
+                disabled={isLoadingSequences}
+                className="h-9 rounded-xl text-xs font-bold border-neutral-200"
+              >
                 <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isLoadingSequences && "animate-spin")} />
-                Actualizar
+                Sincronizar en Vivo
               </Button>
-              <Button onClick={() => setShowDialog(true)} size="sm" className="h-9 rounded-lg font-bold bg-[#1B2B4D] hover:bg-[#121c32] text-white">
+              <Button
+                size="sm"
+                onClick={() => setShowCreateDialog(true)}
+                className="h-9 rounded-xl text-xs font-bold bg-[#0051A8] hover:bg-[#003d7e] text-white"
+              >
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
-                AÑADIR SECUENCIA
+                Nueva Secuencia en EF2
               </Button>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
-          {sequences.length === 0 ? (
-            <div className="p-12 text-center flex flex-col items-center">
-              <div className="h-12 w-12 bg-neutral-100 rounded-full flex items-center justify-center mb-3">
-                <AlertCircle className="h-5 w-5 text-neutral-400" />
+
+        <CardContent className="p-6 space-y-5">
+          {/* Resumen numérico */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-4 rounded-xl bg-sky-50/60 border border-sky-100 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-bold text-sky-800 uppercase tracking-wide">Comprobantes Disponibles</div>
+                <div className="text-2xl font-black text-[#0051A8] mt-0.5">{totalDisponibles.toLocaleString()}</div>
               </div>
-              <h3 className="font-bold text-neutral-900">No hay secuencias registradas</h3>
-              <p className="text-sm text-neutral-500 mt-1 max-w-sm">
-                No tienes ninguna secuencia e-NCF activa. Haz clic en "AÑADIR SECUENCIA" para agregar un rango fiscal.
+              <div className="h-10 w-10 rounded-full bg-sky-100 flex items-center justify-center text-[#0051A8]">
+                <FileText className="h-5 w-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-bold text-emerald-800 uppercase tracking-wide">Rangos Activos</div>
+                <div className="text-2xl font-black text-emerald-700 mt-0.5">{activeRangesCount}</div>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700">
+                <CheckCircle2 className="h-5 w-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-neutral-50 border border-neutral-200 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-bold text-neutral-600 uppercase tracking-wide">Total de Rangos Registrados</div>
+                <div className="text-2xl font-black text-neutral-900 mt-0.5">{sequences.length}</div>
+              </div>
+              <div className="h-10 w-10 rounded-full bg-neutral-200/70 flex items-center justify-center text-neutral-700">
+                <Sliders className="h-5 w-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Listado de Secuencias traídas desde EF2 */}
+          {isLoadingSequences ? (
+            <div className="py-12 text-center text-neutral-400 space-y-3">
+              <RefreshCw className="h-6 w-6 animate-spin mx-auto text-[#0051A8]" />
+              <p className="text-xs font-semibold">Consultando secuencias directamente desde EF2...</p>
+            </div>
+          ) : sequences.length === 0 ? (
+            <div className="py-12 text-center border-2 border-dashed border-neutral-200 rounded-2xl p-8 space-y-3">
+              <div className="h-12 w-12 rounded-full bg-sky-50 text-[#0051A8] flex items-center justify-center mx-auto">
+                <Layers className="h-6 w-6" />
+              </div>
+              <h3 className="font-bold text-sm text-neutral-800">No hay secuencias registradas en EF2</h3>
+              <p className="text-xs text-neutral-500 max-w-sm mx-auto">
+                Agrega tu primer rango autorizado de la DGII (ej: E32 para consumidor final o E31 para crédito fiscal).
               </p>
+              <Button
+                size="sm"
+                onClick={() => setShowCreateDialog(true)}
+                className="mt-2 rounded-xl text-xs font-bold bg-[#0051A8] text-white"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> Crear Primera Secuencia
+              </Button>
             </div>
           ) : (
-            <div className="divide-y divide-neutral-100">
-              {sequences.map((seq, i) => (
-                <div key={i} className="p-5 flex items-center justify-between hover:bg-neutral-50/50 transition-colors">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-black text-neutral-900">{seq.sequenceType} - {seq.name || 'COMPROBANTE'}</span>
-                      <Badge variant="secondary" className="text-[10px] bg-emerald-100 text-emerald-700 uppercase tracking-widest font-black">
-                        e-CF
-                      </Badge>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {sequences.map((seq) => {
+                const isSeqActive = seq.estado === true || seq.estado === 1;
+                const total = seq.total_secuencias || Math.max(1, seq.hasta - seq.desde + 1);
+                const current = seq.secuencia_actual || 0;
+                const used = seq.secuencias_usadas ?? Math.max(0, current - seq.desde + 1);
+                const remaining = seq.secuencias_disponibles ?? seq.disponibles ?? Math.max(0, seq.hasta - current);
+                const percent = seq.porcentaje_uso ?? Math.min(100, Math.round((used / total) * 100));
+
+                return (
+                  <div
+                    key={seq.id}
+                    className={cn(
+                      "p-4 rounded-xl border transition-all space-y-3 relative overflow-hidden",
+                      isSeqActive
+                        ? "bg-white border-neutral-200 hover:border-[#0078D4] hover:shadow-sm"
+                        : "bg-neutral-50/80 border-neutral-200 opacity-75"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-md text-xs font-black bg-gradient-to-r from-[#0051A8] to-[#0078D4] text-white">
+                          {seq.prefijo}
+                        </span>
+                        <div>
+                          <div className="font-bold text-xs text-neutral-900 leading-tight">
+                            {seq.tipo_nombre || (seq.prefijo === "E31" ? "Crédito Fiscal" : seq.prefijo === "E32" ? "Consumidor Final" : "Comprobante Fiscal")}
+                          </div>
+                          <div className="text-[10px] text-neutral-500 font-mono mt-0.5">
+                            Rango: {seq.desde.toLocaleString()} → {seq.hasta.toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px] font-bold px-2 py-0.5",
+                            isSeqActive
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              : "bg-neutral-100 text-neutral-600 border-neutral-200"
+                          )}
+                        >
+                          {isSeqActive ? "Activo" : "Inactivo"}
+                        </Badge>
+                      </div>
                     </div>
-                    <p className="text-sm text-neutral-500 font-mono tracking-wider">
-                      {seq.prefix}{seq.currentNumber?.toString().padStart(10, '0')}
-                    </p>
+
+                    {/* Barra de progreso de consumo */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[10px] font-bold text-neutral-600">
+                        <span>Actual: <strong className="text-neutral-900">{current.toLocaleString()}</strong></span>
+                        <span>Disponibles: <strong className={cn(remaining < 50 ? "text-rose-600" : "text-emerald-700")}>{remaining.toLocaleString()}</strong></span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-neutral-100 overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all duration-300",
+                            percent > 90 ? "bg-rose-500" : percent > 70 ? "bg-amber-500" : "bg-emerald-500"
+                          )}
+                          style={{ width: `${Math.min(100, Math.max(2, percent))}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[9.5px] text-neutral-400">
+                        <span>{used.toLocaleString()} usadas ({percent}%)</span>
+                        {seq.fecha_vencimiento ? (
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-2.5 w-2.5" /> Vence: {seq.fecha_vencimiento}
+                          </span>
+                        ) : (
+                          <span>Sin vencimiento</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Acciones directas sobre la secuencia */}
+                    <div className="flex items-center justify-between pt-2 border-t border-neutral-100 text-xs">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleState(seq)}
+                          className={cn(
+                            "text-[11px] font-bold px-2 py-1 rounded-md transition-colors",
+                            isSeqActive
+                              ? "text-neutral-600 hover:bg-neutral-100"
+                              : "text-emerald-700 hover:bg-emerald-50"
+                          )}
+                        >
+                          {isSeqActive ? "Desactivar" : "Activar en EF2"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAdjust(seq)}
+                          className="text-[11px] font-bold text-[#0051A8] hover:bg-sky-50 px-2 py-1 rounded-md transition-colors"
+                        >
+                          Ajustar Contador
+                        </button>
+                      </div>
+
+                      {!isSeqActive && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSequence(seq)}
+                          className="text-rose-600 hover:bg-rose-50 p-1 rounded-md transition-colors"
+                          title="Eliminar rango inactivo de EF2"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <div className="font-black text-emerald-600">
-                      {seq.to - seq.currentNumber} disp.
-                    </div>
-                    <div className="text-xs font-medium text-rose-500 mt-0.5">
-                      Alerta: {seq.alertThreshold || 50}
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
-      
-      <EcfSequenceDialog 
-        open={showDialog} 
-        onClose={() => setShowDialog(false)} 
-        onSave={handleCreateSequence} 
-      />
+
+      {/* Modal para Crear Secuencia en EF2 */}
+      {showCreateDialog && (
+        <EcfSequenceDialog
+          open={showCreateDialog}
+          onClose={() => setShowCreateDialog(false)}
+          token={token}
+          tipos={availableTipos}
+          onSave={handleCreateSequence}
+        />
+      )}
+
+      {/* Modal para Ajustar Secuencia Actual */}
+      {adjustSequenceItem && (
+        <Dialog open={!!adjustSequenceItem} onOpenChange={() => setAdjustSequenceItem(null)}>
+          <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-black text-neutral-900">
+                Ajustar Secuencia Actual ({adjustSequenceItem.prefijo})
+              </DialogTitle>
+              <CardDescription className="text-xs text-neutral-500">
+                Ajusta el número del último comprobante emitido en EF2 si estás migrando desde otro sistema.
+              </CardDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-neutral-700">Rango Autorizado</Label>
+                <div className="text-xs font-mono bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  {adjustSequenceItem.desde} hasta {adjustSequenceItem.hasta}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-bold text-neutral-700">Nuevo Valor de Secuencia Actual</Label>
+                <Input
+                  type="number"
+                  value={newActualSeq}
+                  onChange={(e) => setNewActualSeq(Number(e.target.value))}
+                  min={adjustSequenceItem.desde - 1}
+                  max={adjustSequenceItem.hasta}
+                  className="h-10 rounded-xl border-neutral-200 text-xs font-semibold"
+                />
+                <span className="text-[10px] text-neutral-400">
+                  La próxima factura se emitirá con el número <strong>{Number(newActualSeq) + 1}</strong>.
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2 flex gap-2 sm:justify-end">
+              <Button
+                variant="ghost"
+                onClick={() => setAdjustSequenceItem(null)}
+                className="h-9 px-4 rounded-xl text-xs font-bold"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSaveAdjust}
+                disabled={isAdjusting}
+                className="h-9 px-5 rounded-xl text-xs font-bold bg-[#0051A8] text-white"
+              >
+                {isAdjusting ? "Guardando..." : "Guardar en EF2"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
-

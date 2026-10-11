@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useStore, WhatsAppLog } from "@/store/useStore";
+import { useStore, WhatsAppLog, Tenant } from "@/store/useStore";
 import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendText } from "@/lib/wasender";
@@ -62,7 +62,7 @@ export default function RemindersPage() {
   const { whatsappLogs, customers, vehicles, addWhatsAppLog, tenants, updateTenant, updateWhatsAppLog, deleteWhatsAppLog } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
-  const taller = currentTenant ?? { id: tenantId, name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined };
+  const taller = currentTenant ?? ({ id: tenantId, name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: {} } as Tenant);
 
   // Filtrar por tenantId para garantizar el aislamiento de datos multi-tenant
   const tenantLogs = whatsappLogs.filter((l) => !tenantId || l.tenantId === tenantId);
@@ -97,7 +97,59 @@ export default function RemindersPage() {
   const [autoStates, setAutoStates] = useState<Record<string, { template: string; active: boolean; kmThreshold: string; timeMonths: string; kmUnit: "km" | "mi" }>>(
     Object.fromEntries(AUTOMATIONS.map(a => [a.id, { template: a.template, active: a.active, kmThreshold: "", timeMonths: "", kmUnit: "km" as const }]))
   );
+
+  useEffect(() => {
+    if (taller?.config?.whatsappAutomations) {
+      if (taller.config.whatsappAutomations.autoStates) {
+        setAutoStates(prev => ({ ...prev, ...taller.config!.whatsappAutomations!.autoStates }));
+      }
+      if (taller.config.whatsappAutomations.customAutos) {
+        setCustomAutos(taller.config.whatsappAutomations.customAutos);
+      }
+    }
+  }, [taller?.config?.whatsappAutomations]);
+
   const openNewAuto = () => setEditAuto({ id: `custom_${Date.now()}`, title: "", desc: "", trigger: "Automático", active: true, template: "", kmThreshold: "", timeMonths: "", kmUnit: "km" });
+
+  const handleSaveAutomation = (updatedAuto: typeof editAuto) => {
+    if (!updatedAuto) return;
+    const isCustom = updatedAuto.id.startsWith("custom_");
+    let nextCustom = [...customAutos];
+    if (isCustom) {
+      const idx = nextCustom.findIndex(c => c.id === updatedAuto.id);
+      if (idx !== -1) {
+        nextCustom[idx] = updatedAuto;
+      } else {
+        nextCustom.push(updatedAuto);
+      }
+      setCustomAutos(nextCustom);
+    }
+    const nextStates = {
+      ...autoStates,
+      [updatedAuto.id]: {
+        template: updatedAuto.template,
+        active: updatedAuto.active,
+        kmThreshold: updatedAuto.kmThreshold,
+        timeMonths: updatedAuto.timeMonths,
+        kmUnit: updatedAuto.kmUnit
+      }
+    };
+    setAutoStates(nextStates);
+
+    if (taller?.id) {
+      const newConfig = {
+        ...(taller.config || {}),
+        whatsappAutomations: {
+          autoStates: nextStates,
+          customAutos: nextCustom
+        }
+      };
+      updateTenant(taller.id, { config: newConfig });
+    }
+
+    toast.success("Automatización guardada y sincronizada");
+    setEditAuto(null);
+  };
   const isApiConnected = !!(taller?.wasenderApiKey);
 
   const getCustomerPhone = (id: string) => tenantCustomers.find((c) => c.id === id)?.phone || "";
@@ -730,9 +782,7 @@ export default function RemindersPage() {
                 <div className="flex justify-end gap-2 pt-1">
                   <Button variant="outline" className="rounded-xl h-9 px-5 text-sm" onClick={() => setEditAuto(null)}>Cancelar</Button>
                   <Button className="rounded-xl h-9 px-6 text-sm bg-neutral-900 text-white hover:bg-neutral-800" onClick={() => {
-                    setAutoStates(prev => ({ ...prev, [editAuto.id]: { template: editAuto.template, active: editAuto.active, kmThreshold: editAuto.kmThreshold, timeMonths: editAuto.timeMonths, kmUnit: editAuto.kmUnit } }));
-                    toast.success("Automatización actualizada");
-                    setEditAuto(null);
+                    handleSaveAutomation(editAuto);
                   }}>Guardar</Button>
                 </div>
               </div>

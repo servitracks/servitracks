@@ -37,6 +37,16 @@ export async function upsertNominas(items: NominaPeriodo[]): Promise<void> {
   if (error) console.error("[sync] upsert nominas_periodos:", error);
 }
 
+export async function deleteEmpleadoFromSupabase(id: string): Promise<void> {
+  const { error } = await supabaseAdmin.from("empleados_nomina").delete().eq("id", id);
+  if (error) console.error("[sync] delete empleados_nomina error:", error);
+}
+
+export async function deleteNominaFromSupabase(id: string): Promise<void> {
+  const { error } = await supabaseAdmin.from("nominas_periodos").delete().eq("id", id);
+  if (error) console.error("[sync] delete nominas_periodos error:", error);
+}
+
 export async function syncNominaStoreToSupabase(
   tenantId: string,
   state: { empleados?: EmpleadoNomina[], nominas?: NominaPeriodo[] }

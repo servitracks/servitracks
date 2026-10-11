@@ -6,7 +6,26 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatRD(value: number): string {
-  return `RD$ ${value.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `RD$ ${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0)}`;
+}
+
+/** Parse formatted currency strings like "1,000.50" into a standard numeric float. */
+export function parseAmount(raw: string): number {
+  const cleaned = (raw || "").replace(/[^\d.]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Formats user input with comma thousands separators while preserving typing state and decimals. */
+export function formatAmountInput(raw: string): string {
+  const cleaned = (raw || "").replace(/[^\d.]/g, "");
+  if (!cleaned) return "";
+  const parts = cleaned.split(".");
+  const intPart = parts[0].replace(/^0+(?=\d)/, "");
+  const intFmt = new Intl.NumberFormat("en-US").format(Number(intPart || "0"));
+  if (parts.length === 1) return intFmt;
+  const dec = parts.slice(1).join("").slice(0, 2);
+  return `${intFmt}.${dec}`;
 }
 
 /**
