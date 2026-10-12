@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { useParams, useSearchParams } from "@/lib/next-compat";
 import { EcfSettings } from "@/components/settings/EcfSettings";
 import { PhysicalPrinterSettings } from "@/components/settings/PhysicalPrinterSettings";
-import { getPlans, formatRD } from "@/lib/storage";
+import { getPlans, formatRD, deleteUserDefinitively } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 import { navigation } from "@/components/dashboard/Sidebar";
 import { isModuleEnabled } from "@/lib/permissions";
@@ -486,14 +486,16 @@ export default function SettingsPage() {
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    deleteUser(deleteTarget.id);
-    await supabaseAdmin
-      .from("tenant_users")
-      .delete()
-      .or(`user_id.eq.${deleteTarget.id},id.eq.${deleteTarget.id}`)
-      .eq("tenant_id", taller.id);
-    toast.success(`Usuario "${deleteTarget.name}" eliminado`);
+    const targetName = deleteTarget.name;
+    const targetId = deleteTarget.id;
     setDeleteTarget(null);
+    try {
+      await deleteUserDefinitively(targetId, taller.id);
+      toast.success(`Usuario "${targetName}" eliminado definitivamente`);
+    } catch (err) {
+      console.error("Error al eliminar usuario:", err);
+      toast.error("Error al eliminar el usuario");
+    }
   };
 
   const handleSavePin = async () => {

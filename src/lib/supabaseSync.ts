@@ -861,10 +861,41 @@ export async function upsertInventorySessions(items: InventorySession[]): Promis
 }
 
 export async function deleteTenantUserFromSupabase(id: string, tenantId?: string): Promise<void> {
-  let query = supabaseAdmin.from("tenant_users").delete().or(`id.eq.${id},user_id.eq.${id}`);
-  if (tenantId) query = query.eq("tenant_id", tenantId);
-  const { error } = await query;
-  if (error) console.error("[sync] delete tenant_user error:", error);
+  try {
+    // 1. Localizar el registro para obtener el user_id de Auth
+    let findQuery = supabaseAdmin
+      .from("tenant_users")
+      .select("id, user_id, email, tenant_id")
+      .or(`id.eq.${id},user_id.eq.${id}`);
+    if (tenantId) findQuery = findQuery.eq("tenant_id", tenantId);
+    const { data: records } = await findQuery;
+    const targetUserId = records?.[0]?.user_id || (id.includes("-") ? id : null);
+
+    // 2. Eliminar de tenant_users
+    let query = supabaseAdmin.from("tenant_users").delete().or(`id.eq.${id},user_id.eq.${id}`);
+    if (tenantId) query = query.eq("tenant_id", tenantId);
+    const { error } = await query;
+    if (error) console.error("[sync] delete tenant_user error:", error);
+
+    // 3. Si ya no le quedan otros talleres, eliminar de auth.users
+    if (targetUserId) {
+      const { data: remaining } = await supabaseAdmin
+        .from("tenant_users")
+        .select("id")
+        .eq("user_id", targetUserId);
+
+      if (!remaining || remaining.length === 0) {
+        const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+        if (authErr) {
+          console.error("[sync] delete auth user error:", authErr);
+        } else {
+          console.log(`[sync] Usuario ${targetUserId} eliminado definitivamente de Supabase Auth.`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[sync] deleteTenantUserFromSupabase error:", err);
+  }
 }
 
 export async function syncTenantToSupabase(id: string, updates: Partial<Tenant>): Promise<void> {
