@@ -238,9 +238,21 @@ export default function AdminPage() {
                             <PlanBadge id={t.plan_id || "basico"} />
                           </td>
                           <td className="px-6 py-4 text-center">
-                            <Badge variant="outline" className={`font-semibold bg-white ${t.estado === "ACTIVO" ? "text-green-700 border-green-200 bg-green-50/50" : t.estado === "SUSPENDIDO" ? "text-amber-700 border-amber-200 bg-amber-50/50" : "text-neutral-500 border-neutral-200"}`}>
-                              {t.estado === "TRIAL" ? "Prueba" : t.estado || "ACTIVO"}
-                            </Badge>
+                            <div className="flex flex-col items-center gap-1">
+                              <Badge variant="outline" className={`font-semibold bg-white ${t.estado === "ACTIVO" ? "text-green-700 border-green-200 bg-green-50/50" : t.estado === "SUSPENDIDO" ? "text-amber-700 border-amber-200 bg-amber-50/50" : t.estado === "TRIAL" ? "text-amber-700 border-amber-200 bg-amber-50/50" : "text-neutral-500 border-neutral-200"}`}>
+                                {t.estado === "TRIAL" ? "Prueba" : t.estado || "ACTIVO"}
+                              </Badge>
+                              {t.estado === "TRIAL" && (
+                                <span className="text-[10px] font-bold text-amber-700">
+                                  {t.trial_hasta 
+                                    ? (() => {
+                                        const d = Math.ceil((new Date(t.trial_hasta).getTime() - Date.now()) / 86400000);
+                                        return d > 0 ? `${d} días rest.` : "Expirado";
+                                      })()
+                                    : "Sin fecha"}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-center font-medium text-neutral-700">{tenantOrds.count}</td>
                           <td className="px-6 py-4 text-right font-bold text-slate-900">{formatRD(tenantOrds.total)}</td>

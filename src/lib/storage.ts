@@ -100,10 +100,18 @@ export async function deletePlan(id: string): Promise<void> {
 // ─── Tenants ──────────────────────────────────────────────────────────────────
 
 export async function getTenants(): Promise<Tenant[]> {
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from("tenants")
     .select("*")
     .order("created_at", { ascending: false });
+  if (error) {
+    const res = await supabase
+      .from("tenants")
+      .select("*")
+      .order("created_at", { ascending: false });
+    data = res.data;
+    error = res.error;
+  }
   if (error) { console.error("[storage] getTenants:", error); return useStore.getState().tenants; }
   const tenants = (data || []).map(dbToTenant);
   useStore.getState().setTenants?.(tenants);

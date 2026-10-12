@@ -352,15 +352,12 @@ export const useStore = create<AppState>()(
           tenants: state.tenants.map((t) => (t.id === id ? { ...t, ...updates } : t)),
           currentTenant: state.currentTenant?.id === id ? { ...state.currentTenant, ...updates } : state.currentTenant,
         }));
-        import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(id, updates));
       },
       addTenant: (tenant) => {
         set((state) => ({ tenants: [...state.tenants, tenant] }));
-        import("@/lib/supabaseSync").then(m => m.createTenantInSupabase(tenant));
       },
       deleteTenant: (id) => {
         set((state) => ({ tenants: state.tenants.filter((t) => t.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('tenants', id));
       },
 
       addUser: (user) => set((state) => {
