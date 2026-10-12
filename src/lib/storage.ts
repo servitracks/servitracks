@@ -191,10 +191,40 @@ export async function getOrdenes(tenantId: string) {
 // ─── Global Config ────────────────────────────────────────────────────────────
 
 export async function getGlobalConfig(): Promise<GlobalConfig> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "global_config")
+      .maybeSingle();
+
+    if (!error && data?.value) {
+      const cfg = data.value as GlobalConfig;
+      useStore.getState().setGlobalConfig?.(cfg);
+      return cfg;
+    }
+  } catch (err) {
+    console.error("[storage] getGlobalConfig Supabase error:", err);
+  }
   return useStore.getState().globalConfig;
 }
 
 export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("platform_settings")
+      .upsert({
+        key: "global_config",
+        value: config,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "key" });
+
+    if (error) {
+      console.error("[storage] saveGlobalConfig Supabase error:", error);
+    }
+  } catch (err) {
+    console.error("[storage] saveGlobalConfig failed:", err);
+  }
   useStore.getState().setGlobalConfig?.(config);
 }
 

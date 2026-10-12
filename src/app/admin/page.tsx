@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useStore } from "@/store/useStore";
 import { 
   Building2, Shield, TrendingUp, Users, Trash2, ExternalLink, Plus, Pencil, 
   Package, LogOut, MoreHorizontal, Key, CreditCard
@@ -30,6 +31,7 @@ import {
   updateTenantAdmin,
   updateTenantPlan,
   updateTenantStatus,
+  updateTenantTrialHasta,
   updateTenantModulosOverride,
   getGlobalConfig,
   saveGlobalConfig,
@@ -103,7 +105,7 @@ export default function AdminPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [totalOrdenes, setTotalOrdenes] = useState(0);
   const [ordenesByTenant, setOrdenesByTenant] = useState<Record<string, { count: number; total: number }>>({});
-  const [globalConfig, setGlobalConfig] = useState<GlobalConfig>({ requirePlanOnRegistration: true, trialDays: 14, defaultPlanId: 'basico' });
+  const [globalConfig, setGlobalConfig] = useState<GlobalConfig>(() => useStore.getState().globalConfig || { requirePlanOnRegistration: true, trialDays: 25, defaultPlanId: 'basico' });
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [openPlan, setOpenPlan] = useState(false);
   const [openBank, setOpenBank] = useState(false);
@@ -114,6 +116,7 @@ export default function AdminPage() {
   const [newPassword, setNewPassword] = useState("");
   const [selectedPlanId, setSelectedPlanId] = useState<PlanId>("basico");
   const [newStatus, setNewStatus] = useState<any>("ACTIVO");
+  const [newTrialDays, setNewTrialDays] = useState<number>(25);
   const [overrides, setOverrides] = useState<any>({});
 
   useEffect(() => {
@@ -145,6 +148,10 @@ export default function AdminPage() {
       await updateTenantAdmin(editingTenant.id, newEmail, newPassword || undefined);
       await updateTenantPlan(editingTenant.id, selectedPlanId);
       await updateTenantStatus(editingTenant.id, newStatus);
+      if (newStatus === "TRIAL") {
+        const calculatedTrialHasta = new Date(Date.now() + newTrialDays * 24 * 60 * 60 * 1000).toISOString();
+        await updateTenantTrialHasta(editingTenant.id, calculatedTrialHasta);
+      }
       await updateTenantModulosOverride(editingTenant.id, overrides);
       toast.success("Información de taller actualizada");
       setOpenEditModal(false);
@@ -265,6 +272,10 @@ export default function AdminPage() {
                                         setNewPassword("");
                                         setSelectedPlanId(t.plan_id || "basico");
                                         setNewStatus(t.estado || "ACTIVO");
+                                        const remainingDays = t.trial_hasta 
+                                          ? Math.max(0, Math.ceil((new Date(t.trial_hasta).getTime() - Date.now()) / 86400000)) 
+                                          : (globalConfig.trialDays || 25);
+                                        setNewTrialDays(remainingDays > 0 ? remainingDays : (globalConfig.trialDays || 25));
                                         setOverrides(t.config?.modulos_override || {});
                                         setOpenEditModal(true);
                                       }}
@@ -337,8 +348,12 @@ export default function AdminPage() {
                   <Button 
                     size="sm" 
                     onClick={async () => { 
-                      await saveGlobalConfig(globalConfig); 
-                      toast.success("Configuración guardada"); 
+                      try {
+                        await saveGlobalConfig(globalConfig); 
+                        toast.success("Configuración guardada exitosamente"); 
+                      } catch {
+                        toast.error("Error al guardar la configuración");
+                      }
                     }}
                     className="h-9 px-4 rounded-lg shadow-sm bg-black text-white hover:bg-neutral-900 font-bold cursor-pointer"
                   >
@@ -484,6 +499,27 @@ export default function AdminPage() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {newStatus === "TRIAL" && (
+                <div className="space-y-2 rounded-xl bg-neutral-50 p-3 border border-neutral-200/80">
+                  <Label htmlFor="edit-trial-days" className="font-semibold text-neutral-700 text-xs uppercase tracking-wider">
+                    Días de Prueba Restantes
+                  </Label>
+                  <div className="flex items-center gap-3">
+                    <Input
+                      id="edit-trial-days"
+                      type="number"
+                      min={1}
+                      className="w-24 rounded-lg border-neutral-200 h-10 bg-white"
+                      value={newTrialDays}
+                      onChange={(e) => setNewTrialDays(Math.max(1, Number(e.target.value)))}
+                    />
+                    <span className="text-xs text-neutral-500 font-medium">
+                      días a partir de hoy (se calculará la nueva fecha límite)
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2 pt-2 border-t border-neutral-100">
                 <Label className="font-semibold text-neutral-700">Forzar Módulos (Overrides)</Label>

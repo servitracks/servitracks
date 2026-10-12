@@ -231,7 +231,7 @@ export const useStore = create<AppState>()(
       plans: [],
       globalConfig: {
         requirePlanOnRegistration: true,
-        trialDays: 14,
+        trialDays: 25,
         defaultPlanId: 'basico',
       },
       licencias: [],
@@ -1377,7 +1377,7 @@ export const useStore = create<AppState>()(
             cajaMovements: [],
             plans: [],
             licencias: [],
-            globalConfig: { requirePlanOnRegistration: true, trialDays: 14, defaultPlanId: 'basico' },
+            globalConfig: { requirePlanOnRegistration: true, trialDays: 25, defaultPlanId: 'basico' },
             printSettings: _persistedState?.printSettings ?? { paperSize: '80mm', showLogo: true, showNcf: true, showItbis: true, showChange: true, copies: 1, footer: '¡Gracias por su preferencia!', warrantyText: 'Garantía: 30 días en mano de obra.', showWarranty: true },
             barcodeSettings: _persistedState?.barcodeSettings ?? { width: 1.5, height: 40, showText: true, fontSize: 14 },
             currentUserId: null,
