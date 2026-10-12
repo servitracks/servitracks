@@ -118,13 +118,22 @@ export default function DashboardLayout() {
 
     async function refreshTenantStatus() {
       try {
-        const { data, error } = await supabaseAdmin
+        let res = await supabaseAdmin
           .from("tenants")
           .select("estado, trial_hasta, plan_id, status")
           .eq("id", currentTenant!.id)
           .single();
-        
-        if (!error && data) {
+
+        if (res.error) {
+          res = await supabase
+            .from("tenants")
+            .select("estado, trial_hasta, plan_id, status")
+            .eq("id", currentTenant!.id)
+            .single();
+        }
+
+        const data = res.data;
+        if (!res.error && data) {
           const updates: Partial<typeof currentTenant> = {};
           if (data.estado && data.estado !== currentTenant!.estado) updates.estado = data.estado;
           if (data.trial_hasta && data.trial_hasta !== currentTenant!.trial_hasta) updates.trial_hasta = data.trial_hasta;
