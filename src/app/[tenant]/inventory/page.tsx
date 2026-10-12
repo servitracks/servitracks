@@ -877,6 +877,7 @@ export default function InventoryPage() {
       
       const existingProduct = products.find(p => 
         (row.sku && p.sku === row.sku) || 
+        (row.barcode && p.barcode === row.barcode) ||
         p.name.toLowerCase() === row.name.trim().toLowerCase()
       );
       
@@ -890,6 +891,7 @@ export default function InventoryPage() {
           stock: existingProduct.stock + (Number(row.quantity) || 0),
           costPrice: row.costPrice > 0 ? row.costPrice : existingProduct.costPrice,
           salePrice: row.salePrice > 0 ? row.salePrice : existingProduct.salePrice,
+          barcode: existingProduct.barcode || row.barcode || undefined,
         });
       } else {
         const newProduct: Product = {
@@ -897,13 +899,13 @@ export default function InventoryPage() {
           tenantId: tenantId,
           name: row.name.trim(),
           sku: row.sku || `SKU-${Date.now()}-${imported}`,
-          barcode: "",
+          barcode: row.barcode || "",
           category: row.category || "Otros",
           brand: row.brand || "",
           supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",
           costPrice: row.costPrice || 0,
           salePrice: row.salePrice || 0,
-          stock: (Number(row.stock) || 0) + (Number(row.quantity) || 0),
+          stock: Number(row.stock) || Number(row.quantity) || 0,
           minStock: row.minStock || 5,
           tax: row.tax || 18,
           location: row.location || "",

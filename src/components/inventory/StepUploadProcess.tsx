@@ -3,13 +3,30 @@
 import { useRef, useState, useCallback } from "react";
 import { SourceType } from "./ImportWizardModal";
 import { ImportRow } from "./StepPreviewEditor";
-import { Upload, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, FileText, Camera, Loader2, AlertCircle, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 import { extractProductsWithAI } from "@/lib/import-ai";
 import { Supplier } from "@/store/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+
+function downloadInventoryTemplate() {
+  const templateHeaders = [
+    "Codigo", "Nombre", "Referencia", "Inv. Total", "Costo", "Con_Itbis", "Precio", "Beneficio"
+  ];
+  const sampleData = [
+    ["00-000023", "5W-30 ACEITE GULF CX FORMULA SYNTHETICO", "", 3, 342.63, 404.30, 675.00, 270.69],
+    ["00-000025", "FILTRO DE ACEITE HYUNDAI / KIA GENUINE 26300-3505", "2630035505 GA", 27, 252.02, 297.38, 750.00, 452.61],
+    ["00-000113", "GENUINE ESCOBILLA SILICONE X1 N.28", "7467180000000", 4, 109.88, 129.65, 250.00, 120.34],
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet([templateHeaders, ...sampleData]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Inventario");
+  XLSX.writeFile(wb, "Plantilla_Inventario_ServiTracks.xlsx");
+}
 
 const CATEGORIES = [
   "Lubricantes",
@@ -62,10 +79,46 @@ interface StepUploadProcessProps {
 function parseNumber(val: unknown): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
   if (!val) return 0;
-  // Convert text, strip currency symbols, replace commas used as thousand separators
-  const str = String(val).replace(/[^0-9.-]/g, "").trim();
+  let str = String(val).trim();
+  str = str.replace(/[^0-9.,-]/g, "").trim();
+  if (!str) return 0;
+
+  const hasComma = str.includes(",");
+  const hasDot = str.includes(".");
+
+  if (hasComma && hasDot) {
+    const lastComma = str.lastIndexOf(",");
+    const lastDot = str.lastIndexOf(".");
+    if (lastComma > lastDot) {
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      str = str.replace(/,/g, "");
+    }
+  } else if (hasComma && !hasDot) {
+    const parts = str.split(",");
+    if (parts.length === 2 && parts[1].length <= 2) {
+      str = str.replace(",", ".");
+    } else {
+      str = str.replace(/,/g, "");
+    }
+  }
+
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
+}
+
+function formatBarcodeOrRef(val: unknown): string {
+  if (!val) return "";
+  const s = String(val).trim();
+  // Expand scientific notation if Excel formatted long number (e.g. 7.46718E+12)
+  if (/^[0-9]+(\.[0-9]+)?e\+[0-9]+$/i.test(s)) {
+    try {
+      return BigInt(Math.round(Number(s))).toString();
+    } catch {
+      return s;
+    }
+  }
+  return s;
 }
 
 function getVal(raw: Record<string, unknown>, keyAliases: string[]): unknown {
@@ -111,53 +164,95 @@ function autoExtractSku(name: string, explicitSku?: string): string {
 }
 
 function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
+  // 1. Nombre
   const nameVal = String(getVal(raw, [
     "name", "nombre", "producto", "descripcion", "descripción", 
     "articulo", "artículo", "item", "detalle"
   ]) ?? "").trim();
 
-  const explicitSku = String(getVal(raw, [
-    "sku", "codigo", "código", "referencia", "ref", "noparte", 
-    "no.parte", "numparte", "parte", "id"
+  // 2. Codigo (SKU / Código interno)
+  const explicitCode = String(getVal(raw, [
+    "codigo", "código", "cod", "sku", "id"
   ]) ?? "").trim();
 
-  const sku = autoExtractSku(nameVal, explicitSku);
+  // 3. Referencia (OEM / Fabricante / Código de barras)
+  const rawRef = getVal(raw, [
+    "referencia", "ref", "noparte", "no.parte", "numparte", "parte", "barcode", "codigobarras"
+  ]);
+  const explicitRef = formatBarcodeOrRef(rawRef);
 
+  let sku = explicitCode;
+  if (!sku) {
+    sku = autoExtractSku(nameVal, explicitRef);
+  }
+  if (!sku && explicitRef) {
+    sku = explicitRef;
+  }
+
+  const barcode = explicitRef || (explicitCode && explicitCode !== sku ? explicitCode : "");
+
+  // 4. Marca
   const brand = String(getVal(raw, [
     "brand", "marca", "fabricante"
   ]) ?? "").trim();
 
+  // 5. Categoría
   const rawCat = String(getVal(raw, [
     "category", "categoria", "categoría", "grupo", "linea", "línea"
   ]) ?? "");
-
   const category = autoDetectCategory(nameVal, rawCat);
 
+  // 6. Proveedor
   const supplier = String(getVal(raw, [
     "supplier", "proveedor", "distribuidor", "suplidor"
   ]) ?? "").trim();
 
-  // Costo: Costo Unit., Costo Unitario, Precio Costo, Con ITBIS Unit., Costo Total, Costo
+  // 7. Costo
   const rawCost = getVal(raw, [
-    "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto", 
-    "conitbisunit", "costo", "costototal"
+    "costo", "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto"
   ]);
-  const costPrice = parseNumber(rawCost);
+  let costPrice = rawCost !== undefined && rawCost !== null && String(rawCost).trim() !== ""
+    ? parseNumber(rawCost)
+    : 0;
 
-  // Precio Venta: Precio Unit., Precio Unitario, Precio Venta, Precio, Precio Total
+  const rawConItbis = getVal(raw, [
+    "conitbis", "con_itbis", "conitbisunit", "costoconitbis"
+  ]);
+  const conItbis = parseNumber(rawConItbis);
+
+  if (costPrice === 0 && conItbis > 0) {
+    costPrice = Math.round((conItbis / 1.18) * 100) / 100;
+  }
+
+  // 8. Precio de Venta
   const rawSale = getVal(raw, [
-    "salePrice", "preciounit", "preciounitario", "precioventa", "preciodeventa", 
-    "precio", "preciototal"
+    "precio", "salePrice", "precioventa", "preciodeventa", "preciounit", "preciounitario", "pvp"
   ]);
-  const salePrice = parseNumber(rawSale);
+  let salePrice = rawSale !== undefined && rawSale !== null && String(rawSale).trim() !== ""
+    ? parseNumber(rawSale)
+    : 0;
 
-  // Cantidad / Stock: Inv.Total, Inv Total, Cantidad, Stock, Qty, Existencia
+  const rawBeneficio = getVal(raw, ["beneficio", "margen", "ganancia", "utilidad"]);
+  if (salePrice === 0 && rawBeneficio !== undefined) {
+    const beneficio = parseNumber(rawBeneficio);
+    if (beneficio > 0 && costPrice > 0) {
+      salePrice = Math.round((costPrice + beneficio) * 100) / 100;
+    }
+  }
+
+  // 9. Cantidad / Stock
   const rawQty = getVal(raw, [
-    "invtotal", "invtotal.", "inv total", "quantity", "cantidad", "qty", 
-    "stock", "existencia", "existencias", "unidades"
+    "invtotal", "invtotal.", "inv total", "inventariototal", "cantidad", "quantity", 
+    "qty", "stock", "existencia", "existencias", "unidades", "cant"
   ]);
-  const quantity = parseNumber(rawQty) || 1;
-  const stock = parseNumber(getVal(raw, ["stock", "existencia"])) || quantity;
+  const quantity = rawQty !== undefined && rawQty !== null && String(rawQty).trim() !== ""
+    ? parseNumber(rawQty)
+    : 0;
+
+  const rawStock = getVal(raw, ["stock", "existencia"]);
+  const stock = rawStock !== undefined && rawStock !== null && String(rawStock).trim() !== ""
+    ? parseNumber(rawStock)
+    : quantity;
 
   const minStock = parseNumber(getVal(raw, ["minstock", "stockminimo", "stockmínimo"])) || 5;
   const tax = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18;
@@ -167,6 +262,8 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
     _id: `row-${index}-${Date.now()}`,
     name: nameVal,
     sku: sku,
+    barcode: barcode,
+    reference: explicitRef,
     brand: brand,
     category: category,
     supplier: supplier,
@@ -191,7 +288,7 @@ function parseCSVtoRows(file: File): Promise<ImportRow[]> {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
         
-        // Intelligent header detection: find the row containing "Nombre", "Producto", "Inv", "Costo", or "Precio"
+        // Intelligent header detection: find the row containing "Codigo", "Nombre", "Producto", "Referencia", "Inv", "Costo", or "Precio"
         const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: false }) as unknown[][];
         let headerRowIndex = 0;
         if (rawRows && rawRows.length > 0) {
@@ -199,7 +296,16 @@ function parseCSVtoRows(file: File): Promise<ImportRow[]> {
             const row = rawRows[i];
             if (Array.isArray(row)) {
               const rowStr = row.map(cell => String(cell).toLowerCase()).join(" ");
-              if (rowStr.includes("nombre") || rowStr.includes("producto") || rowStr.includes("inv") || rowStr.includes("costo") || rowStr.includes("precio")) {
+              if (
+                rowStr.includes("nombre") || 
+                rowStr.includes("producto") || 
+                rowStr.includes("codigo") || 
+                rowStr.includes("código") || 
+                rowStr.includes("referencia") || 
+                rowStr.includes("inv") || 
+                rowStr.includes("costo") || 
+                rowStr.includes("precio")
+              ) {
                 headerRowIndex = i;
                 break;
               }
@@ -313,15 +419,28 @@ export default function StepUploadProcess({
 
   return (
     <div className="space-y-4 py-2">
-      <div>
-        <h2 className="text-base font-bold text-neutral-900">
-          Sube tu {config.label}
-        </h2>
-        <p className="text-sm text-neutral-500 mt-1">
-          {sourceType === "csv"
-            ? "El archivo se procesará localmente en tu dispositivo de forma instantánea."
-            : "El archivo se enviará de forma segura a la IA para extraer los productos."}
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h2 className="text-base font-bold text-neutral-900">
+            Sube tu {config.label}
+          </h2>
+          <p className="text-sm text-neutral-500 mt-1">
+            {sourceType === "csv"
+              ? "El archivo se procesará localmente en tu dispositivo de forma instantánea."
+              : "El archivo se enviará de forma segura a la IA para extraer los productos."}
+          </p>
+        </div>
+        {sourceType === "csv" && !isProcessing && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={downloadInventoryTemplate}
+            className="text-xs font-bold gap-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 rounded-xl cursor-pointer shrink-0"
+          >
+            <Download className="h-3.5 w-3.5" /> Descargar Plantilla Excel
+          </Button>
+        )}
       </div>
 
       {/* Drop Zone */}
