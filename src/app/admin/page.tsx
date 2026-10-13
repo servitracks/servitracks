@@ -5,8 +5,11 @@ import { useNavigate } from "react-router-dom";
 import { useStore } from "@/store/useStore";
 import { 
   Building2, Shield, TrendingUp, Users, Trash2, ExternalLink, Plus, Pencil, 
-  Package, LogOut, MoreHorizontal, Key, CreditCard
+  Package, LogOut, MoreHorizontal, Key, CreditCard,
+  Calendar, Clock, SlidersHorizontal, RotateCcw, Check, Sparkles, Mail, Lock,
+  MessageSquare, FileText, Truck, Workflow, Loader2, AlertCircle, Eye, EyeOff
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useRequireAuth } from "@/lib/useRequireAuth";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -114,10 +117,12 @@ export default function AdminPage() {
   const [openEditModal, setOpenEditModal] = useState(false);
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<PlanId>("basico");
   const [newStatus, setNewStatus] = useState<any>("ACTIVO");
   const [newTrialDays, setNewTrialDays] = useState<number>(25);
   const [overrides, setOverrides] = useState<any>({});
+  const [isSavingTenant, setIsSavingTenant] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -144,6 +149,7 @@ export default function AdminPage() {
 
   async function handleUpdateAdmin() {
     if (!editingTenant) return;
+    setIsSavingTenant(true);
     try {
       await updateTenantAdmin(editingTenant.id, newEmail, newPassword || undefined);
       await updateTenantPlan(editingTenant.id, selectedPlanId);
@@ -153,12 +159,14 @@ export default function AdminPage() {
         await updateTenantTrialHasta(editingTenant.id, calculatedTrialHasta);
       }
       await updateTenantModulosOverride(editingTenant.id, overrides);
-      toast.success("Información de taller actualizada");
+      toast.success("Información del taller actualizada correctamente");
       setOpenEditModal(false);
       setTick(t => t + 1);
     } catch (error) {
       console.error("Error updating tenant:", error);
       toast.error("Error al actualizar el taller");
+    } finally {
+      setIsSavingTenant(false);
     }
   }
 
@@ -438,131 +446,411 @@ export default function AdminPage() {
 
         {/* Modal para editar Credenciales de Taller */}
         <Dialog open={openEditModal} onOpenChange={setOpenEditModal}>
-          <DialogContent className="rounded-2xl border-none shadow-lg max-w-md bg-white p-6">
-            <DialogHeader>
-              <DialogTitle className="font-display text-2xl font-bold flex items-center gap-2 text-neutral-900">
-                <Shield className="h-5 w-5 text-neutral-700" /> Editar Taller
-              </DialogTitle>
-              <DialogDescription className="text-sm text-neutral-500 mt-1">
-                Actualiza el acceso y estado para <strong>{editingTenant?.name}</strong>
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-5 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-email" className="font-semibold text-neutral-700">Correo Administrativo</Label>
-                <div className="relative">
-                  <Users className="absolute left-3 top-3.5 h-4 w-4 text-neutral-400" />
-                  <Input 
-                    id="edit-email" 
-                    type="email" 
-                    className="pl-10 rounded-xl border-neutral-200 h-11" 
-                    value={newEmail} 
-                    onChange={(e) => setNewEmail(e.target.value)} 
-                  />
+          <DialogContent className="sm:max-w-2xl max-w-[95vw] rounded-2xl border border-neutral-200/80 shadow-2xl bg-white p-0 max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header Fijo */}
+            <div className="px-6 py-5 border-b border-neutral-100 bg-white shrink-0 pr-12">
+              <div className="flex items-center gap-3.5">
+                <div 
+                  className="h-11 w-11 rounded-2xl flex items-center justify-center text-white shadow-md font-extrabold text-base shrink-0"
+                  style={{ background: `linear-gradient(135deg, ${editingTenant?.color_primario || '#0f172a'}, ${editingTenant?.color_secundario || '#334155'})` }}
+                >
+                  {editingTenant?.name?.charAt(0)?.toUpperCase() || "T"}
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-pass" className="font-semibold text-neutral-700">Nueva Contraseña (opcional)</Label>
-                <div className="relative">
-                  <Key className="absolute left-3 top-3.5 h-4 w-4 text-neutral-400" />
-                  <Input 
-                    id="edit-pass" 
-                    type="password" 
-                    className="pl-10 rounded-xl border-neutral-200 h-11" 
-                    placeholder="Dejar en blanco para no cambiar"
-                    value={newPassword} 
-                    onChange={(e) => setNewPassword(e.target.value)} 
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-plan" className="font-semibold text-neutral-700">Plan de Suscripción</Label>
-                <Select value={selectedPlanId} onValueChange={(v: string | null) => v && setSelectedPlanId(v as PlanId)}>
-                  <SelectTrigger className="h-11 rounded-xl border-neutral-200">
-                    <SelectValue placeholder="Seleccionar plan" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl shadow-md bg-white border border-neutral-200 p-1">
-                    {plans.map((p) => (
-                      <SelectItem key={p.id} value={p.id} className="rounded-lg hover:bg-neutral-50 cursor-pointer">
-                        <div className="flex items-center justify-between w-full gap-4">
-                          <span className="font-semibold text-neutral-900">{p.nombre}</span>
-                          <span className="text-xs text-neutral-400 font-bold">{formatRD(p.precio_mensual)}/mes</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-status" className="font-semibold text-neutral-700">Estado de la Suscripción</Label>
-                <Select value={newStatus} onValueChange={(v: string | null) => v && setNewStatus(v)}>
-                  <SelectTrigger className="h-11 rounded-xl border-neutral-200">
-                    <SelectValue placeholder="Seleccionar estado" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl shadow-md bg-white border border-neutral-200 p-1">
-                    <SelectItem value="ACTIVO" className="rounded-lg hover:bg-neutral-50 cursor-pointer">Activo</SelectItem>
-                    <SelectItem value="TRIAL" className="rounded-lg hover:bg-neutral-50 cursor-pointer">En Prueba</SelectItem>
-                    <SelectItem value="SUSPENDIDO" className="rounded-lg hover:bg-neutral-50 cursor-pointer text-amber-600 font-bold">Suspendido</SelectItem>
-                    <SelectItem value="CANCELADO" className="rounded-lg hover:bg-neutral-50 cursor-pointer text-red-600 font-bold">Cancelado</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {newStatus === "TRIAL" && (
-                <div className="space-y-2 rounded-xl bg-neutral-50 p-3 border border-neutral-200/80">
-                  <Label htmlFor="edit-trial-days" className="font-semibold text-neutral-700 text-xs uppercase tracking-wider">
-                    Días de Prueba Restantes
-                  </Label>
-                  <div className="flex items-center gap-3">
-                    <Input
-                      id="edit-trial-days"
-                      type="number"
-                      min={1}
-                      className="w-24 rounded-lg border-neutral-200 h-10 bg-white"
-                      value={newTrialDays}
-                      onChange={(e) => setNewTrialDays(Math.max(1, Number(e.target.value)))}
-                    />
-                    <span className="text-xs text-neutral-500 font-medium">
-                      días a partir de hoy (se calculará la nueva fecha límite)
-                    </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <DialogTitle className="font-display text-xl font-bold text-neutral-900 truncate">
+                      {editingTenant?.name || "Editar Taller"}
+                    </DialogTitle>
+                    <Badge variant="outline" className={cn(
+                      "font-bold text-[10px] tracking-wide uppercase px-2.5 py-0.5 rounded-full border",
+                      newStatus === "ACTIVO" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                      newStatus === "TRIAL" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                      newStatus === "SUSPENDIDO" ? "bg-orange-50 text-orange-700 border-orange-200" :
+                      "bg-red-50 text-red-700 border-red-200"
+                    )}>
+                      {newStatus === "TRIAL" ? "En Prueba" : newStatus}
+                    </Badge>
                   </div>
-                </div>
-              )}
-
-              <div className="space-y-2 pt-2 border-t border-neutral-100">
-                <Label className="font-semibold text-neutral-700">Forzar Módulos (Overrides)</Label>
-                <p className="text-[10px] text-neutral-500 mb-2">Activa o desactiva módulos de forma individual para este taller, sin importar su plan base.</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["whatsapp", "facturacion_fiscal", "multisucursal", "logistica", "procesos"] as const).map((m) => (
-                    <label key={m} className="flex items-center gap-2 text-xs font-semibold text-neutral-700 cursor-pointer p-2 rounded-lg border border-neutral-100 hover:bg-neutral-50">
-                      <Switch 
-                        checked={overrides[m] === true}
-                        onCheckedChange={(v) => setOverrides((prev: any) => ({ ...prev, [m]: v }))}
-                      />
-                      <span className="capitalize">{m.replace(/_/g, " ")}</span>
-                    </label>
-                  ))}
-                  <Button 
-                    variant="ghost" 
-                    className="col-span-2 text-xs h-8 text-neutral-500 hover:text-rose-600"
-                    onClick={() => setOverrides({})}
-                  >
-                    Restablecer y usar plan original
-                  </Button>
+                  <DialogDescription className="text-xs text-neutral-500 mt-0.5 truncate">
+                    ID: <span className="font-mono text-neutral-700 font-semibold">{editingTenant?.id}</span> • Gestión de plan, acceso y permisos
+                  </DialogDescription>
                 </div>
               </div>
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-0 mt-2">
-              <Button variant="ghost" onClick={() => setOpenEditModal(false)} className="rounded-xl border border-neutral-200 cursor-pointer">Cancelar</Button>
-              <Button onClick={handleUpdateAdmin} className="bg-black text-white hover:bg-neutral-950 rounded-xl shadow-sm font-bold px-5 cursor-pointer h-10">
-                Guardar Cambios
+            {/* Pestañas de Navegación */}
+            <Tabs defaultValue="subscription" className="w-full flex-1 flex flex-col overflow-hidden">
+              <div className="px-6 pt-3 pb-2 border-b border-neutral-100 bg-neutral-50/60 shrink-0">
+                <TabsList className="bg-neutral-200/70 p-1 rounded-xl w-full grid grid-cols-3">
+                  <TabsTrigger value="subscription" className="rounded-lg text-xs font-semibold py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <CreditCard className="h-3.5 w-3.5 mr-1.5 text-neutral-600" /> Suscripción & Días
+                  </TabsTrigger>
+                  <TabsTrigger value="modules" className="rounded-lg text-xs font-semibold py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <SlidersHorizontal className="h-3.5 w-3.5 mr-1.5 text-neutral-600" /> Módulos & Overrides
+                  </TabsTrigger>
+                  <TabsTrigger value="access" className="rounded-lg text-xs font-semibold py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                    <Lock className="h-3.5 w-3.5 mr-1.5 text-neutral-600" /> Acceso & Cuenta
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              {/* Contenido con Scroll Interior */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                
+                {/* ── TAB 1: Suscripción & Días ── */}
+                <TabsContent value="subscription" className="space-y-6 m-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Plan */}
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-plan" className="font-bold text-xs uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                        <CreditCard className="h-3.5 w-3.5" /> Plan de Suscripción
+                      </Label>
+                      <Select value={selectedPlanId} onValueChange={(v: string | null) => v && setSelectedPlanId(v as PlanId)}>
+                        <SelectTrigger className="h-11 rounded-xl border-neutral-200 bg-white">
+                          <SelectValue placeholder="Seleccionar plan" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl shadow-lg bg-white border border-neutral-200 p-1">
+                          {plans.map((p) => (
+                            <SelectItem key={p.id} value={p.id} className="rounded-lg hover:bg-neutral-50 cursor-pointer py-2">
+                              <div className="flex items-center justify-between w-full gap-4">
+                                <span className="font-bold text-neutral-900">{p.nombre}</span>
+                                <span className="text-xs text-neutral-500 font-semibold">{formatRD(p.precio_mensual)}/mes</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-neutral-400">Define los límites y precio base aplicados al taller.</p>
+                    </div>
+
+                    {/* Estado */}
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-status" className="font-bold text-xs uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                        <Shield className="h-3.5 w-3.5" /> Estado de Cuenta
+                      </Label>
+                      <Select value={newStatus} onValueChange={(v: string | null) => v && setNewStatus(v)}>
+                        <SelectTrigger className="h-11 rounded-xl border-neutral-200 bg-white">
+                          <SelectValue placeholder="Seleccionar estado" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl shadow-lg bg-white border border-neutral-200 p-1">
+                          <SelectItem value="ACTIVO" className="rounded-lg hover:bg-neutral-50 cursor-pointer font-bold text-emerald-700">
+                            ● Activo (Vigente)
+                          </SelectItem>
+                          <SelectItem value="TRIAL" className="rounded-lg hover:bg-neutral-50 cursor-pointer font-bold text-amber-700">
+                            ● En Prueba (Trial)
+                          </SelectItem>
+                          <SelectItem value="SUSPENDIDO" className="rounded-lg hover:bg-neutral-50 cursor-pointer font-bold text-orange-600">
+                            ● Suspendido (Temporal)
+                          </SelectItem>
+                          <SelectItem value="CANCELADO" className="rounded-lg hover:bg-neutral-50 cursor-pointer font-bold text-red-600">
+                            ● Cancelado (Bloqueado)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-neutral-400">Controla si el taller puede iniciar sesión o emitir órdenes.</p>
+                    </div>
+                  </div>
+
+                  {/* Panel de Días de Prueba */}
+                  <div className={cn(
+                    "rounded-2xl border p-5 transition-all space-y-4",
+                    newStatus === "TRIAL" 
+                      ? "border-amber-200/90 bg-gradient-to-br from-amber-50/70 via-white to-amber-50/30 shadow-xs" 
+                      : "border-neutral-200/70 bg-neutral-50/50"
+                  )}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={cn(
+                          "h-8 w-8 rounded-xl flex items-center justify-center",
+                          newStatus === "TRIAL" ? "bg-amber-100 text-amber-800" : "bg-neutral-200/80 text-neutral-600"
+                        )}>
+                          <Calendar className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-sm text-neutral-900">Días de Prueba Restantes</h4>
+                          <p className="text-xs text-neutral-500">
+                            {newStatus === "TRIAL" 
+                              ? "Asigna o extiende el periodo de cortesía para este taller." 
+                              : "Solo aplicable cuando el estado está en 'En Prueba (TRIAL)'."}
+                          </p>
+                        </div>
+                      </div>
+                      {newStatus === "TRIAL" && (
+                        <Badge className="bg-amber-500 text-white font-bold text-[10px] px-2.5 py-0.5">
+                          Prueba Activa
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 pt-1">
+                      {/* Control Numérico con Stepper */}
+                      <div className="flex items-center border border-neutral-300 rounded-xl bg-white shadow-xs overflow-hidden shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setNewTrialDays(Math.max(1, newTrialDays - 1))}
+                          className="px-3.5 py-2.5 hover:bg-neutral-100 text-neutral-600 font-bold text-lg select-none cursor-pointer transition-colors"
+                        >
+                          -
+                        </button>
+                        <Input
+                          id="edit-trial-days"
+                          type="number"
+                          min={1}
+                          className="w-16 h-10 border-0 text-center font-extrabold text-base shadow-none focus-visible:ring-0 p-0"
+                          value={newTrialDays}
+                          onChange={(e) => setNewTrialDays(Math.max(1, Number(e.target.value) || 1))}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setNewTrialDays(newTrialDays + 1)}
+                          className="px-3.5 py-2.5 hover:bg-neutral-100 text-neutral-600 font-bold text-lg select-none cursor-pointer transition-colors"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Botones Presets Rápidos */}
+                      <div className="flex items-center gap-1.5 flex-wrap flex-1">
+                        {[
+                          { label: "+7 días", days: newTrialDays + 7 },
+                          { label: "+15 días", days: newTrialDays + 15 },
+                          { label: "+30 días", days: newTrialDays + 30 },
+                          { label: "25 días (defecto)", days: 25 },
+                        ].map((btn) => (
+                          <Button
+                            key={btn.label}
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs font-semibold rounded-lg border-neutral-200 hover:bg-amber-100/60 hover:border-amber-300 text-neutral-700 cursor-pointer"
+                            onClick={() => setNewTrialDays(btn.days)}
+                          >
+                            {btn.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Fecha Límite Estimada */}
+                    {newStatus === "TRIAL" && (
+                      <div className="bg-amber-100/60 border border-amber-200 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-900">
+                        <Clock className="h-4 w-4 text-amber-700 shrink-0" />
+                        <div>
+                          <span>A partir de hoy, la nueva fecha límite de prueba será: </span>
+                          <strong className="font-extrabold underline decoration-amber-400">
+                            {new Date(Date.now() + newTrialDays * 86400000).toLocaleDateString("es-DO", {
+                              weekday: "long",
+                              day: "numeric",
+                              month: "long",
+                              year: "numeric"
+                            })}
+                          </strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                {/* ── TAB 2: Módulos & Overrides ── */}
+                <TabsContent value="modules" className="space-y-4 m-0">
+                  <div className="flex items-center justify-between pb-1">
+                    <div>
+                      <h4 className="font-bold text-sm text-neutral-900 flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-neutral-700" /> Forzar Módulos Específicos
+                      </h4>
+                      <p className="text-xs text-neutral-500">
+                        Activa o desactiva módulos de forma individual para este taller, sin importar su plan base.
+                      </p>
+                    </div>
+                    {Object.keys(overrides).length > 0 && (
+                      <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 font-bold text-[10px]">
+                        {Object.keys(overrides).length} overrides activos
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { 
+                        id: "whatsapp" as const, 
+                        title: "WhatsApp Bot & Notificaciones", 
+                        desc: "Envío automático de estatus a clientes",
+                        icon: MessageSquare, 
+                        color: "bg-emerald-100 text-emerald-700" 
+                      },
+                      { 
+                        id: "facturacion_fiscal" as const, 
+                        title: "Facturación Fiscal (NCF)", 
+                        desc: "Comprobantes fiscales B01, B02, etc.",
+                        icon: FileText, 
+                        color: "bg-blue-100 text-blue-700" 
+                      },
+                      { 
+                        id: "multisucursal" as const, 
+                        title: "Multisucursal", 
+                        desc: "Gestión y cambio de múltiples sedes",
+                        icon: Building2, 
+                        color: "bg-purple-100 text-purple-700" 
+                      },
+                      { 
+                        id: "logistica" as const, 
+                        title: "Logística y Despachos", 
+                        desc: "Control de entregas y repartos",
+                        icon: Truck, 
+                        color: "bg-amber-100 text-amber-700" 
+                      },
+                      { 
+                        id: "procesos" as const, 
+                        title: "Control de Procesos", 
+                        desc: "Flujos de checklist y estaciones",
+                        icon: Workflow, 
+                        color: "bg-cyan-100 text-cyan-700" 
+                      },
+                    ].map((mod) => {
+                      const isOverridden = overrides[mod.id] !== undefined;
+                      const isEnabled = overrides[mod.id] === true;
+                      const Icon = mod.icon;
+
+                      return (
+                        <div 
+                          key={mod.id} 
+                          className={cn(
+                            "flex items-start justify-between p-3.5 rounded-xl border transition-all",
+                            isEnabled 
+                              ? "bg-neutral-50/80 border-neutral-300 shadow-xs" 
+                              : "bg-white border-neutral-200 hover:border-neutral-300"
+                          )}
+                        >
+                          <div className="flex items-start gap-3 min-w-0 pr-2">
+                            <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5", mod.color)}>
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-xs text-neutral-900">{mod.title}</span>
+                              </div>
+                              <p className="text-[11px] text-neutral-500 mt-0.5 leading-tight">{mod.desc}</p>
+                              <div className="mt-1.5">
+                                {isOverridden ? (
+                                  <span className={cn(
+                                    "text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded",
+                                    isEnabled ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                                  )}>
+                                    {isEnabled ? "Forzado: Activo" : "Forzado: Apagado"}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] text-neutral-400 font-medium">Según plan</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <Switch 
+                            checked={overrides[mod.id] === true}
+                            onCheckedChange={(checked) => setOverrides((prev: any) => ({ ...prev, [mod.id]: checked }))}
+                            className="mt-1 shrink-0"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-2">
+                    <Button 
+                      type="button"
+                      variant="outline" 
+                      size="sm"
+                      className="w-full text-xs font-semibold text-neutral-600 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50/50 rounded-xl gap-2 h-9 border-neutral-200 cursor-pointer"
+                      onClick={() => setOverrides({})}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Restablecer todos los módulos al plan base original
+                    </Button>
+                  </div>
+                </TabsContent>
+
+                {/* ── TAB 3: Acceso & Cuenta ── */}
+                <TabsContent value="access" className="space-y-4 m-0">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-email" className="font-bold text-xs uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                      <Mail className="h-3.5 w-3.5" /> Correo Administrativo
+                    </Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-400" />
+                      <Input 
+                        id="edit-email" 
+                        type="email" 
+                        className="pl-10 rounded-xl border-neutral-200 h-11 bg-white" 
+                        value={newEmail} 
+                        onChange={(e) => setNewEmail(e.target.value)} 
+                        placeholder="admin@taller.com"
+                      />
+                    </div>
+                    <p className="text-[11px] text-neutral-400">
+                      Este correo es el usuario principal de autenticación del taller en la plataforma.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-neutral-100">
+                    <Label htmlFor="edit-pass" className="font-bold text-xs uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5" /> Nueva Contraseña de Acceso
+                    </Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-neutral-400" />
+                      <Input 
+                        id="edit-pass" 
+                        type={showPassword ? "text" : "password"} 
+                        className="pl-10 pr-10 rounded-xl border-neutral-200 h-11 bg-white" 
+                        placeholder="Dejar en blanco para no modificar"
+                        value={newPassword} 
+                        onChange={(e) => setNewPassword(e.target.value)} 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-3 text-neutral-400 hover:text-neutral-700 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="bg-neutral-50 border border-neutral-200/80 rounded-xl p-3 flex items-start gap-2.5 text-xs text-neutral-600">
+                      <Shield className="h-4 w-4 text-neutral-500 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-neutral-800">Seguridad:</strong> Dejar este campo en blanco preservará la contraseña actual del usuario. Si introduces una nueva, se actualizará directamente en Supabase Auth.
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
+
+            {/* Footer Fijo */}
+            <div className="px-6 py-4 bg-neutral-50/90 border-t border-neutral-100 flex items-center justify-between shrink-0">
+              <Button 
+                type="button"
+                variant="ghost" 
+                onClick={() => setOpenEditModal(false)} 
+                className="rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-100 cursor-pointer font-semibold h-10 px-4"
+              >
+                Cancelar
               </Button>
-            </DialogFooter>
+              <Button 
+                type="button"
+                onClick={handleUpdateAdmin} 
+                disabled={isSavingTenant}
+                className="bg-neutral-900 hover:bg-black text-white rounded-xl shadow-md font-bold px-6 cursor-pointer h-10 gap-2 transition-all"
+              >
+                {isSavingTenant ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Guardando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" /> Guardar Cambios
+                  </>
+                )}
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
 
