@@ -121,19 +121,41 @@ function formatBarcodeOrRef(val: unknown): string {
   return s;
 }
 
-function getVal(raw: Record<string, unknown>, keyAliases: string[]): unknown {
-  const normKeys = Object.keys(raw).reduce((acc, k) => {
-    const cleanKey = k.toLowerCase().replace(/[^a-z0-9]/g, "");
-    acc[cleanKey] = raw[k];
-    return acc;
-  }, {} as Record<string, unknown>);
+function getVal(raw: Record<string, unknown>, keyAliases: string[], excludeKeywords: string[] = []): unknown {
+  const keys = Object.keys(raw);
+  const cleanKeyMap = new Map<string, unknown>();
+  for (const k of keys) {
+    cleanKeyMap.set(k.toLowerCase().replace(/[^a-z0-9]/g, ""), raw[k]);
+  }
 
+  // 1. Exact match
   for (const alias of keyAliases) {
     const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (normKeys[cleanAlias] !== undefined && normKeys[cleanAlias] !== null && String(normKeys[cleanAlias]).trim() !== "") {
-      return normKeys[cleanAlias];
+    if (cleanKeyMap.has(cleanAlias)) {
+      const val = cleanKeyMap.get(cleanAlias);
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
+        return val;
+      }
     }
   }
+
+  // 2. Partial match: check if cleanKey contains alias, respecting exclusions
+  for (const alias of keyAliases) {
+    const cleanAlias = alias.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (cleanAlias.length < 3) continue;
+
+    for (const [k, val] of cleanKeyMap.entries()) {
+      if (excludeKeywords.some(ex => k.includes(ex))) {
+        continue;
+      }
+      if (k.includes(cleanAlias)) {
+        if (val !== undefined && val !== null && String(val).trim() !== "") {
+          return val;
+        }
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -168,12 +190,12 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   const nameVal = String(getVal(raw, [
     "name", "nombre", "producto", "descripcion", "descripción", 
     "articulo", "artículo", "item", "detalle"
-  ]) ?? "").trim();
+  ], ["codigo", "cod", "sku", "ref", "referencia", "costo", "precio", "total"]) ?? "").trim();
 
   // 2. Codigo (SKU / Código interno)
   const explicitCode = String(getVal(raw, [
     "codigo", "código", "cod", "sku", "id"
-  ]) ?? "").trim();
+  ], ["barcode", "barra", "barras", "nombre", "descripcion"]) ?? "").trim();
 
   // 3. Referencia (OEM / Fabricante / Código de barras)
   const rawRef = getVal(raw, [
@@ -210,7 +232,7 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   // 7. Costo
   const rawCost = getVal(raw, [
     "costo", "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto"
-  ]);
+  ], ["itbis", "total"]);
   let costPrice = rawCost !== undefined && rawCost !== null && String(rawCost).trim() !== ""
     ? parseNumber(rawCost)
     : 0;
@@ -227,12 +249,12 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   // 8. Precio de Venta
   const rawSale = getVal(raw, [
     "precio", "salePrice", "precioventa", "preciodeventa", "preciounit", "preciounitario", "pvp"
-  ]);
+  ], ["costo", "itbis", "total"]);
   let salePrice = rawSale !== undefined && rawSale !== null && String(rawSale).trim() !== ""
     ? parseNumber(rawSale)
     : 0;
 
-  const rawBeneficio = getVal(raw, ["beneficio", "margen", "ganancia", "utilidad"]);
+  const rawBeneficio = getVal(raw, ["beneficio", "margen", "ganancia", "utilidad"], ["total"]);
   if (salePrice === 0 && rawBeneficio !== undefined) {
     const beneficio = parseNumber(rawBeneficio);
     if (beneficio > 0 && costPrice > 0) {
@@ -259,7 +281,7 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   const location = String(getVal(raw, ["location", "ubicacion", "ubicación", "estante", "tramo"]) ?? "").trim();
 
   return {
-    _id: `row-${index}-${Date.now()}`,
+    _id: `row-${index}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: nameVal,
     sku: sku,
     barcode: barcode,
@@ -278,6 +300,113 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
   };
 }
 
+function scoreHeaderRow(row: unknown[]): number {
+  if (!Array.isArray(row)) return -1;
+  const nonEmptyCells = row.filter(c => c !== undefined && c !== null && String(c).trim() !== "");
+  if (nonEmptyCells.length <= 1) return -1; // Single cell is likely a banner or title
+
+  let score = 0;
+  const joined = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, "")).join(" ");
+
+  const hasCode = /codigo|c[oó]digo|sku|cod|ref|referencia/i.test(joined);
+  const hasName = /nombre|descripcion|descripci[oó]n|producto|articulo|art[ií]culo|detalle|item/i.test(joined);
+  const hasStock = /inv|inventario|cantidad|cant|stock|existencia|qty/i.test(joined);
+  const hasCost = /costo|cost/i.test(joined);
+  const hasPrice = /precio|price|pvp|venta/i.test(joined);
+  const hasTax = /itbis|iva|tax/i.test(joined);
+  const hasBenefit = /beneficio|margen|ganancia|utilidad/i.test(joined);
+
+  if (hasName) score += 4;
+  if (hasCode) score += 3;
+  if (hasStock) score += 3;
+  if (hasCost) score += 3;
+  if (hasPrice) score += 3;
+  if (hasTax) score += 2;
+  if (hasBenefit) score += 2;
+
+  return score;
+}
+
+function parseWorksheet(worksheet: XLSX.WorkSheet): ImportRow[] {
+  const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: false }) as unknown[][];
+  if (!rawRows || rawRows.length === 0) return [];
+
+  // Find header row with scoring
+  let bestHeaderIndex = 0;
+  let bestScore = -1;
+
+  for (let i = 0; i < Math.min(rawRows.length, 25); i++) {
+    const row = rawRows[i];
+    const s = scoreHeaderRow(row);
+    if (s > bestScore) {
+      bestScore = s;
+      bestHeaderIndex = i;
+    }
+  }
+
+  // If score is reasonable (>= 4, meaning at least 2 distinct column keywords matched)
+  if (bestScore >= 4) {
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: bestHeaderIndex, defval: "", raw: false }) as Record<string, unknown>[];
+    const parsed = jsonData
+      .map((row, idx) => toImportRow(row, idx))
+      .filter((r) => r.name.trim() !== "");
+
+    if (parsed.length > 0) return parsed;
+  }
+
+  // Positional fallback if header scoring yielded nothing or 0 products:
+  // Layout matching typical format: Col 0: Codigo, Col 1: Nombre, Col 2: Ref, Col 3: Inv. Total, Col 4: Costo, Col 6: Con_Itbis, Col 8: Precio, Col 10: Beneficio
+  const dataRows = rawRows.slice(bestScore >= 0 ? bestHeaderIndex + 1 : 0);
+  const positionalRows: ImportRow[] = [];
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const r = dataRows[i];
+    if (!Array.isArray(r) || r.length < 2) continue;
+    const col0 = String(r[0] ?? "").trim();
+    const col1 = String(r[1] ?? "").trim();
+    if (!col1) continue;
+
+    const col1Lower = col1.toLowerCase();
+    if (col1Lower === "nombre" || col1Lower.includes("total general") || col1Lower.includes("subtotal") || col1Lower.includes("reporte de")) continue;
+
+    const explicitCode = col0;
+    const name = col1;
+    const explicitRef = formatBarcodeOrRef(r[2]);
+    const quantity = parseNumber(r[3]);
+    let costPrice = parseNumber(r[4]);
+    const conItbis = parseNumber(r[6]);
+    if (costPrice === 0 && conItbis > 0) costPrice = Math.round((conItbis / 1.18) * 100) / 100;
+    let salePrice = parseNumber(r[8]);
+    const beneficio = parseNumber(r[10]);
+    if (salePrice === 0 && beneficio > 0 && costPrice > 0) salePrice = Math.round((costPrice + beneficio) * 100) / 100;
+
+    let sku = explicitCode;
+    if (!sku) sku = autoExtractSku(name, explicitRef);
+    if (!sku && explicitRef) sku = explicitRef;
+
+    positionalRows.push({
+      _id: `row-pos-${i}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name,
+      sku: sku || `SKU-${i + 1}`,
+      barcode: explicitRef,
+      reference: explicitRef,
+      brand: "",
+      category: autoDetectCategory(name),
+      supplier: "",
+      costPrice,
+      salePrice,
+      quantity,
+      stock: quantity,
+      minStock: 5,
+      tax: 18,
+      location: "",
+      _hasError: false,
+    });
+  }
+
+  return positionalRows;
+}
+
 function parseCSVtoRows(file: File): Promise<ImportRow[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -285,40 +414,20 @@ function parseCSVtoRows(file: File): Promise<ImportRow[]> {
       try {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
         
-        // Intelligent header detection: find the row containing "Codigo", "Nombre", "Producto", "Referencia", "Inv", "Costo", or "Precio"
-        const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: false }) as unknown[][];
-        let headerRowIndex = 0;
-        if (rawRows && rawRows.length > 0) {
-          for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
-            const row = rawRows[i];
-            if (Array.isArray(row)) {
-              const rowStr = row.map(cell => String(cell).toLowerCase()).join(" ");
-              if (
-                rowStr.includes("nombre") || 
-                rowStr.includes("producto") || 
-                rowStr.includes("codigo") || 
-                rowStr.includes("código") || 
-                rowStr.includes("referencia") || 
-                rowStr.includes("inv") || 
-                rowStr.includes("costo") || 
-                rowStr.includes("precio")
-              ) {
-                headerRowIndex = i;
-                break;
-              }
-            }
+        let bestRows: ImportRow[] = [];
+        
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          if (!worksheet) continue;
+          const rows = parseWorksheet(worksheet);
+          if (rows.length > bestRows.length) {
+            bestRows = rows;
           }
         }
 
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRowIndex, defval: "", raw: false }) as Record<string, unknown>[];
-        const rows = jsonData
-          .map((row, i) => toImportRow(row, i))
-          .filter((r) => r.name.trim() !== "");
-
-        resolve(rows);
+        console.log(`[ServiTracks Import] Total de productos reconocidos: ${bestRows.length}`);
+        resolve(bestRows);
       } catch (err) {
         reject(err);
       }
