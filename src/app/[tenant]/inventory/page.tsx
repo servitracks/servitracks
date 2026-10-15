@@ -981,6 +981,7 @@ export default function InventoryPage() {
           stock: existingProduct.stock + itemQty,
           costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
           salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
+          barcode: existingProduct.barcode || row.barcode || undefined,
         };
         prodsToUpdate.push(updated);
         if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), updated);
@@ -991,7 +992,7 @@ export default function InventoryPage() {
           tenantId: tenantId,
           name: cleanName,
           sku: cleanSku || `SKU-${now}-${imported}`,
-          barcode: "",
+          barcode: row.barcode || "",
           category: row.category || "Otros",
           brand: row.brand || "",
           supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",

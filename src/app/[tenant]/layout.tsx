@@ -118,18 +118,32 @@ export default function DashboardLayout() {
 
     async function refreshTenantStatus() {
       try {
-        const { data, error } = await supabaseAdmin
+        let res = await supabaseAdmin
           .from("tenants")
           .select("estado, trial_hasta, plan_id, status")
           .eq("id", currentTenant!.id)
           .single();
-        
-        if (!error && data) {
+
+        if (res.error) {
+          res = await supabase
+            .from("tenants")
+            .select("estado, trial_hasta, plan_id, status")
+            .eq("id", currentTenant!.id)
+            .single();
+        }
+
+        const data = res.data;
+        if (!res.error && data) {
           const updates: Partial<typeof currentTenant> = {};
           if (data.estado && data.estado !== currentTenant!.estado) updates.estado = data.estado;
-          if (data.trial_hasta && data.trial_hasta !== currentTenant!.trial_hasta) updates.trial_hasta = data.trial_hasta;
           if (data.plan_id && data.plan_id !== currentTenant!.plan_id) updates.plan_id = data.plan_id;
           if (data.status && data.status !== currentTenant!.status) updates.status = data.status;
+
+          const currentTs = currentTenant!.trial_hasta ? new Date(currentTenant!.trial_hasta).getTime() : 0;
+          const remoteTs = data.trial_hasta ? new Date(data.trial_hasta).getTime() : 0;
+          if (remoteTs !== currentTs && data.trial_hasta) {
+            updates.trial_hasta = data.trial_hasta;
+          }
           
           if (Object.keys(updates).length > 0) {
             console.log("[Trial Check] Actualizando estado del tenant desde Supabase:", updates);

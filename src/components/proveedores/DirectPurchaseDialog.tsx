@@ -323,35 +323,196 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
   };
 
   const processSpreadsheet = async (file: File) => {
+    const parseNum = (val: unknown): number => {
+      if (typeof val === "number") return isNaN(val) ? 0 : val;
+      if (!val) return 0;
+      let str = String(val).trim().replace(/[^0-9.,-]/g, "").trim();
+      if (!str) return 0;
+      const hasComma = str.includes(",");
+      const hasDot = str.includes(".");
+      if (hasComma && hasDot) {
+        if (str.lastIndexOf(",") > str.lastIndexOf(".")) {
+          str = str.replace(/\./g, "").replace(",", ".");
+        } else {
+          str = str.replace(/,/g, "");
+        }
+      } else if (hasComma && !hasDot) {
+        const parts = str.split(",");
+        if (parts.length === 2 && parts[1].length <= 2) {
+          str = str.replace(",", ".");
+        } else {
+          str = str.replace(/,/g, "");
+        }
+      }
+      const n = parseFloat(str);
+      return isNaN(n) ? 0 : n;
+    };
+
+    const formatRef = (val: unknown): string => {
+      if (!val) return "";
+      const s = String(val).trim();
+      if (/^[0-9]+(\.[0-9]+)?e\+[0-9]+$/i.test(s)) {
+        try {
+          return BigInt(Math.round(Number(s))).toString();
+        } catch {
+          return s;
+        }
+      }
+      return s;
+    };
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
         const workbook = XLSX.read(data, { type: "array" });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as any[];
         
-        const newItems = jsonData.map((row, idx) => {
-          const productName = String(row.name ?? row.Nombre ?? row.NOMBRE ?? row.producto ?? row.Producto ?? row.Descripción ?? row.Descripcion ?? "");
-          const quantity = Number(row.quantity ?? row.Cantidad ?? row.cantidad ?? row.CANTIDAD ?? row.qty ?? 1);
-          const unitPrice = Number(row.costPrice ?? row["Precio Costo"] ?? row.costo ?? row.Costo ?? row.Precio ?? row.precio ?? 0);
-          
-          const matchedProduct = products.find(p => p.name.toLowerCase() === productName.toLowerCase());
-          return {
-            id: `poi_${Date.now()}_${idx}`,
-            productId: matchedProduct?.id || "",
-            productName: productName,
-            quantity: quantity,
-            unitPrice: unitPrice,
-            salePrice: matchedProduct?.salePrice || Math.round(unitPrice * 1.3),
-            receivedQuantity: quantity,
-          };
-        }).filter(item => item.productName.trim() !== "");
+        let bestItems: any[] = [];
 
-        if (newItems.length > 0) {
-          setItems(newItems);
-          toast.success(`Se importaron ${newItems.length} productos del Excel`, { id: "scan-toast" });
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          if (!worksheet) continue;
+
+          const rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "", raw: false }) as unknown[][];
+          if (!rawRows || rawRows.length === 0) continue;
+
+          let bestHeaderIndex = 0;
+          let bestScore = -1;
+
+          for (let i = 0; i < Math.min(rawRows.length, 25); i++) {
+            const row = rawRows[i];
+            if (!Array.isArray(row)) continue;
+            const nonEmpty = row.filter(c => c !== undefined && c !== null && String(c).trim() !== "");
+            if (nonEmpty.length <= 1) continue;
+
+            const joined = row.map(c => String(c).toLowerCase().replace(/[^a-z0-9]/g, "")).join(" ");
+            let score = 0;
+            if (/nombre|descripcion|descripci[oó]n|producto|articulo|art[ií]culo|detalle|item/i.test(joined)) score += 4;
+            if (/codigo|c[oó]digo|sku|cod|ref|referencia/i.test(joined)) score += 3;
+            if (/inv|inventario|cantidad|cant|stock|existencia|qty/i.test(joined)) score += 3;
+            if (/costo|cost/i.test(joined)) score += 3;
+            if (/precio|price|pvp|venta/i.test(joined)) score += 3;
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestHeaderIndex = i;
+            }
+          }
+
+          let sheetItems: any[] = [];
+
+          if (bestScore >= 4) {
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: bestHeaderIndex, defval: "", raw: false }) as any[];
+            sheetItems = jsonData.map((row, idx) => {
+              const keys = Object.keys(row);
+              const cleanMap = new Map<string, any>();
+              for (const k of keys) {
+                cleanMap.set(k.toLowerCase().replace(/[^a-z0-9]/g, ""), row[k]);
+              }
+
+              const getFld = (aliases: string[], exclusions: string[] = []) => {
+                for (const a of aliases) {
+                  const clean = a.toLowerCase().replace(/[^a-z0-9]/g, "");
+                  if (cleanMap.has(clean)) {
+                    const v = cleanMap.get(clean);
+                    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+                  }
+                }
+                for (const a of aliases) {
+                  const clean = a.toLowerCase().replace(/[^a-z0-9]/g, "");
+                  if (clean.length < 3) continue;
+                  for (const [k, v] of cleanMap.entries()) {
+                    if (exclusions.some(ex => k.includes(ex))) continue;
+                    if (k.includes(clean)) {
+                      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+                    }
+                  }
+                }
+                return undefined;
+              };
+
+              const productName = String(getFld(
+                ["name", "nombre", "producto", "descripcion", "descripción", "articulo", "item"],
+                ["codigo", "cod", "sku", "ref", "referencia", "costo", "precio", "total"]
+              ) ?? "").trim();
+
+              const explicitCode = String(getFld(["codigo", "código", "sku", "id"], ["barcode", "barra", "barras", "nombre"]) ?? "").trim();
+              const explicitRef = formatRef(getFld(["referencia", "ref", "barcode", "codigobarras"]));
+              const sku = explicitCode || explicitRef;
+
+              const rawQty = getFld(["invtotal", "invtotal.", "inv total", "inventariototal", "cantidad", "quantity", "qty", "stock", "existencia", "cant"]);
+              const quantity = parseNum(rawQty) || 1;
+
+              const rawCost = getFld(["costo", "costPrice", "costounit", "costounitario", "preciocosto", "costodecosto"], ["itbis", "total"]);
+              let unitPrice = parseNum(rawCost);
+              const rawConItbis = getFld(["conitbis", "con_itbis", "conitbisunit"]);
+              if (unitPrice === 0 && rawConItbis) {
+                unitPrice = Math.round((parseNum(rawConItbis) / 1.18) * 100) / 100;
+              }
+
+              const rawSale = getFld(["precio", "salePrice", "precioventa", "preciodeventa", "pvp"], ["costo", "itbis", "total"]);
+              let salePrice = parseNum(rawSale);
+
+              const matchedProduct = products.find(p => 
+                (sku && p.sku === sku) || 
+                (p.name && productName && p.name.toLowerCase() === productName.toLowerCase())
+              );
+
+              return {
+                id: `poi_${Date.now()}_${idx}`,
+                productId: matchedProduct?.id || "",
+                productName: productName,
+                quantity: quantity,
+                unitPrice: unitPrice > 0 ? unitPrice : (matchedProduct?.costPrice || 0),
+                salePrice: salePrice > 0 ? salePrice : (matchedProduct?.salePrice || Math.round((unitPrice || 100) * 1.3)),
+                receivedQuantity: quantity,
+              };
+            }).filter(item => item.productName.trim() !== "");
+          }
+
+          // Fallback positional if needed
+          if (sheetItems.length === 0) {
+            const dataRows = rawRows.slice(bestScore >= 0 ? bestHeaderIndex + 1 : 0);
+            for (let i = 0; i < dataRows.length; i++) {
+              const r = dataRows[i];
+              if (!Array.isArray(r) || r.length < 2) continue;
+              const col0 = String(r[0] ?? "").trim();
+              const col1 = String(r[1] ?? "").trim();
+              if (!col1 || col1.toLowerCase().includes("total") || col1.toLowerCase().includes("reporte")) continue;
+
+              const productName = col1;
+              const sku = col0 || formatRef(r[2]);
+              const quantity = parseNum(r[3]) || 1;
+              let unitPrice = parseNum(r[4]);
+              const conItbis = parseNum(r[6]);
+              if (unitPrice === 0 && conItbis > 0) unitPrice = Math.round((conItbis / 1.18) * 100) / 100;
+              let salePrice = parseNum(r[8]);
+
+              const matchedProduct = products.find(p => 
+                (sku && p.sku === sku) || 
+                (p.name && p.name.toLowerCase() === productName.toLowerCase())
+              );
+
+              sheetItems.push({
+                id: `poi_pos_${Date.now()}_${i}`,
+                productId: matchedProduct?.id || "",
+                productName: productName,
+                quantity: quantity,
+                unitPrice: unitPrice > 0 ? unitPrice : (matchedProduct?.costPrice || 0),
+                salePrice: salePrice > 0 ? salePrice : (matchedProduct?.salePrice || Math.round((unitPrice || 100) * 1.3)),
+                receivedQuantity: quantity,
+              });
+            }
+          }
+
+          if (sheetItems.length > bestItems.length) {
+            bestItems = sheetItems;
+          }
+        }
+
+        if (bestItems.length > 0) {
+          setItems(bestItems);
+          toast.success(`Se importaron ${bestItems.length} productos del Excel`, { id: "scan-toast" });
         } else {
           toast.error("No se encontraron productos válidos en el Excel", { id: "scan-toast" });
         }

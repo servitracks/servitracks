@@ -17,6 +17,8 @@ export interface ImportRow {
   _id: string;
   name: string;
   sku: string;
+  barcode?: string;
+  reference?: string;
   brand: string;
   category: string;
   supplier: string;
@@ -257,6 +259,11 @@ export default function StepPreviewEditor({
                           placeholder="SKU / Código"
                           className="h-9 text-xs font-mono font-bold tracking-wide rounded-xl border border-neutral-200 hover:border-neutral-300 focus:border-neutral-900 bg-neutral-50/50 uppercase"
                         />
+                        {(row.reference || row.barcode) && (row.reference || row.barcode) !== row.sku && (
+                          <div className="text-[10px] text-neutral-400 font-mono truncate mt-0.5 px-1" title={`Ref: ${row.reference || row.barcode}`}>
+                            Ref: {row.reference || row.barcode}
+                          </div>
+                        )}
                       </td>
 
                       {/* Brand */}

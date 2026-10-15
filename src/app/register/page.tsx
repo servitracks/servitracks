@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { useStore } from "@/store/useStore";
 import type { Tenant, TenantUser } from "@/store/types";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
-import { getPlans } from "@/lib/storage";
+import { getPlans, getGlobalConfig } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 
 // Dominican Republic provinces list
@@ -574,8 +574,11 @@ export default function RegisterPage() {
 
       // 2. Insertar Tenant usando supabaseAdmin
       setProvisioningStep(1);
-      const TRIAL_DAYS = 7;
-      const trialEndDate = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const globalConfig = await getGlobalConfig();
+      const trialDays = (globalConfig && typeof globalConfig.trialDays === 'number' && globalConfig.trialDays > 0)
+        ? globalConfig.trialDays
+        : 25;
+      const trialEndDate = new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000).toISOString();
 
       const { data: tenantData, error: tenantError } = await supabaseAdmin
         .from("tenants")

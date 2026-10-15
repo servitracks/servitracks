@@ -100,10 +100,18 @@ export async function deletePlan(id: string): Promise<void> {
 // ─── Tenants ──────────────────────────────────────────────────────────────────
 
 export async function getTenants(): Promise<Tenant[]> {
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from("tenants")
     .select("*")
     .order("created_at", { ascending: false });
+  if (error) {
+    const res = await supabase
+      .from("tenants")
+      .select("*")
+      .order("created_at", { ascending: false });
+    data = res.data;
+    error = res.error;
+  }
   if (error) { console.error("[storage] getTenants:", error); return useStore.getState().tenants; }
   const tenants = (data || []).map(dbToTenant);
   useStore.getState().setTenants?.(tenants);
@@ -111,9 +119,84 @@ export async function getTenants(): Promise<Tenant[]> {
 }
 
 export async function deleteTenant(id: string): Promise<void> {
-  const { error } = await supabaseAdmin.from("tenants").delete().eq("id", id);
-  if (error) { console.error("[storage] deleteTenant:", error); throw error; }
+  try {
+    // 1. Obtener los usuarios vinculados a este taller
+    const { data: usersOfTenant } = await supabaseAdmin
+      .from("tenant_users")
+      .select("user_id")
+      .eq("tenant_id", id);
+
+    // 2. Eliminar el taller
+    const { error } = await supabaseAdmin.from("tenants").delete().eq("id", id);
+    if (error) { console.error("[storage] deleteTenant:", error); throw error; }
+
+    // 3. Eliminar los registros de membresía en tenant_users
+    await supabaseAdmin.from("tenant_users").delete().eq("tenant_id", id);
+
+    // 4. Si los usuarios no pertenecen a ningún otro taller, eliminarlos de Supabase Auth
+    if (usersOfTenant && usersOfTenant.length > 0) {
+      for (const u of usersOfTenant) {
+        if (!u.user_id) continue;
+        const { data: remaining } = await supabaseAdmin
+          .from("tenant_users")
+          .select("id")
+          .eq("user_id", u.user_id);
+        
+        if (!remaining || remaining.length === 0) {
+          await supabaseAdmin.auth.admin.deleteUser(u.user_id).catch(err => {
+            console.error(`[storage] Error eliminando auth user ${u.user_id}:`, err);
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[storage] deleteTenant fallo:", err);
+    throw err;
+  }
   useStore.getState().deleteTenant?.(id);
+}
+
+export async function deleteUserDefinitively(userIdOrEmail: string, tenantId?: string): Promise<void> {
+  try {
+    // 1. Localizar el registro en tenant_users para obtener el user_id de Auth
+    let findQuery = supabaseAdmin
+      .from("tenant_users")
+      .select("id, user_id, email, tenant_id")
+      .or(`id.eq.${userIdOrEmail},user_id.eq.${userIdOrEmail},email.eq.${userIdOrEmail}`);
+    if (tenantId) findQuery = findQuery.eq("tenant_id", tenantId);
+    
+    const { data: records } = await findQuery;
+    const targetUserId = records?.[0]?.user_id || (userIdOrEmail.includes("-") ? userIdOrEmail : null);
+
+    // 2. Eliminar de tenant_users
+    let delQuery = supabaseAdmin
+      .from("tenant_users")
+      .delete()
+      .or(`id.eq.${userIdOrEmail},user_id.eq.${userIdOrEmail},email.eq.${userIdOrEmail}`);
+    if (tenantId) delQuery = delQuery.eq("tenant_id", tenantId);
+    await delQuery;
+
+    // 3. Si no le quedan otros talleres, eliminar definitivamente de Supabase Auth
+    if (targetUserId) {
+      const { data: remaining } = await supabaseAdmin
+        .from("tenant_users")
+        .select("id")
+        .eq("user_id", targetUserId);
+
+      if (!remaining || remaining.length === 0) {
+        const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+        if (authErr) {
+          console.error("[storage] Error eliminando usuario de auth.users:", authErr);
+        } else {
+          console.log(`[storage] Usuario ${targetUserId} eliminado definitivamente de Supabase Auth.`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[storage] deleteUserDefinitively fallo:", err);
+  } finally {
+    useStore.getState().deleteUser?.(userIdOrEmail);
+  }
 }
 
 export async function updateTenantAdmin(id: string, email: string, password?: string): Promise<void> {
@@ -191,10 +274,40 @@ export async function getOrdenes(tenantId: string) {
 // ─── Global Config ────────────────────────────────────────────────────────────
 
 export async function getGlobalConfig(): Promise<GlobalConfig> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("platform_settings")
+      .select("value")
+      .eq("key", "global_config")
+      .maybeSingle();
+
+    if (!error && data?.value) {
+      const cfg = data.value as GlobalConfig;
+      useStore.getState().setGlobalConfig?.(cfg);
+      return cfg;
+    }
+  } catch (err) {
+    console.error("[storage] getGlobalConfig Supabase error:", err);
+  }
   return useStore.getState().globalConfig;
 }
 
 export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("platform_settings")
+      .upsert({
+        key: "global_config",
+        value: config,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "key" });
+
+    if (error) {
+      console.error("[storage] saveGlobalConfig Supabase error:", error);
+    }
+  } catch (err) {
+    console.error("[storage] saveGlobalConfig failed:", err);
+  }
   useStore.getState().setGlobalConfig?.(config);
 }
 
