@@ -3,7 +3,7 @@
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
 import { supabaseAdmin } from "@/lib/supabase";
-import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab } from "@/store/types";
+import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab, InventorySession, Tenant } from "@/store/types";
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
@@ -272,11 +272,21 @@ export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTa
   }));
 }
 
+export async function loadInventorySessionsFromSupabase(tenantId: string): Promise<InventorySession[]> {
+  const { data, error } = await supabaseAdmin
+    .from("inventory_sessions")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false });
+  if (error) { console.error("[sync] inventory_sessions:", error); return []; }
+  return (data || []).map(dbToInventorySession);
+}
+
 export async function downloadFullStateFromSupabase(tenantId: string) {
   const [
     customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices,
     cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs, inventorySessions
   ] = await Promise.all([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
@@ -301,10 +311,11 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadQuoteRequestsFromSupabase(tenantId),
     loadActivityLogsFromSupabase(tenantId),
     loadUsersFromSupabase(tenantId),
-    loadOpenTabsFromSupabase(tenantId)
+    loadOpenTabsFromSupabase(tenantId),
+    loadInventorySessionsFromSupabase(tenantId)
   ]);
   
-  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs };
+  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs, inventorySessions };
 }
 
 
@@ -410,6 +421,31 @@ function dbToActivityLog(row: any): ActivityLog {
 }
 function activityLogToDb(log: ActivityLog) {
   return { id: log.id, tenant_id: log.tenantId, user_id: log.userId, user_name: log.userName, user_role: log.userRole, action: log.action, details: log.details, module: log.module, created_at: log.createdAt };
+}
+
+function dbToInventorySession(row: any): InventorySession {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    status: row.status,
+    auditorId: row.auditor_id || undefined,
+    discrepancies: row.discrepancies || [],
+    createdAt: row.created_at,
+    completedAt: row.completed_at || undefined,
+  };
+}
+function inventorySessionToDb(s: InventorySession) {
+  return {
+    id: s.id,
+    tenant_id: s.tenantId,
+    name: s.name,
+    status: s.status,
+    auditor_id: s.auditorId || null,
+    discrepancies: s.discrepancies || [],
+    created_at: s.createdAt,
+    completed_at: s.completedAt || null,
+  };
 }
 
 // ─── NEW MAPPERS ──────────────────────────────────────────────────────────────
@@ -540,18 +576,18 @@ function workOrderToDb(o: WorkOrder) {
     id: o.id,
     tenant_id: o.tenantId,
     customer_id: o.customerId,
-    vehicle_id: o.vehicleId,
+    vehicle_id: o.vehicleId || "general",
     mechanic_id: o.mechanicId || null,
     km: o.km || null,
     km_unit: o.kmUnit || null,
     status: o.status,
-    description: o.description,
-    service_ids: o.serviceIds || null,
-    parts: o.parts || null,
+    description: o.description || "",
+    service_ids: o.serviceIds || [],
+    parts: o.parts || [],
     estimated_time: o.estimatedTime || null,
     notes: o.notes || null,
-    checklist: o.checklist || null,
-    total: o.total,
+    checklist: o.checklist || [],
+    total: o.total || 0,
     created_at: o.createdAt,
     updated_at: o.updatedAt,
   };
@@ -808,14 +844,85 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     customer_id: t.customerId,
     mechanic_id: t.mechanicId,
     order_id: t.orderId || null,
-    discount: t.discount || null,
-    discount_type: t.discountType || null,
     items: t.items,
     created_at: t.createdAt,
     updated_at: t.updatedAt
   }));
   const { error } = await supabaseAdmin.from("open_tabs").upsert(dbItems, { onConflict: "id" });
   if (error) console.error("[sync] upsert open_tabs:", error);
+}
+
+export async function upsertInventorySessions(items: InventorySession[]): Promise<void> {
+  if (items.length === 0) return;
+  const { error } = await supabaseAdmin.from("inventory_sessions").upsert(items.map(inventorySessionToDb), { onConflict: "id" });
+  if (error) console.error("[sync] upsert inventory_sessions:", error);
+}
+
+export async function deleteTenantUserFromSupabase(id: string, tenantId?: string): Promise<void> {
+  let query = supabaseAdmin.from("tenant_users").delete().or(`id.eq.${id},user_id.eq.${id}`);
+  if (tenantId) query = query.eq("tenant_id", tenantId);
+  const { error } = await query;
+  if (error) console.error("[sync] delete tenant_user error:", error);
+}
+
+export async function syncTenantToSupabase(id: string, updates: Partial<Tenant>): Promise<void> {
+  const dbUpdates: Record<string, any> = {};
+  if (updates.name !== undefined) dbUpdates.name = updates.name;
+  if (updates.slug !== undefined) dbUpdates.slug = updates.slug;
+  if (updates.logo !== undefined) dbUpdates.logo = updates.logo || null;
+  if (updates.address !== undefined) dbUpdates.address = updates.address || null;
+  if (updates.phone !== undefined) dbUpdates.phone = updates.phone || null;
+  if (updates.email !== undefined) dbUpdates.email = updates.email || null;
+  if (updates.rnc !== undefined) dbUpdates.rnc = updates.rnc || null;
+  if (updates.status !== undefined) dbUpdates.status = updates.status;
+  if (updates.wasenderApiKey !== undefined) dbUpdates.wasender_api_key = updates.wasenderApiKey || null;
+  if (updates.wasenderPhone !== undefined) dbUpdates.wasender_phone = updates.wasenderPhone || null;
+  if (updates.monto_caja_chica !== undefined) dbUpdates.monto_caja_chica = updates.monto_caja_chica;
+  if (updates.monto_actual_caja_chica !== undefined) dbUpdates.monto_actual_caja_chica = updates.monto_actual_caja_chica;
+  if (updates.plan_id !== undefined) dbUpdates.plan_id = updates.plan_id;
+  if (updates.estado !== undefined) dbUpdates.estado = updates.estado;
+  if (updates.trial_hasta !== undefined) dbUpdates.trial_hasta = updates.trial_hasta;
+  if (updates.max_sucursales !== undefined) dbUpdates.max_sucursales = updates.max_sucursales;
+  if (updates.color_primario !== undefined) dbUpdates.color_primario = updates.color_primario;
+  if (updates.color_secundario !== undefined) dbUpdates.color_secundario = updates.color_secundario;
+  
+  if (updates.config !== undefined || updates.adminPin !== undefined) {
+    const configToSave = { ...(updates.config || {}) };
+    if (updates.adminPin !== undefined) {
+      configToSave.adminPin = updates.adminPin;
+    }
+    dbUpdates.config = configToSave;
+  }
+
+  if (Object.keys(dbUpdates).length === 0) return;
+  const { error } = await supabaseAdmin.from("tenants").update(dbUpdates).eq("id", id);
+  if (error) console.error("[sync] error updating tenant in Supabase:", error);
+}
+
+export async function createTenantInSupabase(t: Tenant): Promise<void> {
+  const dbRow = {
+    id: t.id,
+    name: t.name,
+    slug: t.slug,
+    logo: t.logo || null,
+    address: t.address || null,
+    phone: t.phone || null,
+    email: t.email || null,
+    rnc: t.rnc || null,
+    status: t.status || 'pending',
+    wasender_api_key: t.wasenderApiKey || null,
+    wasender_phone: t.wasenderPhone || null,
+    monto_caja_chica: t.monto_caja_chica || 0,
+    monto_actual_caja_chica: t.monto_actual_caja_chica || 0,
+    config: t.config || {},
+    plan_id: t.plan_id || 'basico',
+    estado: t.estado || 'ACTIVO',
+    trial_hasta: t.trial_hasta || null,
+    color_primario: t.color_primario || '#000000',
+    color_secundario: t.color_secundario || '#4b5563',
+  };
+  const { error } = await supabaseAdmin.from("tenants").insert(dbRow);
+  if (error) console.error("[sync] error inserting tenant:", error);
 }
 
 // ─── Full sync: store → Supabase ──────────────────────────────────────────────
@@ -845,7 +952,8 @@ export async function syncStoreToSupabase(
     accountsPayable?: AccountPayable[],
     quoteRequests?: QuoteRequest[],
     activityLogs?: ActivityLog[],
-    openTabs?: OpenTab[]
+    openTabs?: OpenTab[],
+    inventorySessions?: InventorySession[]
   }
 ): Promise<void> {
   const tasks = [];
@@ -873,6 +981,7 @@ export async function syncStoreToSupabase(
   if (state.quoteRequests) tasks.push(upsertQuoteRequests(state.quoteRequests.filter(i => i.tenantId === tenantId)));
   if (state.activityLogs) tasks.push(upsertActivityLogs(state.activityLogs.filter(i => i.tenantId === tenantId)));
   if (state.openTabs) tasks.push(upsertOpenTabs(state.openTabs.filter(i => i.tenantId === tenantId)));
+  if (state.inventorySessions) tasks.push(upsertInventorySessions(state.inventorySessions.filter(i => i.tenantId === tenantId)));
 
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);

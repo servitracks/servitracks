@@ -15,11 +15,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api/dgii": {
-        target: "https://dgii-rnc.pronesoft.com",
+      "/api/ef2": {
+        target: "https://master.ef2.do/api2",
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path.replace(/^\/api\/dgii/, "/get"),
+        rewrite: (path) => path.replace(/^\/api\/ef2/, ""),
       },
       "/api/whatsapp": {
         target: "https://wasenderapi.com",

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useStore, Service, Vehicle } from "@/store/useStore";
-import { Search, CheckCircle2, ChevronDown } from "lucide-react";
+import { Search, CheckCircle2, ChevronDown, Building2, Landmark, ShieldCheck, User } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import type { WorkOrder } from "@/store/types";
 import { useSearchParams, useParams } from "@/lib/next-compat";
 
 type KmUnit = "km" | "mi";
+export type CustomerType = "consumidor_final" | "credito_fiscal" | "gubernamental" | "regimen_especial";
+
 type FormData = {
   customerId: string;
   vehicleId: string;
@@ -24,9 +26,23 @@ type FormData = {
   kmUnit: KmUnit;
   serviceIds: string[];
   mechanicId: string;
+  customerType: CustomerType;
+  customerRnc: string;
+  customerBusinessName: string;
 };
+
 const emptyForm: FormData = {
-  customerId: "", vehicleId: "", description: "", notes: "", currentKm: "", kmUnit: "km", serviceIds: [], mechanicId: ""
+  customerId: "",
+  vehicleId: "",
+  description: "",
+  notes: "",
+  currentKm: "",
+  kmUnit: "km",
+  serviceIds: [],
+  mechanicId: "",
+  customerType: "consumidor_final",
+  customerRnc: "",
+  customerBusinessName: "",
 };
 
 interface OrderCreateDialogProps {
@@ -125,6 +141,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
         }
         
         setForm({
+          ...emptyForm,
           customerId: cId,
           vehicleId: vId,
           description: desc || "Mantenimiento preventivo",
@@ -153,6 +170,14 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       toast.error("Debe asignar un técnico a la orden de trabajo");
       return;
     }
+
+    const ncfTypeMap: Record<CustomerType, string> = {
+      consumidor_final: "E32",
+      credito_fiscal: "E31",
+      gubernamental: "E45",
+      regimen_especial: "E44",
+    };
+
     const newOrder: WorkOrder = {
       id: `o${Date.now()}`,
       tenantId: tenantId,
@@ -163,6 +188,10 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       kmUnit: form.currentKm ? form.kmUnit : undefined,
       status: "pending",
       description: form.description,
+      customerType: form.customerType,
+      ncfType: ncfTypeMap[form.customerType],
+      customerRnc: form.customerRnc.trim() || undefined,
+      customerBusinessName: form.customerBusinessName.trim() || undefined,
       serviceIds: form.serviceIds,
       total: 0,
       notes: form.notes || undefined,
@@ -214,7 +243,19 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                         <button 
                           key={c.id}
                           type="button"
-                          onClick={() => { setForm(prev => ({ ...prev, customerId: c.id, vehicleId: "" })); setIsCustomerPopoverOpen(false); setCustomerSearch(""); }}
+                          onClick={() => {
+                            const isEmpresa = c.type === "Empresa" || !!c.rnc;
+                            setForm(prev => ({
+                              ...prev,
+                              customerId: c.id,
+                              vehicleId: "",
+                              customerType: isEmpresa ? "credito_fiscal" : prev.customerType,
+                              customerRnc: c.rnc || prev.customerRnc,
+                              customerBusinessName: c.businessName || c.name,
+                            }));
+                            setIsCustomerPopoverOpen(false);
+                            setCustomerSearch("");
+                          }}
                           className={cn("w-full text-left px-3 py-2 text-xs rounded-lg transition-colors flex flex-col", form.customerId === c.id ? "bg-black text-white" : "hover:bg-neutral-100")}
                         >
                           <div className="font-bold">{c.name}</div>
@@ -257,6 +298,104 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                     {availableVehicles.map((v) => <SelectItem key={v.id} value={v.id}>{`${v.brand} ${v.model} — ${v.plate}`}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Tipo de Cliente / Comprobante Fiscal (col-span-2) */}
+              <div className="col-span-2 space-y-2 p-3.5 rounded-xl border border-neutral-200 bg-neutral-50/60">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 text-[#0051A8]" />
+                    Tipo de Cliente / Comprobante Fiscal
+                  </Label>
+                  <span className="text-[10px] text-[#0051A8] font-bold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-100">
+                    DGII • Facturación Electrónica EF2
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, customerType: "consumidor_final" }))}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer",
+                      form.customerType === "consumidor_final"
+                        ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100"
+                    )}
+                  >
+                    <User className="h-4 w-4 mb-1" />
+                    <span className="text-[11px] font-bold leading-tight">Consumidor Final</span>
+                    <span className="text-[9px] opacity-70">E32 / B02</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, customerType: "credito_fiscal" }))}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer",
+                      form.customerType === "credito_fiscal"
+                        ? "bg-[#0051A8] text-white border-[#0051A8] shadow-sm"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100"
+                    )}
+                  >
+                    <Building2 className="h-4 w-4 mb-1" />
+                    <span className="text-[11px] font-bold leading-tight">Empresa</span>
+                    <span className="text-[9px] opacity-70">Crédito Fiscal (E31)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, customerType: "gubernamental" }))}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer",
+                      form.customerType === "gubernamental"
+                        ? "bg-slate-800 text-white border-slate-800 shadow-sm"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100"
+                    )}
+                  >
+                    <Landmark className="h-4 w-4 mb-1" />
+                    <span className="text-[11px] font-bold leading-tight">Gubernamental</span>
+                    <span className="text-[9px] opacity-70">E45 / B15</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setForm(prev => ({ ...prev, customerType: "regimen_especial" }))}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer",
+                      form.customerType === "regimen_especial"
+                        ? "bg-emerald-700 text-white border-emerald-700 shadow-sm"
+                        : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-100"
+                    )}
+                  >
+                    <ShieldCheck className="h-4 w-4 mb-1" />
+                    <span className="text-[11px] font-bold leading-tight">Rég. Especial</span>
+                    <span className="text-[9px] opacity-70">E44 / B14</span>
+                  </button>
+                </div>
+
+                {form.customerType !== "consumidor_final" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-neutral-200 mt-1 animate-in fade-in">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-bold text-neutral-700">RNC o Cédula *</Label>
+                      <Input
+                        placeholder="Ej: 131123456"
+                        value={form.customerRnc}
+                        onChange={(e) => setForm(prev => ({ ...prev, customerRnc: e.target.value }))}
+                        className="h-9 rounded-lg border-neutral-200 bg-white text-xs font-mono font-semibold"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-bold text-neutral-700">Razón Social *</Label>
+                      <Input
+                        placeholder="Ej: Empresa / Institución SRL"
+                        value={form.customerBusinessName}
+                        onChange={(e) => setForm(prev => ({ ...prev, customerBusinessName: e.target.value }))}
+                        className="h-9 rounded-lg border-neutral-200 bg-white text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Descripción del Servicio (col-span-2) */}

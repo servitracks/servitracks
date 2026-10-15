@@ -72,7 +72,7 @@ export default function LoginPage() {
 
       // ── Ruta Usuario/Tenant: Supabase Auth normal ──
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
       });
 
@@ -82,7 +82,7 @@ export default function LoginPage() {
         } else if (authError.message.includes("Email not confirmed")) {
           toast.error("Confirma tu correo electrónico antes de iniciar sesión");
         } else {
-          toast.error("Error al iniciar sesión. Intenta de nuevo.");
+          toast.error("Error al iniciar sesión: " + authError.message);
         }
         setIsLoading(false);
         return;
@@ -95,47 +95,129 @@ export default function LoginPage() {
       }
 
       const userId = authData.user.id;
-      const userEmail = authData.user.email || "";
+      const userEmail = (authData.user.email || trimmedEmail).trim().toLowerCase();
 
-      // Buscar el tenant asociado al usuario (por UUID primero, luego por email)
-      let { data: tenantUsers, error: tenantUserError } = await supabaseAdmin
-        .from("tenant_users")
-        .select("id, tenant_id, user_id, name, email, role, status, tenants(*)")
-        .eq("user_id", userId)
-        .limit(1);
+      let tenantUser: any = null;
+      let tenant: any = null;
 
-      // Fallback: buscar por email si no se encontró por UUID
-      if ((!tenantUsers || tenantUsers.length === 0) && userEmail) {
-        const fallback = await supabaseAdmin
+      // 1. Buscar en tenant_users por user_id
+      try {
+        const { data: tuByUserId, error: errUserId } = await supabaseAdmin
           .from("tenant_users")
-          .select("id, tenant_id, user_id, name, email, role, status, tenants(*)")
-          .eq("email", userEmail)
+          .select("id, tenant_id, user_id, name, email, role, status")
+          .eq("user_id", userId)
           .limit(1);
-        if (!fallback.error && fallback.data && fallback.data.length > 0) {
-          tenantUsers = fallback.data;
-          tenantUserError = null;
+
+        if (!errUserId && tuByUserId && tuByUserId.length > 0) {
+          tenantUser = tuByUserId[0];
+        }
+      } catch (e) {
+        console.warn("[Login] Error buscando tenant_user por user_id:", e);
+      }
+
+      // 2. Si no se encontró por user_id, buscar por email (case-insensitive)
+      if (!tenantUser && userEmail) {
+        try {
+          const { data: tuByEmail, error: errEmail } = await supabaseAdmin
+            .from("tenant_users")
+            .select("id, tenant_id, user_id, name, email, role, status")
+            .ilike("email", userEmail)
+            .limit(1);
+
+          if (!errEmail && tuByEmail && tuByEmail.length > 0) {
+            tenantUser = tuByEmail[0];
+            // Si el user_id estaba desactualizado, actualizarlo
+            if (tenantUser.user_id !== userId) {
+              await supabaseAdmin
+                .from("tenant_users")
+                .update({ user_id: userId })
+                .eq("id", tenantUser.id);
+            }
+          }
+        } catch (e) {
+          console.warn("[Login] Error buscando tenant_user por email:", e);
         }
       }
 
-      if (tenantUserError || !tenantUsers || tenantUsers.length === 0) {
-        toast.info("No tienes un taller configurado. Completa tu registro.", { duration: 5000 });
-        navigate("/register?step=taller&from=login");
-        setIsLoading(false);
-        return;
+      // 3. Si se encontró tenantUser con tenant_id, cargar su tenant
+      if (tenantUser?.tenant_id) {
+        try {
+          const { data: tData, error: tErr } = await supabaseAdmin
+            .from("tenants")
+            .select("*")
+            .eq("id", tenantUser.tenant_id)
+            .maybeSingle();
+
+          if (!tErr && tData) {
+            tenant = tData;
+          }
+        } catch (e) {
+          console.warn("[Login] Error cargando tenant:", e);
+        }
       }
 
-      const tenantUser = tenantUsers[0];
-      const tenantRaw = tenantUser.tenants as any;
-      const tenant = Array.isArray(tenantRaw) ? tenantRaw[0] : tenantRaw;
+      // 4. Fallback directo: Si no se encontró tenantUser o tenant, buscar en tabla tenants por email
+      if (!tenant && userEmail) {
+        try {
+          const { data: directTenants, error: dtErr } = await supabaseAdmin
+            .from("tenants")
+            .select("*")
+            .ilike("email", userEmail)
+            .order("created_at", { ascending: false })
+            .limit(1);
 
+          if (!dtErr && directTenants && directTenants.length > 0) {
+            tenant = directTenants[0];
+            // Auto-vincular en tenant_users para reparar la cuenta
+            const userName = authData.user.user_metadata?.name || tenant.name || userEmail.split("@")[0];
+            const { data: existingLink } = await supabaseAdmin
+              .from("tenant_users")
+              .select("*")
+              .eq("tenant_id", tenant.id)
+              .eq("user_id", userId)
+              .maybeSingle();
+
+            if (existingLink) {
+              tenantUser = existingLink;
+            } else {
+              const { data: insertedTU } = await supabaseAdmin
+                .from("tenant_users")
+                .insert({
+                  tenant_id: tenant.id,
+                  user_id: userId,
+                  name: userName,
+                  email: userEmail,
+                  role: "owner",
+                  status: "active"
+                })
+                .select()
+                .maybeSingle();
+
+              tenantUser = insertedTU || {
+                id: userId,
+                tenant_id: tenant.id,
+                user_id: userId,
+                name: userName,
+                email: userEmail,
+                role: "owner",
+                status: "active"
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("[Login] Error buscando tenant directo por email:", e);
+        }
+      }
+
+      // 5. Si de verdad no tiene ningún taller configurado
       if (!tenant) {
-        toast.info("Tu cuenta está registrada pero el taller no fue encontrado. Contacta soporte.", { duration: 6000 });
-        navigate("/register?step=taller&from=login");
+        toast.info("Aún no tienes un taller configurado. Vamos a crearlo en pocos pasos.", { duration: 5000 });
+        navigate(`/register?step=taller&from=login&email=${encodeURIComponent(userEmail)}`);
         setIsLoading(false);
         return;
       }
 
-      // Guardar en el store
+      // 6. Configurar store y sesión
       setCurrentUserId(userId);
       setAuthenticated(true);
       setTenants([tenant]);
@@ -146,10 +228,10 @@ export default function LoginPage() {
         addUser({
           id: userId,
           tenantId: tenant.id,
-          name: tenantUser.name,
+          name: tenantUser?.name || tenant.name || userEmail.split("@")[0],
           email: userEmail,
-          role: tenantUser.role,
-          status: tenantUser.status || "active",
+          role: tenantUser?.role || "owner",
+          status: tenantUser?.status || "active",
           createdAt: new Date().toISOString()
         });
       }
@@ -159,8 +241,9 @@ export default function LoginPage() {
         user_id: userId,
         tenant_id: tenant.id,
         tenant_slug: tenant.slug,
+        empleado_id: userId,
         email: userEmail,
-        role: tenantUser.role,
+        role: tenantUser?.role || "owner",
         iniciado_en: new Date().toISOString(),
         remember_me: rememberMe
       };
@@ -169,7 +252,7 @@ export default function LoginPage() {
         sessionStorage.setItem("servitracks-session", JSON.stringify(sessionData));
       }
 
-      toast.success(`¡Bienvenido de nuevo, ${tenantUser.name}!`);
+      toast.success(`¡Bienvenido de nuevo, ${tenantUser?.name || tenant.name}!`);
       navigate(`/${tenant.slug}`);
     } catch (error: any) {
       console.error("Error en login:", error);

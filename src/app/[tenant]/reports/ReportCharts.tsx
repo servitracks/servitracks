@@ -50,7 +50,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
         </CardHeader>
         <CardContent className="h-[280px] w-full">
           {isMounted && (
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={monthlyRevenue}>
                 <XAxis dataKey="name" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="#aaa" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `${v / 1000}k`} />
@@ -76,7 +76,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
             {topProducts.length === 0 ? (
               <div className="flex items-center justify-center h-full text-neutral-400 text-sm">Sin datos de ventas.</div>
             ) : isMounted ? (
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <BarChart data={topProducts} layout="vertical">
                   <XAxis type="number" stroke="#aaa" fontSize={11} tickLine={false} axisLine={false}
                     tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -100,7 +100,7 @@ export default function ReportCharts({ topProducts, statusData }: ReportChartsPr
             {statusData.length === 0 ? (
               <div className="flex items-center justify-center h-40 text-neutral-400 text-sm">Sin órdenes.</div>
             ) : isMounted ? (
-              <ResponsiveContainer width="100%" height={220} minWidth={0} minHeight={0}>
+              <ResponsiveContainer width="100%" height={220} minWidth={1} minHeight={1}>
                 <PieChart>
                   <Pie data={statusData} cx="50%" cy="50%" innerRadius={50} outerRadius={85} paddingAngle={3} dataKey="value">
                     {statusData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}

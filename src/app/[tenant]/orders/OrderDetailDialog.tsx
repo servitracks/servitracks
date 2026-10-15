@@ -2,7 +2,7 @@
 
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useStore } from "@/store/useStore";
-import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, PackageOpen, Plus, Minus, Shield } from "lucide-react";
+import { Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, PackageOpen, Plus, Minus, Shield, FileText, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
@@ -42,7 +42,11 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     km: order.km?.toString() || "",
     kmUnit: order.kmUnit || "km",
     notes: order.notes || "",
-    mechanicId: order.mechanicId || ""
+    mechanicId: order.mechanicId || "",
+    customerType: order.customerType || "consumidor_final",
+    ncfType: order.ncfType || "E32",
+    customerRnc: order.customerRnc || "",
+    customerBusinessName: order.customerBusinessName || ""
   });
 
   const [showPartSelector, setShowPartSelector] = useState(false);
@@ -55,7 +59,11 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       km: order.km?.toString() || "",
       kmUnit: order.kmUnit || "km",
       notes: order.notes || "",
-      mechanicId: order.mechanicId || ""
+      mechanicId: order.mechanicId || "",
+      customerType: order.customerType || "consumidor_final",
+      ncfType: order.ncfType || "E32",
+      customerRnc: order.customerRnc || "",
+      customerBusinessName: order.customerBusinessName || ""
     });
     setIsEditing(false);
     setIsInspectionOpen(false);
@@ -77,7 +85,11 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       km: editForm.km ? Number(editForm.km) : undefined,
       kmUnit: editForm.km ? (editForm.kmUnit as "km" | "mi") : undefined,
       notes: editForm.notes || undefined,
-      mechanicId: editForm.mechanicId === "none" || !editForm.mechanicId ? undefined : editForm.mechanicId
+      mechanicId: editForm.mechanicId === "none" || !editForm.mechanicId ? undefined : editForm.mechanicId,
+      customerType: editForm.customerType as any,
+      ncfType: editForm.ncfType,
+      customerRnc: editForm.customerRnc || undefined,
+      customerBusinessName: editForm.customerBusinessName || undefined
     });
     toast.success("Orden de trabajo actualizada correctamente");
     setIsEditing(false);
@@ -236,6 +248,72 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
               />
             </div>
 
+            {/* Tipo de Cliente / Comprobante e-CF */}
+            <div className="space-y-2 p-3 bg-neutral-50 rounded-xl border border-neutral-200">
+              <Label className="text-xs font-bold text-neutral-700 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-blue-600" />
+                Tipo de Cliente / Comprobante Fiscal
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: "consumidor_final", label: "Consumidor Final", sub: "E32 / B02" },
+                  { id: "credito_fiscal", label: "Crédito Fiscal", sub: "E31 / B01" },
+                  { id: "gubernamental", label: "Gubernamental", sub: "E45 / B15" },
+                  { id: "regimen_especial", label: "Rég. Especial", sub: "E44 / B14" },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      const ncfMap: Record<string, string> = {
+                        consumidor_final: "E32",
+                        credito_fiscal: "E31",
+                        gubernamental: "E45",
+                        regimen_especial: "E44",
+                      };
+                      setEditForm({
+                        ...editForm,
+                        customerType: t.id as any,
+                        ncfType: ncfMap[t.id] || "E32",
+                      });
+                    }}
+                    className={cn(
+                      "p-2 rounded-lg border text-left transition-all",
+                      editForm.customerType === t.id
+                        ? "bg-white border-blue-600 shadow-xs ring-1 ring-blue-600"
+                        : "bg-white/60 border-neutral-200 hover:bg-white text-neutral-600"
+                    )}
+                  >
+                    <p className="text-xs font-bold text-neutral-900">{t.label}</p>
+                    <p className="text-[10px] text-neutral-400 font-mono">{t.sub}</p>
+                  </button>
+                ))}
+              </div>
+
+              {editForm.customerType !== "consumidor_final" && (
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-neutral-200/60 mt-2">
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold text-neutral-600">RNC / Cédula</Label>
+                    <Input
+                      placeholder="Ej: 132596161"
+                      className="h-9 rounded-lg border-neutral-200 text-xs font-mono"
+                      value={editForm.customerRnc}
+                      onChange={(e) => setEditForm({ ...editForm, customerRnc: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] font-bold text-neutral-600">Razón Social</Label>
+                    <Input
+                      placeholder="Nombre comercial o empresa"
+                      className="h-9 rounded-lg border-neutral-200 text-xs"
+                      value={editForm.customerBusinessName}
+                      onChange={(e) => setEditForm({ ...editForm, customerBusinessName: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-2 pt-4 border-t border-neutral-100 flex justify-end">
               <Button 
                 variant="outline" 
@@ -259,6 +337,40 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
               <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">Servicio Realizado</p>
               <p className="text-base font-bold text-neutral-900 leading-snug">{order.description}</p>
             </div>
+
+            {/* Información Fiscal / e-CF */}
+            {(order.customerType || order.ncfType || order.customerRnc) && (
+              <div className="bg-blue-50/50 rounded-xl p-3 border border-blue-100 flex items-start justify-between">
+                <div>
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1 mb-0.5">
+                    <FileText className="h-3 w-3" /> Tipo de Comprobante / e-CF
+                  </p>
+                  <p className="text-xs font-bold text-neutral-900">
+                    {order.customerType === "credito_fiscal" || order.ncfType === "E31"
+                      ? "🏢 Empresa / Crédito Fiscal (E31 / B01)"
+                      : order.customerType === "gubernamental" || order.ncfType === "E45"
+                      ? "🏛️ Gubernamental (E45 / B15)"
+                      : order.customerType === "regimen_especial" || order.ncfType === "E44"
+                      ? "🛡️ Régimen Especial (E44 / B14)"
+                      : "👤 Consumidor Final (E32 / B02)"}
+                  </p>
+                  {order.customerBusinessName && (
+                    <p className="text-[11px] text-neutral-600 font-medium mt-0.5 flex items-center gap-1">
+                      <Building2 className="h-3 w-3 text-neutral-400" />
+                      {order.customerBusinessName}
+                    </p>
+                  )}
+                </div>
+                {order.customerRnc && (
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider block">RNC / Cédula</span>
+                    <span className="text-xs font-mono font-bold text-blue-900 bg-white px-2 py-0.5 rounded-md border border-blue-200 inline-block mt-0.5">
+                      {order.customerRnc}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-xl p-3">

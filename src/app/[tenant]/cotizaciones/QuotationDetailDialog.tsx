@@ -52,6 +52,9 @@ export default function QuotationDetailDialog({
   const updateQuote = useStore((s) => s.updateQuote);
   const addOrder = useStore((s) => s.addOrder);
 
+  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
+  const [archiveObsInput, setArchiveObsInput] = useState("");
+
   const currentTenant = useMemo(() => 
     tenants.find((t) => t.id === tenantId) ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" },
     [tenants, tenantId]
@@ -75,9 +78,6 @@ export default function QuotationDetailDialog({
     toast.success(`Estado de cotización actualizado a ${statusLabels[status]}`);
   };
 
-  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
-  const [archiveObsInput, setArchiveObsInput] = useState("");
-
   const handleOpenArchiveModal = () => {
     setArchiveObsInput(quote?.observation || "");
     setIsArchiveDialogOpen(true);
@@ -95,16 +95,16 @@ export default function QuotationDetailDialog({
 
       const customServices = quote.items
         .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
-        .map((i) => ({ name: i.name, price: i.unitPrice }));
+        .map((i) => ({ name: i.name, price: i.unitPrice, tax: i.taxPercentage ?? 0 }));
 
       const customParts = quote.items
         .filter((i) => !i.productId && (!i.serviceId || !i.serviceId.startsWith('custom-')))
-        .map((i) => ({ name: i.name, price: i.unitPrice, quantity: i.quantity }));
+        .map((i) => ({ name: i.name, price: i.unitPrice, quantity: i.quantity, tax: i.taxPercentage ?? 18 }));
 
       const parts = quote.items
-        .filter((i) => i.productId)
+        .filter((i) => i.productId && typeof i.productId === 'string' && i.productId.trim().length > 0)
         .map((i) => ({
-          productId: i.productId!,
+          productId: i.productId!.trim(),
           quantity: i.quantity,
         }));
 
@@ -112,13 +112,13 @@ export default function QuotationDetailDialog({
         id: orderId,
         tenantId,
         customerId: quote.customerId,
-        vehicleId: quote.vehicleId,
+        vehicleId: quote.vehicleId || "general",
         status: "pending",
         description: `Servicios importados de Cotización ${quote.quoteNumber}`,
-        serviceIds: serviceIds.length > 0 ? serviceIds : undefined,
+        serviceIds: serviceIds,
         customServices: customServices.length > 0 ? customServices : undefined,
         customParts: customParts.length > 0 ? customParts : undefined,
-        parts: parts.length > 0 ? parts : undefined,
+        parts: parts,
         total: quote.total,
         notes: quote.notes ? `Notas de cotización: ${quote.notes}` : undefined,
         checklist: [],
@@ -289,7 +289,7 @@ export default function QuotationDetailDialog({
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs text-blue-600 border-blue-100 hover:bg-blue-50 hover:text-blue-700 font-bold cursor-pointer"
-                  onClick={() => handleConvertToOrder(false)}
+                  onClick={() => handleConvertToOrder(true)}
                 >
                   <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Facturar / Orden
                 </Button>

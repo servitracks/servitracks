@@ -61,10 +61,18 @@ interface StepUploadProcessProps {
 
 function parseNumber(val: unknown): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
-  if (!val) return 0;
-  // Convert text, strip currency symbols, replace commas used as thousand separators
-  const str = String(val).replace(/[^0-9.-]/g, "").trim();
-  const num = parseFloat(str);
+  if (!val || val === null || val === undefined) return 0;
+  let str = String(val).replace(/[$RD\s]/gi, "").trim();
+  // Check for Latin format like 1.234,56
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(str)) {
+    str = str.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d+(,\d{2})$/.test(str)) {
+    str = str.replace(",", ".");
+  } else {
+    str = str.replace(/,/g, "");
+  }
+  const cleanStr = str.replace(/[^0-9.-]/g, "").trim();
+  const num = parseFloat(cleanStr);
   return isNaN(num) ? 0 : num;
 }
 
@@ -156,8 +164,14 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
     "invtotal", "invtotal.", "inv total", "quantity", "cantidad", "qty", 
     "stock", "existencia", "existencias", "unidades"
   ]);
-  const quantity = parseNumber(rawQty) || 1;
-  const stock = parseNumber(getVal(raw, ["stock", "existencia"])) || quantity;
+  const parsedQty = rawQty !== undefined && rawQty !== null && String(rawQty).trim() !== ""
+    ? parseNumber(rawQty)
+    : 0;
+  const quantity = parsedQty;
+  const rawStock = getVal(raw, ["stock", "existencia"]);
+  const stock = rawStock !== undefined && rawStock !== null && String(rawStock).trim() !== ""
+    ? parseNumber(rawStock)
+    : quantity;
 
   const minStock = parseNumber(getVal(raw, ["minstock", "stockminimo", "stockmínimo"])) || 5;
   const tax = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18;
@@ -210,7 +224,19 @@ function parseCSVtoRows(file: File): Promise<ImportRow[]> {
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { range: headerRowIndex, defval: "", raw: false }) as Record<string, unknown>[];
         const rows = jsonData
           .map((row, i) => toImportRow(row, i))
-          .filter((r) => r.name.trim() !== "");
+          .filter((r) => {
+            const n = r.name.trim().toUpperCase();
+            const s = (r.sku || "").trim();
+            return (
+              n !== "" &&
+              n !== "TOTALES" &&
+              n !== "TOTAL" &&
+              n !== "SUBTOTAL" &&
+              n !== "TOTAL GENERAL" &&
+              n !== "RESUMEN" &&
+              !((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !s)
+            );
+          });
 
         resolve(rows);
       } catch (err) {

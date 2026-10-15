@@ -62,7 +62,19 @@ export default function ImportWizardModal({
   };
 
   const handleConfirmImport = () => {
-    const validRows = rows.filter((r) => r.name.trim() !== "");
+    const validRows = rows.filter((r) => {
+      const n = (r.name || "").trim().toUpperCase();
+      const s = (r.sku || "").trim();
+      return (
+        n !== "" &&
+        n !== "TOTALES" &&
+        n !== "TOTAL" &&
+        n !== "SUBTOTAL" &&
+        n !== "TOTAL GENERAL" &&
+        n !== "RESUMEN" &&
+        !((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !s)
+      );
+    });
     onImport(validRows, selectedSupplierId, invoiceNumber);
     handleReset();
     onClose();
@@ -73,7 +85,7 @@ export default function ImportWizardModal({
       <DialogContent 
         className={cn(
           "rounded-2xl overflow-hidden flex flex-col p-0 transition-all duration-300",
-          step === 4 
+          step >= 4 
             ? "sm:max-w-6xl w-[96vw] max-w-[96vw] h-[92vh] max-h-[92vh]" 
             : "sm:max-w-3xl max-h-[92vh]"
         )}
@@ -207,8 +219,12 @@ export default function ImportWizardModal({
             <StepPreviewEditor rows={rows} setRows={setRows} />
           )}
           {step === 5 && (
-            <div className="overflow-y-auto flex-1 h-full pr-2">
-              <StepConfirm rows={rows} />
+            <div className="overflow-y-auto flex-1 h-full pr-1">
+              <StepConfirm 
+                rows={rows} 
+                supplierName={suppliers.find(s => s.id === selectedSupplierId)?.commercialName || suppliers.find(s => s.id === selectedSupplierId)?.legalName}
+                invoiceNumber={invoiceNumber}
+              />
             </div>
           )}
         </div>

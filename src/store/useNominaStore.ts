@@ -78,35 +78,53 @@ export const useNominaStore = create<NominaState>()(
       empleados: [],
       nominas: [],
       
-      addEmpleado: (empleado) =>
-        set((state) => ({ empleados: [...state.empleados, empleado] })),
+      addEmpleado: (empleado) => {
+        set((state) => ({ empleados: [...state.empleados, empleado] }));
+        import("@/lib/nominaSync").then(m => m.upsertEmpleados([empleado]));
+      },
         
       updateEmpleado: (id, updates) =>
-        set((state) => ({
-          empleados: state.empleados.map((emp) =>
+        set((state) => {
+          const updated = state.empleados.map((emp) =>
             emp.id === id ? { ...emp, ...updates, updatedAt: new Date().toISOString() } : emp
-          ),
-        })),
+          );
+          const empToSync = updated.find(e => e.id === id);
+          if (empToSync) {
+            import("@/lib/nominaSync").then(m => m.upsertEmpleados([empToSync]));
+          }
+          return { empleados: updated };
+        }),
         
-      deleteEmpleado: (id) =>
+      deleteEmpleado: (id) => {
         set((state) => ({
           empleados: state.empleados.filter((emp) => emp.id !== id),
-        })),
+        }));
+        import("@/lib/nominaSync").then(m => m.deleteEmpleadoFromSupabase(id));
+      },
         
-      addNomina: (nomina) =>
-        set((state) => ({ nominas: [...state.nominas, nomina] })),
+      addNomina: (nomina) => {
+        set((state) => ({ nominas: [...state.nominas, nomina] }));
+        import("@/lib/nominaSync").then(m => m.upsertNominas([nomina]));
+      },
         
       updateNomina: (id, updates) =>
-        set((state) => ({
-          nominas: state.nominas.map((nom) =>
+        set((state) => {
+          const updated = state.nominas.map((nom) =>
             nom.id === id ? { ...nom, ...updates, updatedAt: new Date().toISOString() } : nom
-          ),
-        })),
+          );
+          const nomToSync = updated.find(n => n.id === id);
+          if (nomToSync) {
+            import("@/lib/nominaSync").then(m => m.upsertNominas([nomToSync]));
+          }
+          return { nominas: updated };
+        }),
         
-      deleteNomina: (id) =>
+      deleteNomina: (id) => {
         set((state) => ({
           nominas: state.nominas.filter((nom) => nom.id !== id),
-        })),
+        }));
+        import("@/lib/nominaSync").then(m => m.deleteNominaFromSupabase(id));
+      },
     }),
     {
       name: 'servitracks-nomina-storage',

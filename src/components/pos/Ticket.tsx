@@ -6,16 +6,52 @@ import {
   Phone,
   MapPin,
   Calendar,
-  Shirt,
   FileText,
   ShieldCheck,
+  Wrench,
+  Tag,
+  Calculator,
+  Percent,
+  CircleDollarSign,
+  CreditCard,
+  BadgePercent,
+  Landmark,
+  Coins,
+  Hourglass,
+  ArrowRightLeft,
+  Cog,
+  Car,
 } from "lucide-react";
 
 export function formatRD(amount: number) {
-  return "RD$ " + Number(amount || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (
+    "RD$ " +
+    Number(amount || 0).toLocaleString("es-DO", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }
 
-// ===== Tipos mínimos para portabilidad =====
+export function formatNumber(amount: number) {
+  return Number(amount || 0).toLocaleString("es-DO", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function translatePaymentMethod(method?: string): string {
+  if (!method) return "EFECTIVO";
+  const m = method.toLowerCase().trim();
+  if (m === "cash" || m === "efectivo") return "EFECTIVO";
+  if (m === "card" || m === "tarjeta") return "TARJETA";
+  if (m === "transfer" || m === "transferencia") return "TRANSFERENCIA";
+  if (m === "credit" || m === "credito" || m === "crédito") return "CRÉDITO";
+  if (m === "pago_al_retirar" || m === "retirar") return "PAGO AL RETIRAR";
+  if (m === "mixed" || m === "mixto") return "MIXTO";
+  return method.toUpperCase();
+}
+
 export interface TicketItem {
   id?: string;
   descripcion?: string;
@@ -25,14 +61,12 @@ export interface TicketItem {
   precio_unitario?: number;
   unitPrice?: number;
   salePrice?: number;
-  es_libra?: boolean;
   is_exento?: boolean;
   notas?: string;
   servicio_origen?: string;
 }
 
 export interface TicketProps {
-  // ── Nuevo Formato de Objeto Orden / Cliente / Tenant ──
   orden?: {
     numero: string | number;
     creado_en: string;
@@ -48,19 +82,22 @@ export interface TicketProps {
     pago_referencia?: string;
     estado?: string;
     es_urgente?: boolean;
-    ubicacion_ropa?: string;
     notas?: string;
-    motivo_anulacion?: string;
-    motivo_anulacion_codigo?: string;
     items: TicketItem[];
-    servicios?: string[];
-    servicios_precios?: Record<string, number>;
     ncf?: string;
     ncf_vencimiento?: string;
     nota_credito_ncf?: string;
     ecf_qr?: string;
     ecf_security_code?: string;
     ecf_signature_date?: string;
+    vehicle?: {
+      brand?: string;
+      model?: string;
+      year?: number | string;
+      plate?: string;
+      km?: number | string;
+      color?: string;
+    };
   };
   tenant?: {
     nombre?: string;
@@ -92,10 +129,10 @@ export interface TicketProps {
   formato?: "57mm" | "58mm" | "80mm" | "A4";
   pagoRecibido?: number;
   ocultarNotas?: boolean;
-  esProduccion?: boolean; // True para copia de taller/interno
+  esProduccion?: boolean;
   esCopiaCaja?: boolean;
 
-  // ── Propiedades Directas / Legadas (POS y Facturación serviTracks) ──
+  // Propiedades Directas / Legadas (POS ServiTracks)
   invoiceId?: string;
   ncf?: string;
   createdAt?: string;
@@ -113,12 +150,32 @@ export interface TicketProps {
   securityCode?: string;
   signatureDate?: string;
   discount?: number;
+  vehicle?: {
+    brand?: string;
+    model?: string;
+    year?: number | string;
+    plate?: string;
+    km?: number | string;
+    color?: string;
+  };
 }
 
-// Funciones auxiliares de formato
-function formatMoneda(val: number): string {
-  return "RD$" + Number(val || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+const NCF_NOMBRES: Record<string, string> = {
+  E31: "Factura de Crédito Fiscal Electrónica",
+  E32: "Factura de Consumo Electrónica",
+  E33: "Nota de Débito Electrónica",
+  E34: "Nota de Crédito Electrónica",
+  E41: "Compras Electrónico",
+  E43: "Gastos Menores Electrónico",
+  E44: "Regímenes Especiales Electrónico",
+  E45: "Gubernamental Electrónico",
+  E46: "Exportaciones Electrónico",
+  E47: "Pagos al Exterior Electrónico",
+  B01: "Factura de Crédito Fiscal",
+  B02: "Factura para Consumidor Final",
+  B14: "Regímenes Especiales",
+  B15: "Gubernamental",
+};
 
 function humanizeDate(dateStr?: string, showTime = true): string {
   if (!dateStr) return "";
@@ -129,7 +186,7 @@ function humanizeDate(dateStr?: string, showTime = true): string {
   const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const diffTime = dDate.getTime() - nowDate.getTime();
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-  
+
   if (!showTime) {
     if (diffDays === 0) return "Hoy";
     if (diffDays === 1) return "Mañana";
@@ -139,10 +196,17 @@ function humanizeDate(dateStr?: string, showTime = true): string {
   const timeStr = d.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit", hour12: true });
   if (diffDays === 0) return `Hoy a las ${timeStr}`;
   if (diffDays === 1) return `Mañana a las ${timeStr}`;
-  return d.toLocaleString("es-DO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
+  return d.toLocaleString("es-DO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
 }
 
-function formatPhone(phoneStr?: string): string {
+function formatPhoneDO(phoneStr?: string): string {
   if (!phoneStr || phoneStr === "---") return "";
   const digits = phoneStr.replace(/\D/g, "");
   const cleanDigits = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
@@ -162,7 +226,6 @@ export function Ticket({
   ocultarNotas = false,
   esProduccion = false,
   esCopiaCaja = false,
-  // Props legadas
   invoiceId,
   ncf,
   createdAt,
@@ -180,48 +243,51 @@ export function Ticket({
   securityCode,
   signatureDate,
   discount,
+  vehicle,
 }: TicketProps) {
-  // Reconciliación de datos de Tenant
+  // Reconciliación de Tenant
   const tenantObj = {
-    nombre: tenant?.nombre || tenant?.name || "ServiTracks",
+    nombre: tenant?.nombre || tenant?.name || "ServiTracks Taller Automotriz",
     rnc: tenant?.rnc || "",
     telefono: tenant?.telefono || tenant?.phone || "",
     direccion: tenant?.direccion || tenant?.address || "",
     logo_url: tenant?.logo_url || tenant?.logo || "",
-    config: tenant?.config || {
-      ticket_mostrar_empleado: true,
-      ticket_mostrar_notas: true,
-    },
+    config: tenant?.config || {},
   };
 
-  // Reconciliación de datos de Cliente
+  // Reconciliación de Cliente
   const clienteObj = {
     nombre: cliente?.nombre || customer?.name || customer?.nombre || "Consumidor Final",
     apellido: cliente?.apellido || "",
-    cedula: cliente?.cedula || customer?.rnc || customer?.cedula || customer?.documentId || "",
+    cedula: cliente?.cedula || cliente?.rnc || customer?.rnc || customer?.cedula || customer?.documentId || "",
     telefono: cliente?.telefono || customer?.phone || customer?.telefono || "",
     direccion: cliente?.direccion || customer?.address || customer?.direccion || "",
     tipo: cliente?.tipo || (customer?.rnc ? "Empresa" : "Persona"),
   };
 
-  // Reconciliación de datos de Empleado / Técnico
+  // Reconciliación de Empleado / Mecánico
   const empleadoObj = empleado || (mechanicName ? { nombre: mechanicName } : undefined);
 
-  // Reconciliación de datos de Orden
+  // Reconciliación de Ítems
   const rawItems = orden?.items || items || [];
   const normalizedItems: TicketItem[] = rawItems.map((it: any) => ({
     id: it.id,
-    descripcion: it.descripcion || it.name || "Artículo / Servicio",
+    descripcion: it.descripcion || it.name || "Servicio / Repuesto",
     cantidad: it.cantidad ?? it.quantity ?? 1,
     precio_unitario: it.precio_unitario ?? it.unitPrice ?? it.salePrice ?? 0,
-    es_libra: it.es_libra,
     is_exento: it.is_exento,
     notas: it.notas,
     servicio_origen: it.servicio_origen,
   }));
 
   const ordenObj = {
-    numero: orden?.numero ?? (invoiceId ? (invoiceId.length > 8 ? invoiceId.slice(-6).toUpperCase() : invoiceId) : `FAC-${Date.now().toString().slice(-6)}`),
+    numero:
+      orden?.numero ??
+      (invoiceId
+        ? invoiceId.length > 8
+          ? invoiceId.slice(-6).toUpperCase()
+          : invoiceId
+        : `FAC-${Date.now().toString().slice(-6)}`),
     creado_en: orden?.creado_en || createdAt || new Date().toISOString(),
     fecha_entrega: orden?.fecha_entrega || orden?.creado_en || createdAt || new Date().toISOString(),
     subtotal: orden?.subtotal ?? subtotal ?? 0,
@@ -231,11 +297,10 @@ export function Ticket({
     total: orden?.total ?? total ?? 0,
     saldo: orden?.saldo ?? 0,
     pagado: orden?.pagado ?? (orden?.total ?? total ?? 0),
-    metodo_pago: orden?.metodo_pago || (payMethod === "cash" ? "Efectivo" : payMethod === "card" ? "Tarjeta" : payMethod === "transfer" ? "Transferencia" : payMethod === "credit" ? "Crédito" : (payMethod || "Efectivo")),
+    metodo_pago: translatePaymentMethod(orden?.metodo_pago || payMethod),
     pago_referencia: orden?.pago_referencia,
     estado: orden?.estado || "PAGADA",
     es_urgente: orden?.es_urgente ?? false,
-    ubicacion_ropa: orden?.ubicacion_ropa,
     notas: orden?.notas || notes,
     items: normalizedItems,
     ncf: orden?.ncf || ncf,
@@ -243,121 +308,154 @@ export function Ticket({
     ecf_qr: orden?.ecf_qr || qrUrl,
     ecf_security_code: orden?.ecf_security_code || securityCode,
     ecf_signature_date: orden?.ecf_signature_date || signatureDate,
+    vehicle: orden?.vehicle || vehicle,
   };
 
   const effectivePagoRecibido = pagoRecibido ?? cashReceived;
+  const vuelto =
+    effectivePagoRecibido && effectivePagoRecibido > ordenObj.total
+      ? effectivePagoRecibido - ordenObj.total
+      : 0;
 
-  // Formato de ancho
-  const formatKey = formato === "57mm" ? "58mm" : formato;
-  const w = formatKey === "58mm" ? "w-[58mm]" : formatKey === "A4" ? "w-[210mm] min-h-[297mm]" : "w-[80mm]";
-  const cols = formatKey === "58mm" ? "max-w-[32ch]" : formatKey === "A4" ? "max-w-none" : "max-w-[44ch]";
-  const vuelto = effectivePagoRecibido && effectivePagoRecibido > ordenObj.total ? effectivePagoRecibido - ordenObj.total : 0;
+  // Detección e-CF
+  const isECF = !!(ordenObj.ncf?.startsWith("E") || ordenObj.nota_credito_ncf?.startsWith("E"));
+  const fiscalNCF = ordenObj.nota_credito_ncf || ordenObj.ncf;
+  const qrData =
+    ordenObj.ecf_qr ||
+    (isECF && tenantObj.rnc && fiscalNCF
+      ? `https://fc.dgii.gov.do/ecf/consulta?rncemisor=${tenantObj.rnc.replace(/\D/g, "")}&encf=${fiscalNCF}&codigoSeguridad=${ordenObj.ecf_security_code || ""}&montoTotal=${ordenObj.total}`
+      : "");
 
-  const isECF = ordenObj.ncf?.startsWith("E");
-  const qrData = ordenObj.ecf_qr || (isECF ? `https://fc.dgii.gov.do/testecf/consultatimbrefc?rncemisor=${tenantObj.rnc}&encf=${ordenObj.ncf}&montototal=${ordenObj.total}&codigoseguridad=${encodeURIComponent(ordenObj.ecf_security_code || '')}` : "");
-
-  let tipoDocumento = "RECIBO";
-  if (!esProduccion) {
-    if (ordenObj.nota_credito_ncf) {
-      tipoDocumento = isECF ? "NOTA DE CRÉDITO ELECTRÓNICA" : "NOTA DE CRÉDITO";
-    } else if (ordenObj.ncf) {
-      if (ordenObj.ncf.startsWith("E31") || ordenObj.ncf.startsWith("B01")) tipoDocumento = "FACTURA PARA CRÉDITO FISCAL";
-      else if (ordenObj.ncf.startsWith("E32") || ordenObj.ncf.startsWith("B02")) tipoDocumento = "FACTURA PARA CONSUMIDOR FINAL";
-      else tipoDocumento = "COMPROBANTE FISCAL";
+  let tipoDocumento = "RECIBO DE VENTA";
+  if (!esProduccion && fiscalNCF) {
+    const prefix = fiscalNCF.substring(0, 3);
+    const nombreOficial = NCF_NOMBRES[prefix];
+    if (nombreOficial) {
+      tipoDocumento = nombreOficial.toUpperCase();
+    } else if (isECF) {
+      tipoDocumento = "FACTURA ELECTRÓNICA DGII";
+    } else {
+      tipoDocumento = "COMPROBANTE FISCAL";
     }
   }
 
-  const totalPrendas = (ordenObj.items || [])
-    .filter((it) => !(it.descripcion || "").toLowerCase().startsWith("servicio:"))
-    .reduce((acc, it) => acc + (it.cantidad || 1), 0);
+  const cleanWarranty = warrantyText
+    ? warrantyText
+        .replace(/^[🛡️\s]+/gu, "")
+        .replace(/^garant[ií]a:\s*/gi, "")
+        .replace(/^garant[ií]a\s*/gi, "")
+        .trim()
+    : "";
+
+  const formatKey = formato === "57mm" ? "58mm" : formato;
+  const w = formatKey === "58mm" ? "w-[58mm]" : formatKey === "A4" ? "w-[210mm] min-h-[297mm]" : "w-[80mm]";
+  const cols = formatKey === "58mm" ? "max-w-[32ch]" : formatKey === "A4" ? "max-w-none" : "max-w-[44ch]";
 
   // =========================================================================
-  // ★ FORMATO A4 FISCAL / COMERCIAL ★
+  // ★ FORMATO A4 COMERCIAL / TALLER / FISCAL ★
   // =========================================================================
   if (formatKey === "A4") {
     return (
-      <div className={`thermal-ticket mx-auto ${w} bg-white p-12 font-sans text-neutral-800 text-sm`}>
+      <div
+        className={`thermal-ticket mx-auto ${w} bg-white p-12 font-sans text-neutral-800 text-sm`}
+        style={{ fontFamily: '"Plus Jakarta Sans", sans-serif' }}
+      >
         {/* Header A4 */}
         <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-neutral-100">
           <div className="flex gap-6 items-center">
             {tenantObj.logo_url ? (
-              <img src={tenantObj.logo_url} alt="Logo" className="h-24 w-auto object-contain" />
+              <img src={tenantObj.logo_url} alt="Logo" className="h-20 w-auto object-contain" />
             ) : (
-              <div className="h-24 w-24 bg-neutral-100 rounded-xl flex items-center justify-center font-black text-2xl text-neutral-400">
-                {tenantObj.nombre?.charAt(0) || "T"}
+              <div className="h-16 w-16 bg-[#001D3D] text-white rounded-xl flex items-center justify-center font-black text-2xl">
+                <Wrench className="h-8 w-8 text-sky-400" />
               </div>
             )}
             <div>
-              <h1 className="text-3xl font-black text-black tracking-tight uppercase">{tenantObj.nombre}</h1>
-              <div className="text-neutral-500 mt-1">
-                {tenantObj.rnc && <div><span className="font-semibold text-neutral-700">RNC:</span> {tenantObj.rnc}</div>}
-                {tenantObj.telefono && <div><span className="font-semibold text-neutral-700">Tel:</span> {formatPhone(tenantObj.telefono)}</div>}
+              <h1 className="text-2xl font-black text-black tracking-tight uppercase">{tenantObj.nombre}</h1>
+              <div className="text-xs text-neutral-500 mt-1 space-y-0.5">
+                {tenantObj.rnc && <div><b className="text-neutral-700">RNC:</b> {tenantObj.rnc}</div>}
+                {tenantObj.telefono && <div><b className="text-neutral-700">Tel:</b> {formatPhoneDO(tenantObj.telefono)}</div>}
                 {tenantObj.direccion && <div>{tenantObj.direccion}</div>}
               </div>
             </div>
           </div>
           <div className="text-right">
-            <h2 className="text-2xl font-black text-black uppercase">{tipoDocumento}</h2>
-            <div className="mt-2 text-neutral-600">
-              <div className="text-lg"><b>#{ordenObj.numero}</b></div>
-              {ordenObj.ncf && <div className="mt-1"><span className="font-bold text-neutral-800">{isECF ? 'e-NCF' : 'NCF'}:</span> {ordenObj.ncf}</div>}
-              <div className="mt-1"><span className="font-bold text-neutral-800">Fecha:</span> {new Date(ordenObj.creado_en).toLocaleDateString("es-DO", { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Info Cliente & Operación A4 */}
-        <div className="flex justify-between mb-8 bg-neutral-50 p-6 rounded-2xl border border-neutral-100">
-          <div>
-            <h3 className="text-xs font-black uppercase tracking-widest text-neutral-400 mb-2">Facturado a</h3>
-            {(!clienteObj.nombre || clienteObj.nombre === "Consumidor Final" || clienteObj.nombre === "Walk-in") ? (
-              <div className="font-bold text-lg text-black">Consumidor Final</div>
-            ) : (
-              <div className="text-neutral-700">
-                <div className="font-bold text-lg text-black">{clienteObj.nombre} {clienteObj.apellido}</div>
-                {clienteObj.cedula && <div className="mt-1">{clienteObj.tipo === "Empresa" ? "RNC" : "Cédula"}: {clienteObj.cedula}</div>}
-                {clienteObj.telefono && <div>Teléfono: {formatPhone(clienteObj.telefono)}</div>}
-                {clienteObj.direccion && <div>Dirección: {clienteObj.direccion}</div>}
+            <h2 className="text-xl font-black text-[#0051A8] uppercase tracking-wide">{tipoDocumento}</h2>
+            {fiscalNCF && (
+              <div className="text-sm font-bold text-neutral-900 mt-1">
+                {isECF ? "e-NCF:" : "NCF:"} <span className="font-mono text-base font-black">{fiscalNCF}</span>
               </div>
             )}
-          </div>
-          <div className="text-right">
-            <h3 className="text-xs font-black uppercase tracking-widest text-neutral-400 mb-2">Detalles de Operación</h3>
-            <div className="text-neutral-700">
-              {empleadoObj && <div><span className="font-semibold">Atendido por:</span> {empleadoObj.nombre}</div>}
-              <div className="mt-1"><span className="font-semibold">Método de pago:</span> {ordenObj.metodo_pago}</div>
-              {effectivePagoRecibido !== undefined && effectivePagoRecibido > 0 && (
-                <div className="mt-1"><span className="font-semibold">Recibido:</span> {formatMoneda(effectivePagoRecibido)}</div>
-              )}
+            <div className="text-xs text-neutral-500 mt-1">
+              Orden Nº: <b className="text-neutral-900">{ordenObj.numero}</b> • Fecha: {humanizeDate(ordenObj.creado_en, true)}
             </div>
           </div>
         </div>
 
-        {/* Tabla Items A4 */}
-        <div className="mb-8 rounded-2xl overflow-hidden border border-neutral-200">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-neutral-100 text-neutral-600 text-xs uppercase tracking-widest">
-                <th className="py-4 px-6 font-bold">Descripción</th>
-                <th className="py-4 px-6 font-bold text-center">Cant.</th>
-                <th className="py-4 px-6 font-bold text-right">Precio Unit.</th>
-                <th className="py-4 px-6 font-bold text-right">Subtotal</th>
+        {/* Cliente y Vehículo A4 */}
+        <div className="grid grid-cols-2 gap-6 p-4 rounded-xl bg-neutral-50 border border-neutral-200 mb-6">
+          <div>
+            <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5 text-[#0051A8]" /> Datos del Cliente
+            </div>
+            <div className="text-sm font-black text-neutral-900">
+              {clienteObj.nombre} {clienteObj.apellido || ""}
+            </div>
+            {clienteObj.cedula && (
+              <div className="text-xs text-neutral-600 mt-0.5">
+                <b>{clienteObj.tipo === "Empresa" ? "RNC:" : "Cédula:"}</b> {clienteObj.cedula}
+              </div>
+            )}
+            {clienteObj.telefono && <div className="text-xs text-neutral-600">Tel: {formatPhoneDO(clienteObj.telefono)}</div>}
+            {clienteObj.direccion && <div className="text-xs text-neutral-600 truncate">{clienteObj.direccion}</div>}
+          </div>
+
+          <div>
+            <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <Car className="h-3.5 w-3.5 text-[#0051A8]" /> Datos del Vehículo
+            </div>
+            {ordenObj.vehicle?.plate ? (
+              <div className="space-y-0.5 text-xs text-neutral-700">
+                <div className="text-sm font-black text-neutral-900">
+                  {ordenObj.vehicle.brand} {ordenObj.vehicle.model} {ordenObj.vehicle.year ? `(${ordenObj.vehicle.year})` : ""}
+                </div>
+                <div>Placa: <b className="font-mono">{ordenObj.vehicle.plate}</b></div>
+                {ordenObj.vehicle.km && <div>Kilometraje: <b>{Number(ordenObj.vehicle.km).toLocaleString()} km</b></div>}
+              </div>
+            ) : (
+              <div className="text-xs text-neutral-400 italic">Sin datos de vehículo asociados</div>
+            )}
+          </div>
+        </div>
+
+        {/* Tabla Ítems A4 */}
+        <div className="border border-neutral-200 rounded-xl overflow-hidden mb-6">
+          <table className="w-full text-left">
+            <thead className="bg-[#001D3D] text-white text-xs uppercase font-bold">
+              <tr>
+                <th className="py-3 px-4">Descripción</th>
+                <th className="py-3 px-4 text-center">Cant.</th>
+                <th className="py-3 px-4 text-right">Precio Unitario</th>
+                <th className="py-3 px-4 text-right">ITBIS</th>
+                <th className="py-3 px-4 text-right">Total</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {ordenObj.items.map((it, i) => {
-                let price = it.precio_unitario || 0;
-                let qty = it.cantidad || 1;
-                let valor = qty * price;
+            <tbody className="divide-y divide-neutral-200 text-xs">
+              {ordenObj.items.map((it, idx) => {
+                const qty = it.cantidad || 1;
+                const price = it.precio_unitario || 0;
+                const totalItem = qty * price;
+                const itbisItem = ordenObj.itbis > 0 && !it.is_exento ? totalItem * 0.18 : 0;
                 return (
-                  <tr key={i} className="bg-white">
-                    <td className="py-4 px-6 font-medium text-black">
-                      {it.descripcion}{it.es_libra ? ` (${qty} lb)` : ""}
-                      {it.notas && <div className="text-xs italic text-neutral-500 mt-0.5">Nota: {it.notas}</div>}
+                  <tr key={idx} className="hover:bg-neutral-50/50">
+                    <td className="py-3 px-4 font-semibold text-neutral-900">
+                      {it.descripcion}
+                      {it.notas && <div className="text-[10px] text-neutral-500 italic mt-0.5">Nota: {it.notas}</div>}
                     </td>
-                    <td className="py-4 px-6 text-center text-neutral-600">{qty}</td>
-                    <td className="py-4 px-6 text-right text-neutral-600">{formatMoneda(price)}</td>
-                    <td className="py-4 px-6 text-right font-bold text-black">{formatMoneda(valor)}</td>
+                    <td className="py-3 px-4 text-center font-bold text-neutral-700">{qty}</td>
+                    <td className="py-3 px-4 text-right text-neutral-700">{formatRD(price)}</td>
+                    <td className="py-3 px-4 text-right text-neutral-700">{formatRD(itbisItem)}</td>
+                    <td className="py-3 px-4 text-right font-black text-neutral-900">{formatRD(totalItem)}</td>
                   </tr>
                 );
               })}
@@ -366,392 +464,442 @@ export function Ticket({
         </div>
 
         {/* Totales y QR A4 */}
-        <div className="flex justify-between items-start mt-8">
-          <div className="w-1/2 pr-8 space-y-6">
-            {ordenObj.notas && !ocultarNotas && (
-              <div>
-                <h3 className="text-xs font-black uppercase tracking-widest text-neutral-400 mb-2">Notas</h3>
-                <p className="text-sm text-neutral-600 italic bg-amber-50 p-4 rounded-xl border border-amber-100">{ordenObj.notas}</p>
-              </div>
-            )}
-            
-            {warrantyText && (
-              <div>
-                <h3 className="text-xs font-black uppercase tracking-widest text-neutral-400 mb-2">Garantía</h3>
-                <p className="text-sm text-emerald-800 bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex items-start gap-2">
-                  <ShieldCheck className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>{warrantyText}</span>
-                </p>
-              </div>
-            )}
-
+        <div className="flex justify-between items-start pt-2">
+          <div className="w-1/2 pr-6 space-y-4">
             {isECF && qrData && (
-              <div className="flex gap-4 items-center bg-neutral-50 p-4 rounded-xl border border-neutral-200">
-                <div className="p-2 bg-white rounded-lg border border-neutral-100 shadow-sm shrink-0">
-                  <QRCodeSVG value={qrData} size={80} level="M" />
+              <div className="flex gap-4 items-center bg-[#EBF5FC] p-4 rounded-xl border border-[#BDE0FE]">
+                <div className="p-2 bg-white rounded-lg border border-neutral-200 shrink-0">
+                  <QRCodeSVG value={qrData} size={90} level="M" />
                 </div>
-                <div className="text-xs text-neutral-600">
-                  <div className="font-black text-black uppercase mb-1">Factura de Consumo Electrónica</div>
-                  {ordenObj.ecf_security_code && <div><span className="font-bold">Código de Seg:</span> {ordenObj.ecf_security_code}</div>}
-                  <div><span className="font-bold">Firma:</span> {new Date(ordenObj.ecf_signature_date || ordenObj.creado_en).toLocaleString("es-DO")}</div>
-                  <div className="mt-1">Consulte en: <span className="font-bold">dgii.gov.do</span></div>
+                <div className="text-xs text-[#003D7A] space-y-1">
+                  <div className="font-black text-[#0051A8] uppercase tracking-wide">Comprobante Fiscal Electrónico</div>
+                  {ordenObj.ecf_security_code && <div><b>Código de Seguridad:</b> {ordenObj.ecf_security_code}</div>}
+                  {ordenObj.ecf_signature_date && (
+                    <div><b>Fecha Firma:</b> {humanizeDate(ordenObj.ecf_signature_date, true)}</div>
+                  )}
+                  <div className="text-[11px] font-bold text-neutral-600">Consulte en: <b>dgii.gov.do</b></div>
                 </div>
+              </div>
+            )}
+            {cleanWarranty && (
+              <div className="text-xs text-neutral-800 bg-neutral-50 p-3 rounded-xl border border-neutral-200 flex items-center gap-2">
+                <span><b>Garantía del Taller:</b> {cleanWarranty}</span>
               </div>
             )}
           </div>
-          
-          <div className="w-[400px] bg-neutral-50 p-6 rounded-2xl border border-neutral-200">
-            <div className="space-y-3 mb-4">
-              <div className="flex justify-between text-neutral-600">
-                <span>Subtotal</span>
-                <span className="font-medium text-black">{formatMoneda(ordenObj.subtotal)}</span>
-              </div>
-              {ordenObj.descuento > 0 && (
-                <div className="flex justify-between text-rose-600 font-semibold">
-                  <span>Descuento</span>
-                  <span>-{formatMoneda(ordenObj.descuento)}</span>
-                </div>
-              )}
-              {ordenObj.itbis > 0 && (
-                <div className="flex justify-between text-neutral-600">
-                  <span>ITBIS (18%)</span>
-                  <span className="font-medium text-black">{formatMoneda(ordenObj.itbis)}</span>
-                </div>
-              )}
-              {ordenObj.costo_envio ? (
-                <div className="flex justify-between text-neutral-600">
-                  <span>Envío</span>
-                  <span className="font-medium text-black">{formatMoneda(ordenObj.costo_envio)}</span>
-                </div>
-              ) : null}
+
+          <div className="w-[360px] bg-neutral-50 p-5 rounded-xl border border-neutral-200 space-y-2 text-xs">
+            <div className="flex justify-between text-neutral-600">
+              <span>Subtotal:</span>
+              <span className="font-semibold text-neutral-900">{formatRD(ordenObj.subtotal)}</span>
             </div>
-            <div className="pt-4 border-t-2 border-neutral-200">
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-black uppercase">Total</span>
-                <span className="text-2xl font-black text-black">{formatMoneda(ordenObj.total)}</span>
+            {ordenObj.itbis > 0 && (
+              <div className="flex justify-between text-neutral-600">
+                <span>ITBIS (18%):</span>
+                <span className="font-semibold text-neutral-900">{formatRD(ordenObj.itbis)}</span>
               </div>
+            )}
+            {ordenObj.descuento > 0 && (
+              <div className="flex justify-between text-rose-600 font-bold">
+                <span>Descuento:</span>
+                <span>-{formatRD(ordenObj.descuento)}</span>
+              </div>
+            )}
+            <div className="pt-2 border-t-2 border-neutral-200 flex justify-between items-center text-sm font-black text-neutral-900">
+              <span>TOTAL A PAGAR:</span>
+              <span className="text-xl text-[#0051A8]">{formatRD(ordenObj.total)}</span>
             </div>
             {vuelto > 0 && (
-              <div className="mt-4 pt-4 border-t border-dashed border-neutral-300 flex justify-between text-emerald-600 font-bold">
-                <span>Su Cambio</span>
-                <span>{formatMoneda(vuelto)}</span>
+              <div className="flex justify-between text-emerald-700 font-bold pt-1 border-t border-dashed border-neutral-300">
+                <span>Cambio:</span>
+                <span>{formatRD(vuelto)}</span>
               </div>
             )}
           </div>
         </div>
-
-        <div className="mt-16 pt-8 border-t border-neutral-200 text-center text-neutral-400 text-sm font-medium">
-          {tenantObj.config?.ticket_pie || "¡Gracias por su compra!"}
-        </div>
       </div>
     );
   }
 
   // =========================================================================
-  // ★ 1. FORMATO COPIA DE PRODUCCIÓN / USO INTERNO (TALLER) ★
-  // =========================================================================
-  if (esProduccion) {
-    return (
-      <div
-        className={`thermal-ticket mx-auto ${w} ${cols} bg-white p-3 font-sans text-[11px] leading-snug text-black`}
-        style={{ fontFamily: '"Segoe UI", Arial, sans-serif' }}
-      >
-        <div className="text-center space-y-0.5 mb-1.5">
-          {tenantObj.logo_url ? (
-            <div className="flex justify-center mb-0">
-              <img src={tenantObj.logo_url} alt="Logo" className="h-16 w-auto max-w-[180px] object-contain filter grayscale" />
-            </div>
-          ) : (
-            <div className="text-base font-bold uppercase leading-tight">{tenantObj.nombre}</div>
-          )}
-        </div>
-
-        <div className="text-center font-black uppercase text-[11px] py-1 bg-black text-white my-1 rounded-xs tracking-wider">
-          ★ COPIA DE USO INTERNO ★
-        </div>
-
-        {ordenObj.ubicacion_ropa && (
-          <div className="my-1.5 p-1.5 border-2 border-black bg-black/5 text-center">
-            <div className="text-[9px] font-bold uppercase tracking-wider text-black">UBICACIÓN:</div>
-            <div className="text-[15px] font-black uppercase">{ordenObj.ubicacion_ropa}</div>
-          </div>
-        )}
-
-        <div className="my-1.5 p-2 border-2 border-black bg-black/5 text-center">
-          <div className="text-[9px] font-bold uppercase tracking-wider text-black">CANTIDAD TOTAL:</div>
-          <div className="text-[18px] font-black tracking-tight leading-none mt-1">
-            {totalPrendas} {totalPrendas === 1 ? "PIEZA / ARTÍCULO" : "PIEZAS / ARTÍCULOS"}
-          </div>
-        </div>
-
-        {/* ORDEN N.° */}
-        <div className="my-2 py-2 border-y-2 border-black flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 text-black shrink-0" />
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-black/70">ORDEN N.°</div>
-              <div className="text-xl font-mono font-black tracking-tight leading-none">{ordenObj.numero}</div>
-            </div>
-          </div>
-          {ordenObj.es_urgente && (
-            <span className="font-black text-white bg-black px-2 py-1 text-[9px] uppercase tracking-wider rounded-xs">
-              ★ URGENTE ★
-            </span>
-          )}
-        </div>
-
-        {/* INFORMACIÓN DEL CLIENTE Y FECHA */}
-        <div className="space-y-1 text-[11px]">
-          <div className="flex items-start justify-between gap-2 py-1.5 border-b border-dotted border-black/40">
-            <div className="flex items-center gap-1.5 font-bold uppercase shrink-0 text-black">
-              <User className="h-3.5 w-3.5 text-black" />
-              <span>CLIENTE:</span>
-            </div>
-            <span className="font-semibold text-right text-black">
-              {clienteObj.nombre} {clienteObj.apellido || ""}
-            </span>
-          </div>
-
-          {clienteObj.telefono && clienteObj.telefono !== "---" && (
-            <div className="flex items-center justify-between gap-2 py-1.5 border-b border-dotted border-black/40">
-              <div className="flex items-center gap-1.5 font-bold uppercase shrink-0 text-black">
-                <Phone className="h-3.5 w-3.5 text-black" />
-                <span>TELÉFONO:</span>
-              </div>
-              <span className="font-mono font-semibold text-right text-black">{formatPhone(clienteObj.telefono)}</span>
-            </div>
-          )}
-
-          <div className="py-1.5 border-b border-dotted border-black/40 text-center">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-black flex items-center justify-center gap-1.5">
-              <Calendar className="h-3.5 w-3.5 text-black" />
-              <span>FECHA DE ENTREGA:</span>
-            </div>
-            <div className="text-[16px] font-black text-black mt-0.5 tracking-tight">
-              {humanizeDate(ordenObj.fecha_entrega, true)}
-            </div>
-          </div>
-
-          {/* LISTA DE ÍTEMS */}
-          <div className="py-1.5 border-b border-dotted border-black/40">
-            <div className="flex items-center gap-1.5 font-bold uppercase text-black mb-1">
-              <Shirt className="h-3.5 w-3.5 text-black" />
-              <span>DETALLE DE ÍTEMS:</span>
-            </div>
-            <div className="pl-2 space-y-1">
-              {(ordenObj.items || []).map((it, i) => (
-                <div key={i} className="text-[10px]">
-                  <span className="font-medium text-black">
-                    • {it.cantidad} × {it.descripcion}{it.es_libra ? ` (${it.cantidad} lb)` : ""}
-                  </span>
-                  {it.notas && (
-                    <div className="text-[9px] font-bold text-black italic pl-2">
-                      ⚠️ Nota: {it.notas}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {ordenObj.notas && (
-            <div className="py-1.5 border-b border-dotted border-black/40">
-              <div className="flex items-center gap-1.5 font-bold uppercase text-black mb-1">
-                <FileText className="h-3.5 w-3.5 text-black" />
-                <span>NOTAS GENERALES:</span>
-              </div>
-              <div className="font-bold text-left text-[11px] leading-snug text-black whitespace-pre-line pl-2">
-                {ordenObj.notas}
-              </div>
-            </div>
-          )}
-
-          {empleadoObj && tenantObj.config?.ticket_mostrar_empleado !== false && (
-            <div className="my-2 p-1.5 border border-black bg-black/5 text-center">
-              <div className="text-[11.5px] font-bold text-black flex items-center justify-center gap-1">
-                <User className="h-4 w-4 text-black" />
-                <span>Atendido por:</span>
-              </div>
-              <div className="text-[14px] font-bold text-black mt-0.5">{empleadoObj.nombre}</div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // =========================================================================
-  // ★ 2. FORMATO COMERCIAL / FISCAL / CLIENTE (TÉRMICO 58mm / 80mm) ★
+  // ★ FORMATO TÉRMICO COMERCIAL / FISCAL (58mm / 80mm) ★
   // =========================================================================
   return (
     <div
-      className={`thermal-ticket mx-auto ${w} ${cols} bg-white p-3 font-sans text-[11px] leading-snug text-black`}
-      style={{ fontFamily: '"Segoe UI", Arial, sans-serif' }}
+      className={`thermal-ticket mx-auto ${w} ${cols} bg-white pl-2.5 pr-6 py-2 text-[11px] leading-snug text-black`}
+      style={{
+        fontFamily: '"Plus Jakarta Sans", sans-serif',
+        WebkitPrintColorAdjust: "exact",
+        printColorAdjust: "exact",
+      }}
     >
-      {/* Encabezado */}
+      {/* 1. ENCABEZADO / LOGO */}
       <div className="text-center space-y-0.5">
         {tenantObj.logo_url ? (
-          <div className="flex justify-center mb-0">
-            <img src={tenantObj.logo_url} alt="Logo" className="h-20 w-auto max-w-[200px] object-contain filter grayscale" />
+          <div className="flex justify-center mb-1">
+            <img
+              src={tenantObj.logo_url}
+              alt="Logo"
+              className="h-14 w-auto max-w-[180px] object-contain filter grayscale"
+            />
           </div>
         ) : (
-          <div className="text-base font-bold uppercase leading-tight">{tenantObj.nombre}</div>
+          <div className="text-base font-black uppercase tracking-tight text-black">
+            {tenantObj.nombre}
+          </div>
         )}
-        {tenantObj.rnc && <div><b>RNC:</b> <span className="font-semibold">{tenantObj.rnc}</span></div>}
-        {tenantObj.telefono && <div><b>Tel:</b> <span className="font-semibold">{formatPhone(tenantObj.telefono)}</span></div>}
-        {tenantObj.direccion && <div className="text-[10px] leading-tight font-semibold">{tenantObj.direccion}</div>}
+        {tenantObj.rnc && (
+          <div className="text-[10px]">
+            <b>RNC:</b> <span className="font-semibold tabular-nums">{tenantObj.rnc}</span>
+          </div>
+        )}
+        {tenantObj.telefono && (
+          <div className="text-[10px]">
+            <b>Tel:</b> <span className="font-semibold tabular-nums">{formatPhoneDO(tenantObj.telefono)}</span>
+          </div>
+        )}
+        {tenantObj.direccion && (
+          <div className="text-[9.5px] leading-tight font-semibold text-black/80">{tenantObj.direccion}</div>
+        )}
       </div>
 
       <Sep />
-      <div className="text-center font-bold uppercase text-[12px] py-0.5">{tipoDocumento}</div>
+
+      {/* 2. TIPO DE DOCUMENTO */}
+      <div className="text-center font-extrabold uppercase text-[12px] py-0.5 tracking-wider">
+        {tipoDocumento}
+      </div>
       {esCopiaCaja && (
-        <div className="text-center font-bold uppercase text-[10px] py-0.5 bg-black text-white my-1 rounded-xs tracking-wider">
+        <div className="text-center font-extrabold uppercase text-[10px] py-0.5 bg-black text-white my-1 rounded-xs tracking-wider">
           ★ COPIA DE CAJA ★
         </div>
       )}
-      <div className="text-center font-bold uppercase text-[11px] py-1 border border-black my-1">
-        {ordenObj.saldo === 0 ? "★ FACTURA PAGADA ★" : `⚠️ PENDIENTE: ${formatMoneda(ordenObj.saldo)}`}
-      </div>
+
       <Sep />
 
-      {/* Meta de orden */}
-      <div>
-        <div className="flex justify-between items-center">
-          <div><b>Orden No°:</b> <span className="font-semibold">{ordenObj.numero}</span></div>
+      {/* 3. METADATOS DE LA ORDEN */}
+      <div className="space-y-1 text-[11px] pr-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <ClipboardList className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>
+              <b>Orden No°:</b> <span className="font-bold tabular-nums ml-0.5">{ordenObj.numero}</span>
+            </span>
+          </div>
           {ordenObj.es_urgente && (
-            <span className="font-bold text-black border border-black px-1 py-0.5 text-[9px] uppercase">
+            <span className="font-bold text-[9px] bg-black text-white px-1.5 py-0.5 rounded-xs uppercase shrink-0">
               ★ URGENTE ★
             </span>
           )}
         </div>
-        {ordenObj.ncf && (
-          <div>
-            <b>{isECF ? "e-NCF" : "NCF"}:</b> <span className="font-semibold">{ordenObj.ncf}</span>
+
+        {fiscalNCF && (
+          <div className="flex items-center gap-1.5">
+            <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>
+              <b>{isECF ? "e-NCF:" : "NCF:"}</b>{" "}
+              <span className="font-bold tabular-nums ml-0.5 font-mono text-[12px]">{fiscalNCF}</span>
+            </span>
           </div>
         )}
-        <div><b>Fecha Emisión:</b> <span className="font-semibold">{new Date(ordenObj.creado_en).toLocaleString("es-DO")}</span></div>
+
+        <div className="flex items-center gap-1.5">
+          <Calendar className="h-3.5 w-3.5 shrink-0 text-black" />
+          <span>
+            <b>Fecha Emisión:</b>{" "}
+            <span className="font-semibold tabular-nums ml-0.5">
+              {humanizeDate(ordenObj.creado_en, true)}
+            </span>
+          </span>
+        </div>
+
         {ordenObj.notas && !ocultarNotas && (
-          <div className="border border-black px-1.5 py-0.5 my-1 text-[10.5px] leading-tight bg-black/5">
+          <div className="border border-black px-1.5 py-0.5 my-1 text-[10px] leading-tight bg-black/5">
             <b>NOTA:</b> {ordenObj.notas}
           </div>
         )}
       </div>
 
-      {/* Datos del Cliente */}
-      <Sep />
-      <div className="text-center font-bold uppercase tracking-widest text-[10px]">Datos del Cliente</div>
-      <Sep />
-      <div>
-        <div><b>Cliente:</b> <span className="font-semibold">{clienteObj.nombre} {clienteObj.apellido || ""}</span></div>
-        {clienteObj.cedula && <div><b>{clienteObj.tipo === "Empresa" ? "RNC:" : "Cédula:"}</b> <span className="font-semibold">{clienteObj.cedula}</span></div>}
-        {clienteObj.telefono && clienteObj.telefono !== "---" && <div><b>Teléfono:</b> <span className="font-semibold">{formatPhone(clienteObj.telefono)}</span></div>}
-        {clienteObj.direccion && <div><b>Dirección:</b> <span className="font-semibold">{clienteObj.direccion}</span></div>}
-      </div>
-      <Sep />
-
-      {/* Tabla de ítems */}
-      <div className="flex justify-between font-bold uppercase text-[10px] mb-1">
-        <div className="w-[60%]">DESCRIPCIÓN</div>
-        <div className="w-[15%] text-right">ITBIS</div>
-        <div className="w-[25%] text-right">VALOR</div>
-      </div>
-      <Sep />
-
-      <div className="mt-1 mb-2 space-y-2">
-        {(ordenObj.items || []).map((it, i) => {
-          const qty = it.cantidad || 1;
-          const price = it.precio_unitario || 0;
-          const baseTotal = qty * price;
-          return (
-            <div key={i} className="flex justify-between items-start">
-              <div className="w-[60%] pr-1">
-                <div className="font-bold leading-snug text-[11px] text-black">
-                  {it.descripcion}{it.es_libra ? ` (${qty}lb)` : ""}
-                </div>
-                <div className="text-[10px] text-black font-semibold leading-tight mt-0.5">
-                  {qty} × {formatMoneda(price).replace("RD$", "").trim()}
-                </div>
-                {it.notas && <div className="text-[9px] italic leading-tight text-black mt-0.5">Nota: {it.notas}</div>}
-              </div>
-              <div className="w-[15%] text-right font-semibold pt-0.5 text-[10px]">
-                {ordenObj.itbis > 0 ? formatMoneda(baseTotal * 0.18).replace("RD$", "").trim() : "0.00"}
-              </div>
-              <div className="w-[25%] text-right font-bold pt-0.5 text-[11px]">
-                {formatMoneda(baseTotal).replace("RD$", "").trim()}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <Sep />
-      {/* Totales */}
-      <div>
-        <div className="text-center font-bold text-[12px] my-1">
-          TOTAL DE PIEZAS / ARTÍCULOS: {totalPrendas}
-        </div>
-        <Row k="Subtotal" v={formatMoneda(ordenObj.subtotal)} />
-        {ordenObj.itbis > 0 && <Row k="ITBIS" v={formatMoneda(ordenObj.itbis)} />}
-        {ordenObj.descuento > 0 && <Row k="Descuento" v={`-${formatMoneda(ordenObj.descuento)}`} />}
-        {ordenObj.costo_envio ? <Row k="🚚 Envío" v={formatMoneda(ordenObj.costo_envio)} /> : null}
-        <div className="my-1 border-t border-dashed border-black" />
-        <Row k="TOTAL" v={formatMoneda(ordenObj.total)} bold />
-      </div>
-
-      <Sep />
-      {/* Información de Pago */}
-      <div>
-        <Row k="Método de pago" v={ordenObj.metodo_pago} />
-        <Row k="Estado" v={ordenObj.saldo === 0 ? "PAGADA" : "PENDIENTE DE PAGO"} boldValue />
-        {effectivePagoRecibido !== undefined && (
-          <>
-            <Row k="Recibido" v={formatMoneda(effectivePagoRecibido)} />
-            {vuelto > 0 && <Row k="Cambio" v={formatMoneda(vuelto)} boldValue />}
-          </>
-        )}
-      </div>
-
-      <Sep />
-      {/* Entrega y Pie */}
-      <div>
-        <Row k="Fecha de entrega" v={humanizeDate(ordenObj.fecha_entrega, false)} boldValue />
-        <Row k="Estado de orden" v={(ordenObj.estado || "completada").replace("_", " ")} />
-      </div>
-
-      {warrantyText && (
-        <div className="border-t border-dashed border-black pt-1.5 my-2 text-[10px] font-bold leading-snug text-center px-1 text-black">
-          <span>🛡️ Garantía: {warrantyText}</span>
-        </div>
-      )}
-
-      {empleadoObj && tenantObj.config?.ticket_mostrar_empleado !== false && (
+      {/* 4. DATOS DEL VEHÍCULO */}
+      {ordenObj.vehicle?.plate && (
         <>
           <Sep />
-          <div className="text-center py-0.5">
-            <div className="text-[12px] font-bold text-black">Atendido por:</div>
-            <div className="text-[14.5px] font-bold text-black mt-0.5">{empleadoObj.nombre}</div>
+          <div className="text-center font-bold tracking-widest text-[10.5px] uppercase py-0.5">
+            DATOS DEL VEHÍCULO
+          </div>
+          <Sep />
+          <div className="space-y-0.5 text-[10.5px] pr-2">
+            <div className="flex items-center gap-1.5 font-bold">
+              <Car className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>
+                {ordenObj.vehicle.brand} {ordenObj.vehicle.model}{" "}
+                {ordenObj.vehicle.year ? `(${ordenObj.vehicle.year})` : ""}
+              </span>
+            </div>
+            <div className="flex justify-between pl-5 text-[10px]">
+              <span><b>Placa:</b> <span className="font-mono font-bold">{ordenObj.vehicle.plate}</span></span>
+              {ordenObj.vehicle.km && (
+                <span><b>Km:</b> <span className="tabular-nums font-semibold">{Number(ordenObj.vehicle.km).toLocaleString()}</span></span>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* 5. DATOS DEL CLIENTE */}
+      {clienteObj && clienteObj.nombre !== "Consumidor" && (
+        <>
+          <Sep />
+          <div className="text-center font-bold tracking-widest text-[10.5px] uppercase py-0.5">
+            DATOS DEL CLIENTE
+          </div>
+          <Sep />
+          <div className="space-y-1 text-[11px] pr-2">
+            <div className="flex items-start gap-1.5">
+              <User className="h-3.5 w-3.5 shrink-0 mt-0.5 text-black" />
+              <div>
+                <b>Cliente:</b>{" "}
+                <span className="font-semibold ml-0.5">
+                  {clienteObj.nombre} {clienteObj.apellido || ""}
+                </span>
+              </div>
+            </div>
+
+            {clienteObj.cedula && (
+              <div className="flex items-start gap-1.5 text-[10px]">
+                <CreditCard className="h-3.5 w-3.5 shrink-0 mt-0.5 text-black" />
+                <div>
+                  <b>{clienteObj.tipo === "Empresa" ? "RNC:" : "Cédula:"}</b>{" "}
+                  <span className="font-semibold tabular-nums ml-0.5 font-mono">{clienteObj.cedula}</span>
+                </div>
+              </div>
+            )}
+
+            {clienteObj.telefono && clienteObj.telefono !== "---" && (
+              <div className="flex items-start gap-1.5 text-[10px]">
+                <Phone className="h-3.5 w-3.5 shrink-0 mt-0.5 text-black" />
+                <div>
+                  <b>Teléfono:</b>{" "}
+                  <span className="font-semibold tabular-nums ml-0.5">{formatPhoneDO(clienteObj.telefono)}</span>
+                </div>
+              </div>
+            )}
+
+            {clienteObj.direccion && (
+              <div className="flex items-start gap-1.5 text-[10px] leading-tight">
+                <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5 text-black" />
+                <div className="break-words">
+                  <b>Dirección:</b> <span className="font-normal ml-0.5">{clienteObj.direccion}</span>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
 
       <Sep />
-      <div className="text-center py-1">
-        <div>{tenantObj.config?.ticket_pie || "¡Gracias por su preferencia!"}</div>
-        {tenantObj.config?.ticket_nota && (
-          <div className="text-[10px] leading-tight whitespace-pre-line border-t border-dashed border-black/30 pt-1 mt-1 font-medium">
-            {tenantObj.config.ticket_nota}
+
+      {/* 6. TABLA DE ÍTEMS Y SERVICIOS */}
+      <div>
+        <div className="flex justify-between items-center font-bold uppercase text-[9.5px] pb-1 border-b border-black text-black">
+          <div className="flex-1 min-w-0 flex items-center gap-1">
+            <Cog className="h-3.5 w-3.5 shrink-0" />
+            <span>DESCRIPCIÓN</span>
+          </div>
+          {ordenObj.itbis > 0 && (
+            <div className="w-[20%] text-right flex items-center justify-end gap-0.5">
+              <BadgePercent className="h-3 w-3 shrink-0" />
+              <span>ITBIS</span>
+            </div>
+          )}
+          <div className="w-[26%] text-right pr-2 flex items-center justify-end gap-0.5">
+            <Tag className="h-3 w-3 shrink-0" />
+            <span>VALOR</span>
+          </div>
+        </div>
+
+        <div className="divide-y divide-dotted divide-black/30">
+          {ordenObj.items.map((it, idx) => {
+            const qty = it.cantidad || 1;
+            const price = it.precio_unitario || 0;
+            const baseTotal = qty * price;
+            const itbisVal = ordenObj.itbis > 0 && !it.is_exento ? baseTotal * 0.18 : 0;
+
+            return (
+              <div key={idx} className="flex justify-between items-start py-1">
+                <div className="flex-1 min-w-0 pr-1">
+                  <div className="font-semibold leading-tight text-[10.5px] break-words">
+                    {it.descripcion}
+                  </div>
+                  {price > 0 && (
+                    <div className="text-[9.5px] text-black/80 font-semibold tabular-nums">
+                      {qty} × {formatNumber(price)}
+                    </div>
+                  )}
+                  {it.notas && (
+                    <div className="text-[9px] italic leading-tight text-black/80 font-normal">
+                      Nota: {it.notas}
+                    </div>
+                  )}
+                </div>
+
+                {ordenObj.itbis > 0 && (
+                  <div className="w-[20%] text-right font-semibold pt-0.5 tabular-nums tracking-tight whitespace-nowrap text-[10px]">
+                    {itbisVal > 0 ? formatNumber(itbisVal) : "0.00"}
+                  </div>
+                )}
+
+                <div className="w-[26%] text-right pr-2 font-bold pt-0.5 tabular-nums tracking-tight whitespace-nowrap text-[10.5px]">
+                  {formatNumber(baseTotal)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <Sep />
+
+      {/* 7. DESGLOSE FINANCIERO */}
+      <div className="space-y-1 text-[11px] pt-1 pr-3">
+        <div className="flex justify-between items-center gap-2">
+          <div className="flex items-center gap-1.5 font-semibold shrink-0">
+            <Calculator className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>Subtotal</span>
+          </div>
+          <span className="font-semibold tabular-nums tracking-tight whitespace-nowrap">
+            {formatRD(ordenObj.subtotal)}
+          </span>
+        </div>
+
+        {ordenObj.itbis > 0 && (
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex items-center gap-1.5 font-semibold shrink-0">
+              <Landmark className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>ITBIS 18%</span>
+            </div>
+            <span className="font-semibold tabular-nums tracking-tight whitespace-nowrap">
+              {formatRD(ordenObj.itbis)}
+            </span>
+          </div>
+        )}
+
+        {ordenObj.descuento > 0 && (
+          <div className="flex justify-between items-center gap-2 text-black">
+            <div className="flex items-center gap-1.5 font-semibold shrink-0">
+              <Percent className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>Descuento</span>
+            </div>
+            <span className="font-bold tabular-nums tracking-tight whitespace-nowrap">
+              -{formatRD(ordenObj.descuento)}
+            </span>
+          </div>
+        )}
+
+        <div className="my-1 border-t-[1.5px] border-dashed border-black" />
+
+        <div className="flex justify-between items-center py-0.5 gap-2">
+          <div className="flex items-center gap-1.5 text-[12.5px] font-black tracking-tight shrink-0">
+            <CircleDollarSign className="h-4 w-4 shrink-0 text-black" />
+            <span>TOTAL</span>
+          </div>
+          <span className="font-black text-[14.5px] tabular-nums tracking-tight whitespace-nowrap">
+            {formatRD(ordenObj.total)}
+          </span>
+        </div>
+
+        {ordenObj.descuento > 0 && (
+          <div className="mt-1 py-1 px-2 border border-dashed border-black rounded text-center text-[10.5px] font-bold leading-tight">
+            ¡Te ahorraste {formatRD(ordenObj.descuento)} en este servicio!
           </div>
         )}
       </div>
 
-      {/* QR e-CF */}
-      {isECF && qrData && (
-        <div className="mt-2 flex flex-col items-center gap-1">
-          <div className="p-1 bg-white border border-black">
-            <QRCodeSVG value={qrData} size={95} level="M" />
+      <Sep />
+
+      {/* 9. DETALLES DE PAGO */}
+      <div className="space-y-1 text-[11px] pr-3">
+        <div className="flex justify-between items-center gap-2">
+          <div className="flex items-center gap-1.5 font-semibold shrink-0">
+            <CreditCard className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>Método de pago:</span>
           </div>
-          <div className="text-[8px] text-center leading-tight">
-            {ordenObj.ecf_security_code && <div>Cód. Seguridad: {ordenObj.ecf_security_code}</div>}
+          <span className="font-bold uppercase truncate">{ordenObj.metodo_pago}</span>
+        </div>
+
+        <div className="flex justify-between items-center gap-2">
+          <div className="flex items-center gap-1.5 font-semibold shrink-0">
+            <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>Estado de factura:</span>
+          </div>
+          <span className="font-black uppercase tracking-wide shrink-0">
+            {ordenObj.saldo === 0 ? "PAGADA" : "PENDIENTE DE PAGO"}
+          </span>
+        </div>
+
+        {effectivePagoRecibido !== undefined && (
+          <>
+            <Row k="Recibido" v={formatRD(effectivePagoRecibido)} icon={Coins} />
+            {vuelto > 0 && <Row k="Su Cambio" v={formatRD(vuelto)} icon={ArrowRightLeft} boldValue />}
+          </>
+        )}
+      </div>
+
+      {cleanWarranty && (
+        <>
+          <Sep />
+          <div className="text-[10px] leading-snug font-bold border border-black py-1 px-1.5 text-center">
+            <span>GARANTÍA:</span> <span className="font-semibold">{cleanWarranty}</span>
+          </div>
+        </>
+      )}
+
+      {/* 10. ATENDIDO POR & PIE DE PÁGINA */}
+      {empleadoObj && (
+        <>
+          <Sep />
+          <div className="text-center py-0.5">
+            <div className="text-[10.5px] font-bold text-black uppercase tracking-wide">Técnico / Mecánico:</div>
+            <div className="text-[13px] font-black text-black mt-0.5">{empleadoObj.nombre}</div>
+          </div>
+        </>
+      )}
+
+      <Sep />
+      <div className="text-center py-0.5 text-[10.5px] font-bold uppercase tracking-wider text-black">
+        {tenantObj.config?.ticket_pie || "¡GRACIAS POR SU PREFERENCIA!"}
+      </div>
+
+      {/* 11. SECCIÓN FISCAL DGII E-CF / QR CODE */}
+      {isECF && (
+        <div className="mt-2.5 flex flex-col items-center gap-1 pt-1 border-t-[1.5px] border-dashed border-black">
+          <div className="text-[9.5px] font-black uppercase text-center tracking-wide">
+            {tipoDocumento}
+          </div>
+
+          {qrData ? (
+            <div className="p-1 bg-white border border-black my-1">
+              <QRCodeSVG value={qrData} size={95} level="M" />
+            </div>
+          ) : null}
+
+          <div className="text-[9px] text-center leading-snug font-bold text-black space-y-0.5">
+            {ordenObj.ecf_security_code && (
+              <div>
+                Código de Seguridad: <span className="font-black font-mono">{ordenObj.ecf_security_code}</span>
+              </div>
+            )}
+            {ordenObj.ecf_signature_date && (
+              <div>
+                Fecha Firma: <span className="font-semibold">{humanizeDate(ordenObj.ecf_signature_date, true)}</span>
+              </div>
+            )}
+            <div>Estado DGII: <span className="font-black">ACCEPTED</span></div>
+          </div>
+
+          <div className="text-[9px] text-center leading-tight font-bold text-black mt-0.5">
+            Consulte su factura en:<br />
+            <span className="font-black">dgii.gov.do</span>
           </div>
         </div>
       )}
@@ -759,17 +907,36 @@ export function Ticket({
   );
 }
 
-// Separador con línea discontinua clásica de ticket
 function Sep() {
-  return <div className="my-1.5 border-t border-dashed border-black" />;
+  return <div className="my-1.5 border-t-[1.5px] border-dashed border-black" />;
 }
 
-// Fila clave-valor alineada
-function Row({ k, v, bold, boldValue }: { k: string; v: string; bold?: boolean; boldValue?: boolean }) {
+function Row({
+  k,
+  v,
+  bold,
+  boldValue,
+  icon: Icon,
+}: {
+  k: string;
+  v: string;
+  bold?: boolean;
+  boldValue?: boolean;
+  icon?: any;
+}) {
   return (
-    <div className={`flex justify-between text-[11px] ${bold ? "font-bold text-[12px]" : "font-semibold"}`}>
-      <span>{k}:</span>
-      <span className={boldValue || bold ? "font-bold" : "font-semibold"}>{v}</span>
+    <div
+      className={`flex justify-between items-center gap-2 text-[11px] ${
+        bold ? "font-bold" : "font-semibold"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 font-semibold shrink-0">
+        {Icon && <Icon className="h-3.5 w-3.5 shrink-0 text-black" />}
+        <span>{k}:</span>
+      </div>
+      <span className={boldValue || bold ? "font-bold tabular-nums" : "font-semibold tabular-nums"}>
+        {v}
+      </span>
     </div>
   );
 }

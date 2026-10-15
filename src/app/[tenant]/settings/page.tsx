@@ -257,7 +257,7 @@ export default function SettingsPage() {
     setBranchForm({ ...branchForm, name: val, slug });
   };
 
-  const handleRegisterBranch = () => {
+  const handleRegisterBranch = async () => {
     if (!branchForm.name || !branchForm.slug) {
       toast.error("El nombre y el slug comercial son obligatorios");
       return;
@@ -267,7 +267,7 @@ export default function SettingsPage() {
       return;
     }
 
-    const newTenantId = `t-${Date.now()}`;
+    const newTenantId = crypto.randomUUID();
     addTenant({
       id: newTenantId,
       name: branchForm.name,
@@ -281,8 +281,17 @@ export default function SettingsPage() {
     });
 
     if (currentUser) {
+      await supabaseAdmin.from("tenant_users").insert({
+        user_id: currentUser.id,
+        tenant_id: newTenantId,
+        name: currentUser.name,
+        email: currentUser.email,
+        role: currentUser.role,
+        status: "active"
+      });
+
       addUser({
-        id: `u-${Date.now()}`,
+        id: currentUser.id,
         tenantId: newTenantId,
         name: currentUser.name,
         email: currentUser.email,
@@ -297,9 +306,10 @@ export default function SettingsPage() {
     setBranchForm({ name: "", rnc: "", address: "", phone: "", email: "", slug: "" });
   };
 
-  const confirmDeleteBranch = () => {
+  const confirmDeleteBranch = async () => {
     if (!deleteBranchTarget) return;
     deleteTenant(deleteBranchTarget.id);
+    await supabaseAdmin.from("tenant_users").delete().eq("tenant_id", deleteBranchTarget.id);
     toast.success(`Sucursal "${deleteBranchTarget.name}" eliminada de forma permanente`);
     setDeleteBranchTarget(null);
   };
@@ -474,9 +484,14 @@ export default function SettingsPage() {
     setIsInviting(false);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     deleteUser(deleteTarget.id);
+    await supabaseAdmin
+      .from("tenant_users")
+      .delete()
+      .or(`user_id.eq.${deleteTarget.id},id.eq.${deleteTarget.id}`)
+      .eq("tenant_id", taller.id);
     toast.success(`Usuario "${deleteTarget.name}" eliminado`);
     setDeleteTarget(null);
   };

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useParams } from "@/lib/next-compat";
 import { useStore, Product } from "@/store/useStore";
+import { InventoryMovement } from "@/store/types";
 import {
   Plus,
   Search,
@@ -25,6 +26,8 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  ArrowLeftRight,
+  Truck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -490,7 +493,7 @@ export default function InventoryPage() {
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
   const isOwner = activeRole === 'owner';
 
-  const { addProduct, updateProduct, deleteProduct, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();
+  const { addProduct, updateProduct, deleteProduct, bulkImportProducts, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();
   const allProducts = useStore((s) => s.products);
   const allPurchaseOrders = useStore((s) => s.purchaseOrders) || [];
   const purchaseOrders = tenantId ? allPurchaseOrders.filter((po) => po.tenantId === tenantId) : [];
@@ -506,6 +509,7 @@ export default function InventoryPage() {
   const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && (s.status as any) !== "inactivo") : [];
 
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("products");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [kpiFilter, setKpiFilter] = useState<"all" | "low" | "out">("all");
   const [sortField, setSortField] = useState<"name" | "salePrice" | "stock" | "margin">("margin");
@@ -525,6 +529,46 @@ export default function InventoryPage() {
   const [adjustType, setAdjustType] = useState<"in" | "out" | "adjustment">("in");
   const [adjustReason, setAdjustReason] = useState("");
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false);
+  const [confirmDeleteText, setConfirmDeleteText] = useState("");
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const handleDeleteAllInventory = async () => {
+    if (!tenantId) return;
+    setIsDeletingAll(true);
+    try {
+      const { supabaseAdmin } = await import("@/lib/supabase");
+      
+      // 1. Eliminar movimientos de inventario de este tenant en Supabase
+      const { error: movErr } = await supabaseAdmin
+        .from("movements")
+        .delete()
+        .eq("tenant_id", tenantId);
+      if (movErr) console.warn("Error borrando movimientos en BD:", movErr);
+
+      // 2. Eliminar productos de este tenant en Supabase
+      const { error: prodErr } = await supabaseAdmin
+        .from("products")
+        .delete()
+        .eq("tenant_id", tenantId);
+      if (prodErr) throw prodErr;
+
+      // 3. Limpiar estado en Zustand local
+      useStore.setState((state) => ({
+        products: state.products.filter((p) => p.tenantId !== tenantId),
+        movements: state.movements.filter((m) => m.tenantId !== tenantId),
+      }));
+
+      toast.success("El inventario ha sido vaciado por completo de la base de datos.");
+      setIsDeleteAllModalOpen(false);
+      setConfirmDeleteText("");
+    } catch (err: any) {
+      console.error("Error al vaciar inventario:", err);
+      toast.error(err?.message || "Ocurrió un error al vaciar el inventario.");
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
 
   const productTableRef = useRef<HTMLDivElement>(null);
   const comboTableRef = useRef<HTMLDivElement>(null);
@@ -678,6 +722,21 @@ export default function InventoryPage() {
       return sortOrder === "asc" ? valA - valB : valB - valA;
     });
   }, [filteredCombos, sortField, sortOrder]);
+
+  // Paginación por cada 20 productos para carga ultra rápida y fluido
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
+
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize));
+  const effectivePage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedProducts = useMemo(() => {
+    const start = (effectivePage - 1) * pageSize;
+    return sortedProducts.slice(start, start + pageSize);
+  }, [sortedProducts, effectivePage, pageSize]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, categoryFilter, kpiFilter, sortField, sortOrder]);
 
   const totalValue = products.reduce((acc, p) => acc + p.salePrice * p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock > 0 && p.stock <= p.minStock).length;
@@ -865,86 +924,124 @@ export default function InventoryPage() {
     toast.success(`${products.length} productos exportados`);
   };
 
-  const handleImport = (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => {
+  const handleImport = async (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => {
     let imported = 0;
     let totalPurchaseCost = 0;
     let totalPurchaseTax = 0;
     
-    // Preparar items para la orden de compra
+    const prodsToCreate: Product[] = [];
+    const prodsToUpdate: Product[] = [];
+    const newMovements: InventoryMovement[] = [];
     const purchaseOrderItems: any[] = [];
+
+    // Fast O(1) maps to prevent duplicate queries on large arrays
+    const existingBySku = new Map<string, Product>();
+    const existingByName = new Map<string, Product>();
+    products.forEach((p) => {
+      if (p.sku) existingBySku.set(p.sku.toLowerCase().trim(), p);
+      if (p.name) existingByName.set(p.name.toLowerCase().trim(), p);
+    });
+
+    const now = Date.now();
+
     rows.forEach((row) => {
-      if (!row.name.trim()) return;
+      const cleanName = (row.name || "").trim();
+      const cleanSku = (row.sku || "").trim();
+      const n = cleanName.toUpperCase();
       
-      const existingProduct = products.find(p => 
-        (row.sku && p.sku === row.sku) || 
-        p.name.toLowerCase() === row.name.trim().toLowerCase()
-      );
+      // Filtrar filas de totales del Excel sin afectar marcas reales como "TOTAL 5W30"
+      if (
+        !cleanName || 
+        n === "TOTALES" || 
+        n === "TOTAL" || 
+        n === "SUBTOTAL" || 
+        n === "TOTAL GENERAL" || 
+        n === "RESUMEN" ||
+        ((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !cleanSku)
+      ) return;
+      
+      // Si tiene SKU propio, solo coincide por SKU (evita fusionar artículos distintos con igual nombre)
+      const existingProduct = cleanSku 
+        ? existingBySku.get(cleanSku.toLowerCase()) 
+        : existingByName.get(cleanName.toLowerCase());
       
       let productId = "";
-      let productName = row.name.trim();
+      let productName = cleanName;
+
+      // Usar exactamente la cantidad del archivo
+      const itemQty = Number(row.stock !== undefined && !isNaN(row.stock) ? row.stock : (row.quantity || 0)) || 0;
+      const costPrice = Number(row.costPrice) || 0;
+      const salePrice = Number(row.salePrice) || 0;
 
       if (existingProduct) {
         productId = existingProduct.id;
         productName = existingProduct.name;
-        updateProduct(existingProduct.id, {
-          stock: existingProduct.stock + (Number(row.quantity) || 0),
-          costPrice: row.costPrice > 0 ? row.costPrice : existingProduct.costPrice,
-          salePrice: row.salePrice > 0 ? row.salePrice : existingProduct.salePrice,
-        });
+        const updated: Product = {
+          ...existingProduct,
+          stock: existingProduct.stock + itemQty,
+          costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
+          salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
+        };
+        prodsToUpdate.push(updated);
+        if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), updated);
+        else existingByName.set(cleanName.toLowerCase(), updated);
       } else {
         const newProduct: Product = {
-          id: `p${Date.now()}-${imported}`,
+          id: `p${now}-${imported}-${Math.random().toString(36).substr(2, 5)}`,
           tenantId: tenantId,
-          name: row.name.trim(),
-          sku: row.sku || `SKU-${Date.now()}-${imported}`,
+          name: cleanName,
+          sku: cleanSku || `SKU-${now}-${imported}`,
           barcode: "",
           category: row.category || "Otros",
           brand: row.brand || "",
           supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",
-          costPrice: row.costPrice || 0,
-          salePrice: row.salePrice || 0,
-          stock: (Number(row.stock) || 0) + (Number(row.quantity) || 0),
+          costPrice: costPrice,
+          salePrice: salePrice,
+          stock: itemQty, // Cantidad exacta del archivo, NUNCA duplicada
           minStock: row.minStock || 5,
           tax: row.tax || 18,
           location: row.location || "",
         };
         productId = newProduct.id;
-        addProduct(newProduct);
+        prodsToCreate.push(newProduct);
+        if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), newProduct);
+        else existingByName.set(cleanName.toLowerCase(), newProduct);
       }
       
-      if (row.quantity > 0) {
-        const itemCost = Number(row.costPrice) || 0;
-        const itemQty = Number(row.quantity);
+      if (itemQty > 0) {
         const itemTaxPct = Number(row.tax) || 18;
-        
-        const lineTotalCost = itemCost * itemQty;
+        const lineTotalCost = costPrice * itemQty;
         const lineTax = Math.round(lineTotalCost * (itemTaxPct / 100));
         
         totalPurchaseCost += lineTotalCost;
         totalPurchaseTax += lineTax;
-        addMovement({
-          id: `m${Date.now()}-${imported}`,
+
+        newMovements.push({
+          id: `m${now}-${imported}-${Math.random().toString(36).substr(2, 5)}`,
           tenantId: tenantId,
           productId: productId,
           productName: productName,
           type: "in",
-          quantity: row.quantity,
+          quantity: itemQty,
           reason: "Importación de compra",
           date: new Date().toISOString(),
         });
         
         purchaseOrderItems.push({
-          id: `po_item_${Date.now()}-${imported}`,
+          id: `po_item_${now}-${imported}`,
           productId: productId,
           productName: productName,
           quantity: itemQty,
-          unitPrice: itemCost,
-          salePrice: row.salePrice || 0,
+          unitPrice: costPrice,
+          salePrice: salePrice,
           receivedQuantity: itemQty
         });
       }
       imported++;
     });
+
+    // Guardado masivo atómico en Zustand y Supabase en lotes
+    await bulkImportProducts(prodsToCreate, prodsToUpdate, newMovements);
 
     if (supplierId && totalPurchaseCost > 0) {
       const selectedSupplier = suppliers.find(s => s.id === supplierId);
@@ -996,6 +1093,19 @@ export default function InventoryPage() {
           <p className="text-neutral-500">Gestiona tus productos, repuestos y suministros.</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button 
+            variant="outline" 
+            className="flex items-center gap-2 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 font-bold text-xs h-9 cursor-pointer transition-colors shadow-2xs"
+            onClick={() => {
+              setConfirmDeleteText("");
+              setIsDeleteAllModalOpen(true);
+            }}
+            title="Eliminar todo el inventario de la base de datos"
+          >
+            <Trash2 className="h-4 w-4 text-rose-500" />
+            <span className="hidden sm:inline">Vaciar Inventario</span>
+          </Button>
+
           <Button variant="outline" className="hidden rounded-lg md:flex gap-2" onClick={handleExportCSV}>
             <Download className="h-4 w-4" /> Exportar CSV
           </Button>
@@ -1127,53 +1237,128 @@ export default function InventoryPage() {
       </div>
 
       {/* Tabs: Productos / Combos / Movimientos / Pedidos */}
-      <Tabs defaultValue="products">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <TabsList className="bg-neutral-100/90 p-1 rounded-xl border border-neutral-200/60 inline-flex items-center gap-1 h-auto">
+      <Tabs value={activeTab} onValueChange={(val) => val && setActiveTab(val as string)}>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-2 sm:p-2.5 rounded-2xl border border-neutral-200/80 shadow-2xs">
+          <TabsList className="bg-neutral-100/90 p-1 rounded-xl border border-neutral-200/60 inline-flex items-center gap-1 h-auto flex-wrap sm:flex-nowrap">
             <TabsTrigger 
               value="products" 
-              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+              onClick={() => setActiveTab("products")}
+              className={cn(
+                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
+                activeTab === "products"
+                  ? "!bg-black !text-white shadow-xs"
+                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
+              )}
             >
-              Productos
+              <Package className="h-3.5 w-3.5" />
+              <span>Productos</span>
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
+                activeTab === "products"
+                  ? "!bg-neutral-800 !text-white"
+                  : "bg-neutral-200/80 text-neutral-700"
+              )}>
+                {products.filter(p => !p.isCombo).length}
+              </span>
             </TabsTrigger>
+
             <TabsTrigger 
               value="combos" 
-              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+              onClick={() => setActiveTab("combos")}
+              className={cn(
+                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
+                activeTab === "combos"
+                  ? "!bg-black !text-white shadow-xs"
+                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
+              )}
             >
-              Combos / Paquetes
+              <Layers className="h-3.5 w-3.5" />
+              <span>Combos</span>
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
+                activeTab === "combos"
+                  ? "!bg-neutral-800 !text-white"
+                  : "bg-neutral-200/80 text-neutral-700"
+              )}>
+                {products.filter(p => p.isCombo).length}
+              </span>
             </TabsTrigger>
+
             <TabsTrigger 
               value="movements" 
-              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-neutral-600 transition-all data-[state=active]:bg-white data-[state=active]:text-neutral-900 data-[state=active]:shadow-2xs"
+              onClick={() => setActiveTab("movements")}
+              className={cn(
+                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
+                activeTab === "movements"
+                  ? "!bg-black !text-white shadow-xs"
+                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
+              )}
             >
-              Movimientos
+              <ArrowLeftRight className="h-3.5 w-3.5" />
+              <span>Movimientos</span>
+              <span className={cn(
+                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
+                activeTab === "movements"
+                  ? "!bg-neutral-800 !text-white"
+                  : "bg-neutral-200/80 text-neutral-700"
+              )}>
+                {movements.length}
+              </span>
             </TabsTrigger>
+
             <TabsTrigger 
               value="pedidos" 
-              className="rounded-lg px-3.5 py-1.5 text-xs font-semibold text-blue-600 transition-all data-[state=active]:bg-white data-[state=active]:text-blue-700 data-[state=active]:shadow-2xs"
+              onClick={() => setActiveTab("pedidos")}
+              className={cn(
+                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
+                activeTab === "pedidos"
+                  ? "!bg-black !text-white shadow-xs"
+                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
+              )}
             >
-              Pedidos (Auto)
+              <Truck className="h-3.5 w-3.5" />
+              <span>Pedidos (Auto)</span>
+              {lowStockCount > 0 && (
+                <span className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
+                  activeTab === "pedidos"
+                    ? "!bg-blue-600 !text-white"
+                    : "bg-blue-100 text-blue-700"
+                )}>
+                  {lowStockCount}
+                </span>
+              )}
             </TabsTrigger>
           </TabsList>
 
           {/* Search + filter */}
-          <div className="flex items-center gap-2.5 w-full md:w-auto">
-            <div className="relative flex-1 md:w-64">
+          <div className="flex items-center gap-2 w-full lg:w-auto">
+            <div className="relative flex-1 lg:w-72">
               <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
               <Input 
                 placeholder="Buscar producto, SKU, marca..." 
-                className="rounded-xl border-neutral-200/80 bg-white pl-9 h-9 text-xs focus:border-neutral-400 transition-colors"
+                className="rounded-xl border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white pl-9 pr-7 h-9 text-xs focus:border-neutral-400 transition-colors shadow-2xs"
                 value={search} 
                 onChange={(e) => setSearch(e.target.value)} 
               />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 text-xs font-bold cursor-pointer"
+                  title="Limpiar búsqueda"
+                >
+                  ✕
+                </button>
+              )}
             </div>
             <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v || "Todos")}>
-              <SelectTrigger className="w-36 h-9 rounded-xl border-neutral-200/80 bg-white text-xs font-semibold text-neutral-700 hover:border-neutral-300 transition-colors">
+              <SelectTrigger className="w-40 h-9 rounded-xl border-neutral-200 bg-neutral-50/50 hover:bg-white text-xs font-semibold text-neutral-700 hover:border-neutral-300 transition-colors shrink-0 shadow-2xs cursor-pointer">
                 <Filter className="h-3.5 w-3.5 mr-1.5 text-neutral-400" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-neutral-200">
-                <SelectItem value="Todos" className="text-xs">Todos</SelectItem>
+                <SelectItem value="Todos" className="text-xs">Todas las Categorías</SelectItem>
                 {CATEGORIES.map(c => <SelectItem key={c} value={c} className="text-xs">{c}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -1255,7 +1440,7 @@ export default function InventoryPage() {
                       No se encontraron productos.
                     </TableCell>
                   </TableRow>
-                ) : sortedProducts.map((product) => {
+                ) : paginatedProducts.map((product) => {
                   const margin = calculateMargin(product.salePrice, product.costPrice);
                   return (
                     <TableRow key={product.id} className="group hover:bg-neutral-50/70 transition-colors">
@@ -1362,6 +1547,109 @@ export default function InventoryPage() {
                 })}
               </TableBody>
             </Table>
+          </div>
+
+          {/* Controles de Paginación — 20 por página */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-2.5 bg-white rounded-2xl border border-neutral-200/80 shadow-2xs mt-3">
+            <div className="flex items-center gap-2 text-xs text-neutral-500 font-medium">
+              <span>
+                Mostrando{" "}
+                <strong className="text-neutral-900 font-bold">
+                  {sortedProducts.length > 0 ? (effectivePage - 1) * pageSize + 1 : 0}
+                </strong>{" "}
+                -{" "}
+                <strong className="text-neutral-900 font-bold">
+                  {Math.min(effectivePage * pageSize, sortedProducts.length)}
+                </strong>{" "}
+                de <strong className="text-neutral-900 font-bold">{sortedProducts.length}</strong> productos
+              </span>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs rounded-xl font-bold cursor-pointer hover:bg-neutral-100 disabled:opacity-40"
+                  disabled={effectivePage <= 1}
+                  onClick={() => setCurrentPage(1)}
+                  title="Primera página"
+                >
+                  ««
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs rounded-xl font-bold cursor-pointer hover:bg-neutral-100 disabled:opacity-40"
+                  disabled={effectivePage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  ◀ Anterior
+                </Button>
+
+                <div className="flex items-center gap-1 px-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - effectivePage) <= 2)
+                    .reduce((acc: (number | string)[], p, idx, arr) => {
+                      if (idx > 0 && p - (arr[idx - 1] as number) > 1) {
+                        acc.push("...");
+                      }
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((item, idx) => {
+                      if (item === "...") {
+                        return (
+                          <span key={`dots-${idx}`} className="px-1 text-xs text-neutral-400 font-bold">
+                            ...
+                          </span>
+                        );
+                      }
+                      const pageNum = Number(item);
+                      const isCurrent = pageNum === effectivePage;
+                      return (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={cn(
+                            "h-8 min-w-[32px] px-2 text-xs font-bold rounded-xl transition-all cursor-pointer",
+                            isCurrent
+                              ? "bg-black text-white shadow-xs"
+                              : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+                          )}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs rounded-xl font-bold cursor-pointer hover:bg-neutral-100 disabled:opacity-40"
+                  disabled={effectivePage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Siguiente ▶
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-2.5 text-xs rounded-xl font-bold cursor-pointer hover:bg-neutral-100 disabled:opacity-40"
+                  disabled={effectivePage >= totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  title="Última página"
+                >
+                  »»
+                </Button>
+              </div>
+            )}
           </div>
         </TabsContent>
 
@@ -1829,6 +2117,70 @@ export default function InventoryPage() {
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Confirmación de Eliminación Total de Inventario */}
+      <Dialog open={isDeleteAllModalOpen} onOpenChange={setIsDeleteAllModalOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 mb-3">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            <DialogTitle className="text-center text-lg font-black text-neutral-900">
+              ¿Eliminar TODO el inventario?
+            </DialogTitle>
+            <DialogDescription className="text-center text-xs text-neutral-500 leading-relaxed mt-1">
+              Esta acción eliminará de forma <strong>permanente y directa de la base de datos</strong> todos los productos ({products.length}) y movimientos de inventario ({movements.length}) del taller <strong>{currentTenant?.name}</strong>.
+              <br /><br />
+              Esta operación <span className="text-rose-600 font-bold">NO se puede deshacer</span>.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-2">
+            <Label className="text-xs font-bold text-neutral-700">
+              Para confirmar, escribe <span className="font-mono text-rose-600 font-black">ELIMINAR</span> abajo:
+            </Label>
+            <Input
+              value={confirmDeleteText}
+              onChange={(e) => setConfirmDeleteText(e.target.value)}
+              placeholder="Escribe ELIMINAR para confirmar"
+              className="h-10 text-center font-mono font-bold border-rose-200 focus:border-rose-500 rounded-xl"
+            />
+          </div>
+
+          <DialogFooter className="grid grid-cols-2 gap-2 sm:gap-2 mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl font-bold cursor-pointer"
+              onClick={() => {
+                setIsDeleteAllModalOpen(false);
+                setConfirmDeleteText("");
+              }}
+              disabled={isDeletingAll}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+              disabled={confirmDeleteText.trim().toUpperCase() !== "ELIMINAR" || isDeletingAll}
+              onClick={handleDeleteAllInventory}
+            >
+              {isDeletingAll ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-1.5" />
+                  Eliminar Todo
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

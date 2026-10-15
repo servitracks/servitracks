@@ -302,6 +302,19 @@ export default function OrdersPage() {
                             {config.label}
                           </Badge>
                           <span className="text-xs text-neutral-400 font-mono">#{order.id.slice(-6).toUpperCase()}</span>
+                          {order.customerType === 'credito_fiscal' || order.ncfType === 'E31' ? (
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0 border-blue-200 text-blue-700 bg-blue-50/70">
+                              🏢 E31 Crédito Fiscal
+                            </Badge>
+                          ) : order.customerType === 'gubernamental' || order.ncfType === 'E45' ? (
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0 border-purple-200 text-purple-700 bg-purple-50/70">
+                              🏛️ E45 Gubernamental
+                            </Badge>
+                          ) : order.customerType === 'regimen_especial' || order.ncfType === 'E44' ? (
+                            <Badge variant="outline" className="text-[10px] font-bold px-2 py-0 border-amber-200 text-amber-700 bg-amber-50/70">
+                              🛡️ E44 Rég. Especial
+                            </Badge>
+                          ) : null}
                         </div>
                         <h3 className="font-bold text-neutral-900 truncate">{order.description}</h3>
                         <div className="flex items-center gap-4 text-xs text-neutral-500 flex-wrap">
@@ -383,6 +396,16 @@ export default function OrdersPage() {
                   {colOrders.map((order) => (
                     <div key={order.id} className="bg-white border border-neutral-100 rounded-xl p-3 shadow-sm hover:shadow-md transition-all cursor-pointer"
                       onClick={() => openDetail(order)}>
+                      <div className="flex items-center justify-between gap-1 mb-1.5">
+                        <span className="text-[10px] font-mono text-neutral-400">#{order.id.slice(-6).toUpperCase()}</span>
+                        {order.customerType === 'credito_fiscal' || order.ncfType === 'E31' ? (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200">E31</span>
+                        ) : order.customerType === 'gubernamental' || order.ncfType === 'E45' ? (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200">E45</span>
+                        ) : order.customerType === 'regimen_especial' || order.ncfType === 'E44' ? (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200">E44</span>
+                        ) : null}
+                      </div>
                       <p className="text-xs font-bold text-neutral-900 line-clamp-2 mb-2">{order.description}</p>
                       <p className="text-xs text-neutral-500">{getCustomerName(order.customerId)}</p>
                       <p className="text-xs font-semibold mt-2 text-neutral-500 flex items-center gap-1">

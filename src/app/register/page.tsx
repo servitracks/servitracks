@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, Check, Building2, Palette, Package, UserCircle2, PartyPopper,
   AlertCircle, Search, MapPin, Upload, Sparkles, Eye, EyeOff, Droplet, Clock, CheckCircle2,
-  Wrench
+  Wrench, ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -172,6 +172,11 @@ function compressToWebP(file: File, maxSize = 512, quality = 0.85): Promise<stri
 
 export default function RegisterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fromLogin = searchParams.get("from") === "login";
+  const stepParam = searchParams.get("step");
+  const emailParam = searchParams.get("email");
+
   const addTenant = useStore((s) => s.addTenant);
   const addUser = useStore((s) => s.addUser);
   const setCurrentUserId = useStore((s) => s.setCurrentUserId);
@@ -180,7 +185,15 @@ export default function RegisterPage() {
   const setCurrentTenant = useStore((s) => s.setCurrentTenant);
   const tenants = useStore((s) => s.tenants);
 
-  const [step, setStep] = useState(1);
+  const initialStep = useMemo(() => {
+    if (stepParam === "taller") return 1;
+    if (stepParam === "marca") return 2;
+    if (stepParam === "plan") return 3;
+    if (stepParam === "admin") return 4;
+    return 1;
+  }, [stepParam]);
+
+  const [step, setStep] = useState(initialStep);
   const [form, setForm] = useState<FormState>(initial);
   const [errors, setErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [provOpen, setProvOpen] = useState(false);
@@ -192,10 +205,111 @@ export default function RegisterPage() {
   const [slugChecking, setSlugChecking] = useState(false);
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
   const [dbPlans, setDbPlans] = useState<Plan[]>([]);
+  const [authenticatedUser, setAuthenticatedUser] = useState<{ id: string; email: string; name?: string } | null>(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const storePlans = useStore((s) => s.plans);
+
+  // Detect active session or email parameter: if account already has a workshop, enter directly!
+  useEffect(() => {
+    async function checkExistingAuth() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const u = session.user;
+          const uEmail = (u.email || "").trim().toLowerCase();
+          const uName = u.user_metadata?.name || u.user_metadata?.full_name || "";
+          setAuthenticatedUser({ id: u.id, email: uEmail, name: uName });
+          setForm((f) => ({
+            ...f,
+            admin_email: f.admin_email || uEmail,
+            admin_nombre: f.admin_nombre || uName,
+          }));
+
+          // Si el usuario ya tiene un taller, permitir ingreso directo de inmediato
+          let existingTenant: any = null;
+
+          // 1. Buscar en tenant_users por user_id
+          const { data: tuRows } = await supabaseAdmin
+            .from("tenant_users")
+            .select("tenant_id")
+            .eq("user_id", u.id)
+            .limit(1);
+
+          if (tuRows && tuRows.length > 0 && tuRows[0].tenant_id) {
+            const { data: t } = await supabaseAdmin
+              .from("tenants")
+              .select("*")
+              .eq("id", tuRows[0].tenant_id)
+              .maybeSingle();
+            if (t) existingTenant = t;
+          }
+
+          // 2. Buscar en tenant_users por email
+          if (!existingTenant && uEmail) {
+            const { data: tuByEmail } = await supabaseAdmin
+              .from("tenant_users")
+              .select("tenant_id")
+              .ilike("email", uEmail)
+              .limit(1);
+
+            if (tuByEmail && tuByEmail.length > 0 && tuByEmail[0].tenant_id) {
+              const { data: t } = await supabaseAdmin
+                .from("tenants")
+                .select("*")
+                .eq("id", tuByEmail[0].tenant_id)
+                .maybeSingle();
+              if (t) existingTenant = t;
+            }
+          }
+
+          // 3. Buscar en tenants directamente por email
+          if (!existingTenant && uEmail) {
+            const { data: dt } = await supabaseAdmin
+              .from("tenants")
+              .select("*")
+              .ilike("email", uEmail)
+              .order("created_at", { ascending: false })
+              .limit(1);
+            if (dt && dt.length > 0) {
+              existingTenant = dt[0];
+            }
+          }
+
+          if (existingTenant && existingTenant.slug) {
+            toast.success(`Cuenta identificada. Ingresando a tu taller ${existingTenant.name}...`);
+            setCurrentUserId(u.id);
+            setAuthenticated(true);
+            setTenants([existingTenant]);
+            setCurrentTenant(existingTenant);
+            const sessionData = {
+              user_id: u.id,
+              tenant_id: existingTenant.id,
+              tenant_slug: existingTenant.slug,
+              empleado_id: u.id,
+              email: uEmail,
+              role: "owner",
+              iniciado_en: new Date().toISOString(),
+              remember_me: true
+            };
+            localStorage.setItem("servitracks-session", JSON.stringify(sessionData));
+            navigate(`/${existingTenant.slug}`);
+            return;
+          }
+        } else if (emailParam) {
+          setForm((f) => ({
+            ...f,
+            admin_email: f.admin_email || emailParam.trim().toLowerCase(),
+          }));
+        }
+      } catch (err) {
+        console.warn("[Register] Error verificando sesión previa:", err);
+      }
+    }
+    checkExistingAuth();
+  }, [emailParam, navigate, setCurrentTenant, setCurrentUserId, setTenants, setAuthenticated]);
 
   // Load plans from Supabase on mount, fallback to Zustand store (persisted in localStorage)
   useEffect(() => {
@@ -330,8 +444,12 @@ export default function RegisterPage() {
     if (step === 4) {
       if (!form.admin_nombre.trim()) e.admin_nombre = "El nombre del administrador es obligatorio";
       if (!form.admin_email.includes("@")) e.admin_email = "Dirección de correo electrónico inválida";
-      if (form.admin_password.length < 8) e.admin_password = "La contraseña debe tener al menos 8 caracteres";
-      if (form.admin_password !== form.admin_password_confirm) e.admin_password_confirm = "Las contraseñas no coinciden";
+
+      const isPreAuthenticated = Boolean(authenticatedUser || fromLogin);
+      if (!isPreAuthenticated || showChangePassword) {
+        if (form.admin_password.length < 8) e.admin_password = "La contraseña debe tener al menos 8 caracteres";
+        if (form.admin_password !== form.admin_password_confirm) e.admin_password_confirm = "Las contraseñas no coinciden";
+      }
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -342,49 +460,120 @@ export default function RegisterPage() {
     setProvisioningStep(0);
 
     try {
-      // 1. Crear usuario en Supabase Auth con confirmación automática (sin necesidad de email SMTP)
-      setProvisioningStep(0);
-      let userId = "";
+      const trimmedEmail = form.admin_email.trim().toLowerCase();
+      let userId = authenticatedUser?.id || "";
 
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email: form.admin_email,
-        password: form.admin_password,
-        email_confirm: true, // ← confirma automáticamente sin requerir correo
-        user_metadata: { name: form.admin_nombre }
-      });
+      // 1. Obtener o crear el usuario en Supabase Auth
+      if (!userId) {
+        // Verificar si hay sesión activa en el cliente
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user && sessionData.session.user.email?.trim().toLowerCase() === trimmedEmail) {
+          userId = sessionData.session.user.id;
+        }
+      }
 
-      if (authError) {
-        if (authError.message.toLowerCase().includes("already registered") ||
-            authError.message.toLowerCase().includes("already exists") ||
-            authError.message.toLowerCase().includes("already been registered")) {
-          
-          // INTENTO DE RECICLAJE: El usuario existe en auth.users pero posiblemente no tiene taller (fue eliminado)
-          const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = usersData?.users?.find(u => u.email === form.admin_email);
-          
-          if (existingUser) {
-            // Actualizamos su contraseña para que pueda iniciar sesión con la que acaba de ingresar
-            await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+      // Si el usuario ya está autenticado (viene de login o sesión previa)
+      if (userId) {
+        setProvisioningStep(0);
+        // Si ingresó una contraseña nueva opcional, actualizarla
+        if (form.admin_password && form.admin_password.length >= 8) {
+          try {
+            await supabaseAdmin.auth.admin.updateUserById(userId, {
               password: form.admin_password,
               user_metadata: { name: form.admin_nombre }
             });
-            userId = existingUser.id;
-          } else {
-            throw new Error("Este correo ya está registrado. Usa otro o inicia sesión.");
+          } catch (e) {
+            console.warn("No se pudo actualizar contraseña:", e);
           }
-        } else {
-          throw new Error(`Error de autenticación: ${authError.message}`);
         }
       } else {
-        if (!authData.user) {
-          throw new Error("No se pudo crear el usuario.");
+        // Intento de crear el usuario con supabaseAdmin
+        setProvisioningStep(0);
+        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+          email: trimmedEmail,
+          password: form.admin_password,
+          email_confirm: true,
+          user_metadata: { name: form.admin_nombre }
+        });
+
+        if (authError) {
+          const isAlreadyRegistered =
+            authError.message.toLowerCase().includes("already registered") ||
+            authError.message.toLowerCase().includes("already exists") ||
+            authError.message.toLowerCase().includes("already been registered");
+
+          if (isAlreadyRegistered) {
+            // Caso: El usuario ya existe en auth.users
+            // A) Intentar iniciar sesión con las credenciales ingresadas
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: trimmedEmail,
+              password: form.admin_password,
+            });
+
+            if (!signInError && signInData?.user) {
+              userId = signInData.user.id;
+
+              // Comprobar si ya tenía un taller vinculado
+              const { data: existingTU } = await supabaseAdmin
+                .from("tenant_users")
+                .select("tenant_id")
+                .eq("user_id", userId)
+                .limit(1);
+
+              if (existingTU && existingTU.length > 0 && existingTU[0].tenant_id) {
+                const { data: existingTenant } = await supabaseAdmin
+                  .from("tenants")
+                  .select("slug")
+                  .eq("id", existingTU[0].tenant_id)
+                  .maybeSingle();
+
+                if (existingTenant?.slug) {
+                  toast.info("Ya tienes un taller registrado con este correo. Redirigiendo a tu taller...");
+                  setIsProvisioning(false);
+                  navigate(`/${existingTenant.slug}`);
+                  return;
+                }
+              }
+            } else {
+              // B) Fallback admin: Buscar usuario con paginación en auth.admin.listUsers
+              let matchedUserId: string | null = null;
+              for (let page = 1; page <= 5; page++) {
+                const { data: pageUsers } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 100 });
+                const found = pageUsers?.users?.find(
+                  (u) => u.email?.trim().toLowerCase() === trimmedEmail
+                );
+                if (found) {
+                  matchedUserId = found.id;
+                  break;
+                }
+                if (!pageUsers?.users || pageUsers.users.length < 100) break;
+              }
+
+              if (matchedUserId) {
+                if (form.admin_password) {
+                  await supabaseAdmin.auth.admin.updateUserById(matchedUserId, {
+                    password: form.admin_password,
+                    user_metadata: { name: form.admin_nombre }
+                  });
+                }
+                userId = matchedUserId;
+              } else {
+                throw new Error("Este correo ya está registrado con otra contraseña. Por favor inicia sesión en /login.");
+              }
+            }
+          } else {
+            throw new Error(`Error de autenticación: ${authError.message}`);
+          }
+        } else {
+          if (!authData.user) {
+            throw new Error("No se pudo crear el usuario.");
+          }
+          userId = authData.user.id;
         }
-        userId = authData.user.id;
       }
 
-      // 2. Insertar Tenant usando supabaseAdmin (bypasea RLS con service_role)
+      // 2. Insertar Tenant usando supabaseAdmin
       setProvisioningStep(1);
-      // Calcular fecha de fin de prueba (7 días desde ahora)
       const TRIAL_DAYS = 7;
       const trialEndDate = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
@@ -396,7 +585,7 @@ export default function RegisterPage() {
           logo: form.logo_url || null,
           phone: form.telefono,
           address: `Provincia ${form.provincia}, República Dominicana`,
-          email: form.admin_email,
+          email: trimmedEmail,
           status: "active",
           config: {
             umbral_diferencia_caja: 500,
@@ -416,18 +605,40 @@ export default function RegisterPage() {
 
       const tenantId = tenantData.id;
 
-      // 3. Vincular usuario al tenant (supabaseAdmin)
+      // 3. Vincular usuario al tenant (tenant_users)
       setProvisioningStep(2);
-      const { error: tenantUserError } = await supabaseAdmin
+      let tenantUserError: any = null;
+      const { data: existingTU } = await supabaseAdmin
         .from("tenant_users")
-        .insert({
-          tenant_id: tenantId,
-          user_id: userId,
-          name: form.admin_nombre,
-          email: form.admin_email,
-          role: "owner",
-          status: "active"
-        });
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", userId)
+        .limit(1);
+
+      if (existingTU && existingTU.length > 0) {
+        const { error: updateErr } = await supabaseAdmin
+          .from("tenant_users")
+          .update({
+            name: form.admin_nombre,
+            email: trimmedEmail,
+            role: "owner",
+            status: "active"
+          })
+          .eq("id", existingTU[0].id);
+        tenantUserError = updateErr;
+      } else {
+        const { error: insertErr } = await supabaseAdmin
+          .from("tenant_users")
+          .insert({
+            tenant_id: tenantId,
+            user_id: userId,
+            name: form.admin_nombre,
+            email: trimmedEmail,
+            role: "owner",
+            status: "active"
+          });
+        tenantUserError = insertErr;
+      }
 
       if (tenantUserError) {
         throw new Error(`Error de vinculación de usuario: ${tenantUserError.message}`);
@@ -435,28 +646,34 @@ export default function RegisterPage() {
 
       // 4. Crear empleado principal (supabaseAdmin)
       setProvisioningStep(3);
-      const { error: empleadoError } = await supabaseAdmin
-        .from("empleados")
-        .insert({
-          tenant_id: tenantId,
-          nombre: form.admin_nombre.split(" ")[0],
-          apellido: form.admin_nombre.split(" ").slice(1).join(" ") || "",
-          rol: "ADMIN",
-          pin: "1234"
-        });
-
-      if (empleadoError) {
-        throw new Error(`Error al crear empleado: ${empleadoError.message}`);
+      try {
+        await supabaseAdmin
+          .from("empleados")
+          .insert({
+            tenant_id: tenantId,
+            nombre: form.admin_nombre.split(" ")[0] || "Admin",
+            apellido: form.admin_nombre.split(" ").slice(1).join(" ") || "",
+            rol: "ADMIN",
+            pin: "1234"
+          });
+      } catch (err: any) {
+        console.warn("Error creando empleado:", err);
       }
 
-      // 5. Iniciar sesión para establecer JWT en el cliente (best-effort)
+      // 5. Iniciar sesión para establecer JWT en el cliente si hay contraseña
       setProvisioningStep(4);
-      await supabase.auth.signInWithPassword({
-        email: form.admin_email,
-        password: form.admin_password,
-      });
+      if (form.admin_password) {
+        try {
+          await supabase.auth.signInWithPassword({
+            email: trimmedEmail,
+            password: form.admin_password,
+          });
+        } catch {
+          // ignore
+        }
+      }
 
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 600));
 
       // Actualizar store local de Zustand
       const localTenant: Tenant = {
@@ -478,7 +695,7 @@ export default function RegisterPage() {
         id: userId,
         tenantId: tenantId,
         name: form.admin_nombre,
-        email: form.admin_email,
+        email: trimmedEmail,
         role: "owner",
         status: "active",
         createdAt: new Date().toISOString()
@@ -491,13 +708,18 @@ export default function RegisterPage() {
       setTenants([localTenant]);
       setCurrentTenant(localTenant);
 
-      localStorage.setItem(
-        "servitracks-session",
-        JSON.stringify({
-          empleado_id: localUser.id,
-          iniciado_en: new Date().toISOString()
-        })
-      );
+      const sessionData = {
+        user_id: userId,
+        tenant_id: tenantId,
+        tenant_slug: tenantData.slug,
+        empleado_id: localUser.id,
+        email: trimmedEmail,
+        role: "owner",
+        iniciado_en: new Date().toISOString(),
+        remember_me: true
+      };
+      localStorage.setItem("servitracks-session", JSON.stringify(sessionData));
+      sessionStorage.setItem("servitracks-session", JSON.stringify(sessionData));
 
       setCreatedTenant(localTenant);
       setIsProvisioning(false);
@@ -535,13 +757,66 @@ export default function RegisterPage() {
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">El control de tu taller, simplificado</span>
         </div>
         <div className="absolute right-6 top-8 hidden text-xs md:block">
-          <span className="text-neutral-400 font-semibold">¿Ya tienes taller? </span>
-          <Link to="/login" className="font-bold text-emerald-600 hover:underline">Inicia sesión</Link>
+          {authenticatedUser ? (
+            <div className="flex items-center gap-2">
+              <span className="text-neutral-500 font-medium">Conectado como <strong className="text-neutral-800">{authenticatedUser.email}</strong></span>
+              <button
+                type="button"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  setAuthenticatedUser(null);
+                  navigate("/login");
+                }}
+                className="font-bold text-rose-600 hover:underline cursor-pointer ml-1"
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className="text-neutral-400 font-semibold">¿Ya tienes taller? </span>
+              <Link to="/login" className="font-bold text-emerald-600 hover:underline">Inicia sesión</Link>
+            </>
+          )}
         </div>
       </header>
 
       {/* ═══════════════ MAIN CONTENT ═══════════════ */}
       <main className="container mx-auto pb-10 pt-4 flex-1 flex flex-col items-center justify-center">
+        
+        {/* Banner if redirected from login */}
+        {(fromLogin || authenticatedUser) && (
+          <div className="w-full max-w-2xl px-4 mb-4">
+            <div className="flex items-center justify-between gap-3 rounded-2xl bg-emerald-50 border border-emerald-200/80 p-3.5 text-emerald-950 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs">
+                  <ShieldCheck className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-emerald-950">
+                    Sesión iniciada como <span className="font-mono text-emerald-800 font-bold">{authenticatedUser?.email || emailParam || form.admin_email}</span>
+                  </p>
+                  <p className="text-[11px] text-emerald-700">
+                    Tu cuenta está lista. Completa estos pasos para configurar tu taller y acceder de inmediato.
+                  </p>
+                </div>
+              </div>
+              {authenticatedUser && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    setAuthenticatedUser(null);
+                    navigate("/login");
+                  }}
+                  className="text-[11px] font-bold text-neutral-500 hover:text-rose-600 hover:underline shrink-0 cursor-pointer"
+                >
+                  Cambiar cuenta
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         
         {/* Progress Tracker Steps */}
         <div className="w-full max-w-2xl px-4 mb-6">
@@ -829,8 +1104,31 @@ export default function RegisterPage() {
                   <div className="space-y-6">
                     <div>
                       <h1 className="text-2xl font-black text-neutral-900 tracking-tight">Usuario Administrador</h1>
-                      <p className="text-xs text-neutral-400 mt-1 font-semibold">Define las credenciales maestras de acceso para administrar el taller.</p>
+                      <p className="text-xs text-neutral-400 mt-1 font-semibold">
+                        {authenticatedUser || fromLogin
+                          ? "Verifica los datos de acceso para administrar tu taller."
+                          : "Define las credenciales maestras de acceso para administrar el taller."}
+                      </p>
                     </div>
+
+                    {(authenticatedUser || fromLogin) && (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                          <div className="text-xs">
+                            <p className="font-bold text-emerald-950">Cuenta de usuario verificada</p>
+                            <p className="text-emerald-700">Tu taller quedará vinculado a <span className="font-semibold font-mono">{form.admin_email}</span>.</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowChangePassword(!showChangePassword)}
+                          className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 underline shrink-0 cursor-pointer"
+                        >
+                          {showChangePassword ? "Mantener contraseña actual" : "¿Cambiar contraseña?"}
+                        </button>
+                      </div>
+                    )}
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <Field label="Nombre completo *" error={errors.admin_nombre} className="md:col-span-2">
@@ -847,38 +1145,46 @@ export default function RegisterPage() {
                           value={form.admin_email} 
                           onChange={(e) => update("admin_email", e.target.value)} 
                           placeholder="ejemplo@taller.com" 
-                          className="h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 font-medium"
+                          readOnly={Boolean(authenticatedUser || fromLogin)}
+                          className={`h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 font-medium ${
+                            (authenticatedUser || fromLogin) ? "bg-neutral-100 text-neutral-600 cursor-not-allowed" : ""
+                          }`}
                         />
                       </Field>
-                      <Field label="Contraseña de Acceso *" error={errors.admin_password}>
-                        <div className="relative">
-                          <Input 
-                            type={showPass ? "text" : "password"} 
-                            value={form.admin_password} 
-                            onChange={(e) => update("admin_password", e.target.value)} 
-                            placeholder="Mínimo 8 caracteres" 
-                            className="h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 pr-10 font-medium" 
-                          />
-                          <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 cursor-pointer">
-                            {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
-                        <PasswordStrengthIndicator password={form.admin_password} />
-                      </Field>
-                      <Field label="Confirmar Contraseña *" error={errors.admin_password_confirm}>
-                        <div className="relative">
-                          <Input 
-                            type={showConfirm ? "text" : "password"} 
-                            value={form.admin_password_confirm} 
-                            onChange={(e) => update("admin_password_confirm", e.target.value)} 
-                            placeholder="Repite la contraseña" 
-                            className="h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 pr-10 font-medium" 
-                          />
-                          <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 cursor-pointer">
-                            {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
-                          </button>
-                        </div>
-                      </Field>
+
+                      {(!(authenticatedUser || fromLogin) || showChangePassword) && (
+                        <>
+                          <Field label="Contraseña de Acceso *" error={errors.admin_password}>
+                            <div className="relative">
+                              <Input 
+                                type={showPass ? "text" : "password"} 
+                                value={form.admin_password} 
+                                onChange={(e) => update("admin_password", e.target.value)} 
+                                placeholder="Mínimo 8 caracteres" 
+                                className="h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 pr-10 font-medium" 
+                              />
+                              <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 cursor-pointer">
+                                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                            <PasswordStrengthIndicator password={form.admin_password} />
+                          </Field>
+                          <Field label="Confirmar Contraseña *" error={errors.admin_password_confirm}>
+                            <div className="relative">
+                              <Input 
+                                type={showConfirm ? "text" : "password"} 
+                                value={form.admin_password_confirm} 
+                                onChange={(e) => update("admin_password_confirm", e.target.value)} 
+                                placeholder="Repite la contraseña" 
+                                className="h-11 rounded-xl text-sm border-neutral-200 focus-visible:ring-emerald-500 pr-10 font-medium" 
+                              />
+                              <button type="button" onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 cursor-pointer">
+                                {showConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </div>
+                          </Field>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

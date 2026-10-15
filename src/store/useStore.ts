@@ -55,6 +55,7 @@ interface AppState {
   inventorySessions: InventorySession[];
   addInventorySession: (session: InventorySession) => void;
   updateInventorySession: (id: string, updates: Partial<InventorySession>) => void;
+  deleteInventorySession: (id: string) => void;
 
   // Inspecciones Digitales (MPI)
   inspections: Inspection[];
@@ -112,6 +113,7 @@ interface AppState {
   addProduct: (product: Product) => void;
   updateProduct: (id: string, updates: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
+  bulkImportProducts: (newProducts: Product[], updatedProducts: Product[], movements?: InventoryMovement[]) => Promise<void>;
 
   // Services
   addService: (service: Service) => void;
@@ -330,6 +332,7 @@ export const useStore = create<AppState>()(
           createdAt: new Date().toISOString()
         };
 
+        import("@/lib/supabaseSync").then(m => m.upsertActivityLogs([newLog]));
         return { activityLogs: [newLog, ...cleanLogs].slice(0, 1000) };
       }),
 
@@ -345,14 +348,21 @@ export const useStore = create<AppState>()(
       setCurrentUserId: (id) => set({ currentUserId: id }),
       setTenants: (tenants) => set({ tenants }),
       setCurrentTenant: (tenant) => set({ currentTenant: tenant }),
-      updateTenant: (id, updates) =>
+      updateTenant: (id, updates) => {
         set((state) => ({
           tenants: state.tenants.map((t) => (t.id === id ? { ...t, ...updates } : t)),
-        })),
-      addTenant: (tenant) =>
-        set((state) => ({ tenants: [...state.tenants, tenant] })),
-      deleteTenant: (id) =>
-        set((state) => ({ tenants: state.tenants.filter((t) => t.id !== id) })),
+          currentTenant: state.currentTenant?.id === id ? { ...state.currentTenant, ...updates } : state.currentTenant,
+        }));
+        import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(id, updates));
+      },
+      addTenant: (tenant) => {
+        set((state) => ({ tenants: [...state.tenants, tenant] }));
+        import("@/lib/supabaseSync").then(m => m.createTenantInSupabase(tenant));
+      },
+      deleteTenant: (id) => {
+        set((state) => ({ tenants: state.tenants.filter((t) => t.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('tenants', id));
+      },
 
       addUser: (user) => set((state) => {
         const exists = state.users.some((u) => u.id === user.id);
@@ -371,40 +381,81 @@ export const useStore = create<AppState>()(
       deleteUser: (id) => set((state) => {
         const user = state.users.find(u => u.id === id);
         if (user) state.addActivityLog({ action: 'deleted_user', details: `Eliminó el usuario ${user.name}`, module: 'AJUSTES' });
+        import("@/lib/supabaseSync").then(m => m.deleteTenantUserFromSupabase(id, user?.tenantId));
         return { users: state.users.filter((u) => u.id !== id) };
       }),
 
-      addTechnician: (tech) => set((state) => ({ technicians: [...state.technicians, tech] })),
+      addTechnician: (tech) => {
+        set((state) => ({ technicians: [...state.technicians, tech] }));
+        import("@/lib/supabaseSync").then(m => m.upsertTechnicians([tech]));
+      },
       updateTechnician: (id, updates) =>
-        set((state) => ({
-          technicians: state.technicians.map((t) => (t.id === id ? { ...t, ...updates } : t)),
-        })),
+        set((state) => {
+          const updated = state.technicians.map((t) => (t.id === id ? { ...t, ...updates } : t));
+          const techToSync = updated.find(t => t.id === id);
+          if (techToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertTechnicians([techToSync]));
+          }
+          return { technicians: updated };
+        }),
       deleteTechnician: (id) => {
         set((state) => ({ technicians: state.technicians.filter((t) => t.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('technicians', id));
       },
 
       updatePrintSettings: (updates) =>
-        set((state) => ({ printSettings: { ...state.printSettings, ...updates } })),
+        set((state) => {
+          const newPrintSettings = { ...state.printSettings, ...updates };
+          const curTenant = state.currentTenant || state.tenants[0];
+          if (curTenant) {
+            const newConfig = { ...(curTenant.config || {}), printSettings: newPrintSettings };
+            import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(curTenant.id, { config: newConfig }));
+          }
+          return { printSettings: newPrintSettings };
+        }),
 
       updateBarcodeSettings: (updates) =>
-        set((state) => ({ barcodeSettings: { ...state.barcodeSettings, ...updates } })),
+        set((state) => {
+          const newBarcodeSettings = { ...state.barcodeSettings, ...updates };
+          const curTenant = state.currentTenant || state.tenants[0];
+          if (curTenant) {
+            const newConfig = { ...(curTenant.config || {}), barcodeSettings: newBarcodeSettings };
+            import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(curTenant.id, { config: newConfig }));
+          }
+          return { barcodeSettings: newBarcodeSettings };
+        }),
 
-      addCustomer: (customer) => set((state) => ({ customers: [...state.customers, customer] })),
+      addCustomer: (customer) => {
+        set((state) => ({ customers: [...state.customers, customer] }));
+        import("@/lib/supabaseSync").then(m => m.upsertCustomers([customer]));
+      },
       updateCustomer: (id, updates) =>
-        set((state) => ({
-          customers: state.customers.map((c) => (c.id === id ? { ...c, ...updates } : c)),
-        })),
+        set((state) => {
+          const updated = state.customers.map((c) => (c.id === id ? { ...c, ...updates } : c));
+          const custToSync = updated.find(c => c.id === id);
+          if (custToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertCustomers([custToSync]));
+          }
+          return { customers: updated };
+        }),
       deleteCustomer: (id) => {
         set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('customers', id));
       },
 
-      addVehicle: (vehicle) => set((state) => ({ vehicles: [...state.vehicles, vehicle] })),
+      addVehicle: (vehicle) => {
+        set((state) => ({ vehicles: [...state.vehicles, vehicle] }));
+        import("@/lib/supabaseSync").then(m => m.upsertVehicles([vehicle]));
+      },
       updateVehicle: (id, updates) =>
-        set((state) => ({
-          vehicles: state.vehicles.map((v) => (v.id === id ? { ...v, ...updates } : v)),
-        })),
+        set((state) => {
+          const updated = state.vehicles.map((v) => (v.id === id ? { ...v, ...updates } : v));
+          const vehToSync = updated.find(v => v.id === id);
+          if (vehToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertVehicles([vehToSync]));
+          }
+          return { vehicles: updated };
+        }),
       deleteVehicle: (id) => {
         set((state) => ({ vehicles: state.vehicles.filter((v) => v.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('vehicles', id));
@@ -412,6 +463,7 @@ export const useStore = create<AppState>()(
 
       addOrder: (order) => set((state) => {
         state.addActivityLog({ action: 'created_order', details: `Creó la orden de trabajo para el vehículo ${order.vehicleId}`, module: 'ORDENES' });
+        import("@/lib/supabaseSync").then(m => m.upsertOrders([order]));
         return { orders: [...state.orders, order] };
       }),
       updateOrder: (id, updates) =>
@@ -421,10 +473,15 @@ export const useStore = create<AppState>()(
           } else {
             state.addActivityLog({ action: 'updated_order', details: `Actualizó la orden de trabajo`, module: 'ORDENES' });
           }
+          const updated = state.orders.map((o) =>
+            o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
+          );
+          const ordToSync = updated.find(o => o.id === id);
+          if (ordToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertOrders([ordToSync]));
+          }
           return {
-            orders: state.orders.map((o) =>
-              o.id === id ? { ...o, ...updates, updatedAt: new Date().toISOString() } : o
-            ),
+            orders: updated,
           };
         }),
       deleteOrder: (id) => {
@@ -432,21 +489,61 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('orders', id));
       },
 
-      addProduct: (product) => set((state) => ({ products: [...state.products, product] })),
+      addProduct: (product) => {
+        set((state) => ({ products: [...state.products, product] }));
+        import("@/lib/supabaseSync").then(m => m.upsertProducts([product]));
+      },
       updateProduct: (id, updates) =>
-        set((state) => ({
-          products: state.products.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-        })),
+        set((state) => {
+          const updated = state.products.map((p) => (p.id === id ? { ...p, ...updates } : p));
+          const prodToSync = updated.find(p => p.id === id);
+          if (prodToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertProducts([prodToSync]));
+          }
+          return { products: updated };
+        }),
       deleteProduct: (id) => {
         set((state) => ({ products: state.products.filter((p) => p.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id));
       },
+      bulkImportProducts: async (newProducts, updatedProducts, movements = []) => {
+        set((state) => {
+          const updatedMap = new Map(updatedProducts.map(p => [p.id, p]));
+          const currentProducts = state.products.map(p => updatedMap.get(p.id) || p);
+          return {
+            products: [...currentProducts, ...newProducts],
+            movements: [...state.movements, ...movements],
+          };
+        });
 
-      addService: (service) => set((state) => ({ services: [...state.services, service] })),
+        try {
+          const { upsertProducts, upsertInventoryMovements } = await import("@/lib/supabaseSync");
+          const allProdsToSync = [...newProducts, ...updatedProducts];
+          const CHUNK_SIZE = 100;
+          for (let i = 0; i < allProdsToSync.length; i += CHUNK_SIZE) {
+            await upsertProducts(allProdsToSync.slice(i, i + CHUNK_SIZE));
+          }
+          for (let i = 0; i < movements.length; i += CHUNK_SIZE) {
+            await upsertInventoryMovements(movements.slice(i, i + CHUNK_SIZE));
+          }
+        } catch (err) {
+          console.error("Error sincronizando importación masiva a Supabase:", err);
+        }
+      },
+
+      addService: (service) => {
+        set((state) => ({ services: [...state.services, service] }));
+        import("@/lib/supabaseSync").then(m => m.upsertServices([service]));
+      },
       updateService: (id, updates) =>
-        set((state) => ({
-          services: state.services.map((s) => (s.id === id ? { ...s, ...updates } : s)),
-        })),
+        set((state) => {
+          const updated = state.services.map((s) => (s.id === id ? { ...s, ...updates } : s));
+          const srvToSync = updated.find(s => s.id === id);
+          if (srvToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertServices([srvToSync]));
+          }
+          return { services: updated };
+        }),
       deleteService: (id) => {
         set((state) => ({ services: state.services.filter((s) => s.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('services', id));
@@ -454,8 +551,10 @@ export const useStore = create<AppState>()(
 
       addMovement: (movement) =>
         set((state) => {
+          const mov = { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined };
           state.addActivityLog({ action: 'inventory_movement', details: `Movimiento de inventario: ${movement.type === 'in' ? 'Entrada' : 'Salida'} de ${movement.quantity} ${movement.productName}`, module: 'INVENTARIO' });
-          return { movements: [...state.movements, { ...movement, userId: movement.userId ?? state.currentUserId ?? undefined }] };
+          import("@/lib/supabaseSync").then(m => m.upsertInventoryMovements([mov]));
+          return { movements: [...state.movements, mov] };
         }),
 
       addOpenTab: (tab) => {
@@ -528,6 +627,12 @@ export const useStore = create<AppState>()(
               }
             });
           }
+
+          import("@/lib/supabaseSync").then(m => {
+            m.upsertInvoices([invoice]);
+            m.upsertProducts(updatedProducts);
+            if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
+          });
 
           return { 
             invoices: [...state.invoices, invoice],
@@ -624,8 +729,20 @@ export const useStore = create<AppState>()(
             });
           }
 
+          const updatedInvoices = state.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv));
+          const invToSync = updatedInvoices.find(inv => inv.id === id);
+          if (invToSync) {
+            import("@/lib/supabaseSync").then(m => {
+              m.upsertInvoices([invToSync]);
+              if (updates.status === 'cancelled') {
+                m.upsertProducts(updatedProducts);
+                if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
+              }
+            });
+          }
+
           return {
-            invoices: state.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)),
+            invoices: updatedInvoices,
             products: updatedProducts,
             movements: newMovements
           };
@@ -634,6 +751,7 @@ export const useStore = create<AppState>()(
 
       addCaja: (caja) => set((state) => {
         state.addActivityLog({ action: 'opened_caja', details: `Abrió la caja con RD$ ${caja.monto_inicial}`, module: 'CAJA' });
+        import("@/lib/supabaseSync").then(m => m.upsertCajas([caja]));
         return { cajas: [...state.cajas, caja] };
       }),
       updateCaja: (id, updates) =>
@@ -641,8 +759,13 @@ export const useStore = create<AppState>()(
           if (updates.estado === 'CERRADA') {
             state.addActivityLog({ action: 'closed_caja', details: `Cerró la caja (Diferencia: RD$ ${updates.diferencia || 0})`, module: 'CAJA' });
           }
+          const updated = state.cajas.map((c) => (c.id === id ? { ...c, ...updates } : c));
+          const cajaToSync = updated.find(c => c.id === id);
+          if (cajaToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertCajas([cajaToSync]));
+          }
           return {
-            cajas: state.cajas.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+            cajas: updated,
           };
         }),
       addCajaMovement: (mov) =>
@@ -678,23 +801,41 @@ export const useStore = create<AppState>()(
           chatMessages: state.chatMessages.map((m) => (m.id === id ? { ...m, ...updates } : m)),
         })),
 
-      addInventorySession: (session) =>
-        set((state) => ({ inventorySessions: [session, ...state.inventorySessions] })),
+      addInventorySession: (session) => {
+        set((state) => ({ inventorySessions: [session, ...state.inventorySessions] }));
+        import("@/lib/supabaseSync").then(m => m.upsertInventorySessions([session]));
+      },
       updateInventorySession: (id, updates) =>
-        set((state) => ({
-          inventorySessions: state.inventorySessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
-        })),
+        set((state) => {
+          const updated = state.inventorySessions.map((s) => (s.id === id ? { ...s, ...updates } : s));
+          const sessToSync = updated.find(s => s.id === id);
+          if (sessToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertInventorySessions([sessToSync]));
+          }
+          return { inventorySessions: updated };
+        }),
+      deleteInventorySession: (id) => {
+        set((state) => ({ inventorySessions: state.inventorySessions.filter((s) => s.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('inventory_sessions', id));
+      },
 
-      addInspection: (inspection) =>
-        set((state) => ({ inspections: [inspection, ...state.inspections] })),
+      addInspection: (inspection) => {
+        set((state) => ({ inspections: [inspection, ...state.inspections] }));
+        import("@/lib/supabaseSync").then(m => m.upsertInspections([inspection]));
+      },
       updateInspection: (id, updates) =>
-        set((state) => ({
-          inspections: state.inspections.map((i) => (i.id === id ? { ...i, ...updates } : i)),
-        })),
-      deleteInspection: (id) =>
-        set((state) => ({
-          inspections: state.inspections.filter((i) => i.id !== id),
-        })),
+        set((state) => {
+          const updated = state.inspections.map((i) => (i.id === id ? { ...i, ...updates } : i));
+          const inspToSync = updated.find(i => i.id === id);
+          if (inspToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertInspections([inspToSync]));
+          }
+          return { inspections: updated };
+        }),
+      deleteInspection: (id) => {
+        set((state) => ({ inspections: state.inspections.filter((i) => i.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('inspections', id));
+      },
 
       addQuote: (quote) => {
         set((state) => ({ quotes: [quote, ...state.quotes] }));
@@ -717,30 +858,57 @@ export const useStore = create<AppState>()(
       },
 
       // ──── PROVEEDORES ────────────────────────────────────────────────────────
-      addSupplier: (supplier) =>
-        set((state) => ({ suppliers: [...state.suppliers, supplier] })),
+      addSupplier: (supplier) => {
+        set((state) => ({ suppliers: [...state.suppliers, supplier] }));
+        import("@/lib/supabaseSync").then(m => m.upsertSuppliers([supplier]));
+      },
       updateSupplier: (id, updates) =>
-        set((state) => ({
-          suppliers: state.suppliers.map((s) => (s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s)),
-        })),
-      deleteSupplier: (id) =>
-        set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) })),
-      addSupplierProduct: (sp) =>
-        set((state) => ({ supplierProducts: [...state.supplierProducts, sp] })),
+        set((state) => {
+          const updated = state.suppliers.map((s) => (s.id === id ? { ...s, ...updates, updatedAt: new Date().toISOString() } : s));
+          const supToSync = updated.find(s => s.id === id);
+          if (supToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertSuppliers([supToSync]));
+          }
+          return { suppliers: updated };
+        }),
+      deleteSupplier: (id) => {
+        set((state) => ({ suppliers: state.suppliers.filter((s) => s.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('suppliers', id));
+      },
+      addSupplierProduct: (sp) => {
+        set((state) => ({ supplierProducts: [...state.supplierProducts, sp] }));
+        import("@/lib/supabaseSync").then(m => m.upsertSupplierProducts([sp]));
+      },
       updateSupplierProduct: (id, updates) =>
-        set((state) => ({
-          supplierProducts: state.supplierProducts.map((sp) => (sp.id === id ? { ...sp, ...updates } : sp)),
-        })),
-      deleteSupplierProduct: (id) =>
-        set((state) => ({ supplierProducts: state.supplierProducts.filter((sp) => sp.id !== id) })),
-      addPurchaseOrder: (po) =>
-        set((state) => ({ purchaseOrders: [...state.purchaseOrders, po] })),
+        set((state) => {
+          const updated = state.supplierProducts.map((sp) => (sp.id === id ? { ...sp, ...updates } : sp));
+          const spToSync = updated.find(s => s.id === id);
+          if (spToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertSupplierProducts([spToSync]));
+          }
+          return { supplierProducts: updated };
+        }),
+      deleteSupplierProduct: (id) => {
+        set((state) => ({ supplierProducts: state.supplierProducts.filter((sp) => sp.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('supplier_products', id));
+      },
+      addPurchaseOrder: (po) => {
+        set((state) => ({ purchaseOrders: [...state.purchaseOrders, po] }));
+        import("@/lib/supabaseSync").then(m => m.upsertPurchaseOrders([po]));
+      },
       updatePurchaseOrder: (id, updates) =>
-        set((state) => ({
-          purchaseOrders: state.purchaseOrders.map((po) => (po.id === id ? { ...po, ...updates, updatedAt: new Date().toISOString() } : po)),
-        })),
-      deletePurchaseOrder: (id) =>
-        set((state) => ({ purchaseOrders: state.purchaseOrders.filter((po) => po.id !== id) })),
+        set((state) => {
+          const updated = state.purchaseOrders.map((po) => (po.id === id ? { ...po, ...updates, updatedAt: new Date().toISOString() } : po));
+          const poToSync = updated.find(p => p.id === id);
+          if (poToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertPurchaseOrders([poToSync]));
+          }
+          return { purchaseOrders: updated };
+        }),
+      deletePurchaseOrder: (id) => {
+        set((state) => ({ purchaseOrders: state.purchaseOrders.filter((po) => po.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('purchase_orders', id));
+      },
 
       checkInventoryForPurchaseOrders: (tenantId) => {
         const state = get() as AppState;
@@ -825,42 +993,76 @@ export const useStore = create<AppState>()(
         }
       },
 
-      addGoodsReceipt: (gr) =>
-        set((state) => ({ goodsReceipts: [...state.goodsReceipts, gr] })),
-      addAccountPayable: (ap) =>
-        set((state) => ({ accountsPayable: [...state.accountsPayable, ap] })),
+      addGoodsReceipt: (gr) => {
+        set((state) => ({ goodsReceipts: [...state.goodsReceipts, gr] }));
+        import("@/lib/supabaseSync").then(m => m.upsertGoodsReceipts([gr]));
+      },
+      addAccountPayable: (ap) => {
+        set((state) => ({ accountsPayable: [...state.accountsPayable, ap] }));
+        import("@/lib/supabaseSync").then(m => m.upsertAccountsPayable([ap]));
+      },
       updateAccountPayable: (id, updates) =>
-        set((state) => ({
-          accountsPayable: state.accountsPayable.map((ap) => (ap.id === id ? { ...ap, ...updates } : ap)),
-        })),
-      addQuoteRequest: (qr) =>
-        set((state) => ({ quoteRequests: [...state.quoteRequests, qr] })),
+        set((state) => {
+          const updated = state.accountsPayable.map((ap) => (ap.id === id ? { ...ap, ...updates } : ap));
+          const apToSync = updated.find(a => a.id === id);
+          if (apToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertAccountsPayable([apToSync]));
+          }
+          return { accountsPayable: updated };
+        }),
+      addQuoteRequest: (qr) => {
+        set((state) => ({ quoteRequests: [...state.quoteRequests, qr] }));
+        import("@/lib/supabaseSync").then(m => m.upsertQuoteRequests([qr]));
+      },
       updateQuoteRequest: (id, updates) =>
-        set((state) => ({
-          quoteRequests: state.quoteRequests.map((qr) => (qr.id === id ? { ...qr, ...updates } : qr)),
-        })),
+        set((state) => {
+          const updated = state.quoteRequests.map((qr) => (qr.id === id ? { ...qr, ...updates } : qr));
+          const qrToSync = updated.find(q => q.id === id);
+          if (qrToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertQuoteRequests([qrToSync]));
+          }
+          return { quoteRequests: updated };
+        }),
 
-      addMaintenanceItem: (item) =>
-        set((state) => ({ maintenanceItems: [...state.maintenanceItems, item] })),
+      addMaintenanceItem: (item) => {
+        set((state) => ({ maintenanceItems: [...state.maintenanceItems, item] }));
+        import("@/lib/supabaseSync").then(m => m.upsertMaintenanceItems([item]));
+      },
       updateMaintenanceItem: (id, updates) =>
-        set((state) => ({
-          maintenanceItems: state.maintenanceItems.map((m) => (m.id === id ? { ...m, ...updates } : m)),
-        })),
+        set((state) => {
+          const updated = state.maintenanceItems.map((m) => (m.id === id ? { ...m, ...updates } : m));
+          const mToSync = updated.find(m => m.id === id);
+          if (mToSync) {
+            import("@/lib/supabaseSync").then(mod => mod.upsertMaintenanceItems([mToSync]));
+          }
+          return { maintenanceItems: updated };
+        }),
       deleteMaintenanceItem: (id) => {
         set((state) => ({ maintenanceItems: state.maintenanceItems.filter((m) => m.id !== id) }));
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('maintenance_items', id));
       },
-      addMaintenanceHistoryItem: (item) =>
-        set((state) => ({ maintenanceHistory: [item, ...state.maintenanceHistory] })),
-      deleteMaintenanceHistoryItem: (id) =>
-        set((state) => ({ maintenanceHistory: state.maintenanceHistory.filter((m) => m.id !== id) })),
+      addMaintenanceHistoryItem: (item) => {
+        set((state) => ({ maintenanceHistory: [item, ...state.maintenanceHistory] }));
+        import("@/lib/supabaseSync").then(m => m.upsertMaintenanceHistory([item]));
+      },
+      deleteMaintenanceHistoryItem: (id) => {
+        set((state) => ({ maintenanceHistory: state.maintenanceHistory.filter((m) => m.id !== id) }));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('maintenance_history', id));
+      },
 
-      addMaintenanceAlert: (alert) =>
-        set((state) => ({ maintenanceAlerts: [...state.maintenanceAlerts, alert] })),
+      addMaintenanceAlert: (alert) => {
+        set((state) => ({ maintenanceAlerts: [...state.maintenanceAlerts, alert] }));
+        import("@/lib/supabaseSync").then(m => m.upsertMaintenanceAlerts([alert]));
+      },
       updateMaintenanceAlert: (id, updates) =>
-        set((state) => ({
-          maintenanceAlerts: state.maintenanceAlerts.map((a) => (a.id === id ? { ...a, ...updates } : a)),
-        })),
+        set((state) => {
+          const updated = state.maintenanceAlerts.map((a) => (a.id === id ? { ...a, ...updates } : a));
+          const alertToSync = updated.find(a => a.id === id);
+          if (alertToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertMaintenanceAlerts([alertToSync]));
+          }
+          return { maintenanceAlerts: updated };
+        }),
 
       calculateMaintenanceHealth: (currentKmMap) =>
         set((state) => {

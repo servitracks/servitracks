@@ -55,6 +55,8 @@ export default function StepPreviewEditor({
   setRows,
 }: StepPreviewEditorProps) {
   const [search, setSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 50;
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
   const scrollTable = (direction: "left" | "right") => {
@@ -85,6 +87,11 @@ export default function StepPreviewEditor({
       r.name.toLowerCase().includes(search.toLowerCase()) ||
       r.sku.toLowerCase().includes(search.toLowerCase())
   );
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const effectivePage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (effectivePage - 1) * pageSize;
+  const pageRows = filteredRows.slice(startIndex, startIndex + pageSize);
 
   const errorCount = rows.filter((r) => !r.name.trim()).length;
   const validCount = rows.filter((r) => r.name.trim()).length;
@@ -203,19 +210,19 @@ export default function StepPreviewEditor({
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((row, i) => {
+                pageRows.map((row, i) => {
                   const hasNameError = !row.name.trim();
                   return (
                     <tr
                       key={row._id}
                       className={cn(
                         "group transition-colors hover:bg-neutral-50/80",
-                        hasNameError ? "bg-rose-50/70" : i % 2 === 0 ? "bg-white" : "bg-neutral-50/30"
+                        hasNameError ? "bg-rose-50/70" : (startIndex + i) % 2 === 0 ? "bg-white" : "bg-neutral-50/30"
                       )}
                     >
                       {/* Index */}
                       <td className="px-1.5 py-2 text-center text-[11px] font-mono text-neutral-400 font-bold border-r border-neutral-100">
-                        {i + 1}
+                        {startIndex + i + 1}
                       </td>
 
                       {/* Name */}
@@ -370,24 +377,56 @@ export default function StepPreviewEditor({
         </div>
       </div>
 
-      {/* Bottom hint */}
-      <div className="flex items-center justify-between text-xs text-neutral-400 px-1 pt-1 shrink-0">
-        <span>Mostrando {filteredRows.length} de {rows.length} productos a importar</span>
+      {/* Bottom hint & Pagination */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-neutral-500 px-1 pt-1 shrink-0">
         <div className="flex items-center gap-2">
+          <span className="font-medium">
+            Mostrando {filteredRows.length > 0 ? startIndex + 1 : 0} - {Math.min(startIndex + pageSize, filteredRows.length)} de {filteredRows.length} productos
+          </span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1.5 ml-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs rounded-lg font-bold"
+                disabled={effectivePage <= 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              >
+                ◀ Ant.
+              </Button>
+              <span className="text-[11px] font-bold text-neutral-700 px-1">
+                {effectivePage} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs rounded-lg font-bold"
+                disabled={effectivePage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              >
+                Sig. ▶
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-neutral-400">
           <button 
             type="button" 
             onClick={() => scrollTable("left")} 
-            className="hover:text-neutral-900 font-semibold"
+            className="hover:text-neutral-900 font-semibold cursor-pointer"
           >
-            ◀ Izquierda
+            ◀ Columnas Izq.
           </button>
           <span>•</span>
           <button 
             type="button" 
             onClick={() => scrollTable("right")} 
-            className="hover:text-neutral-900 font-semibold"
+            className="hover:text-neutral-900 font-semibold cursor-pointer"
           >
-            Derecha ▶
+            Columnas Der. ▶
           </button>
         </div>
       </div>

@@ -126,8 +126,9 @@ export default function InventoryScanner() {
       return;
     }
 
+    const sessionId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     addInventorySession({
-      id: Math.random().toString(36).substr(2, 9),
+      id: sessionId,
       tenantId,
       name: sessionName,
       status: 'cerrado',
@@ -144,8 +145,9 @@ export default function InventoryScanner() {
         updateProduct(item.productId, { stock: item.actualQuantity });
         
         // Crear movimiento de ajuste
+        const movementId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `mov_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         addMovement({
-          id: Math.random().toString(36).substr(2, 9),
+          id: movementId,
           tenantId,
           productId: item.productId,
           productName: item.productName,
