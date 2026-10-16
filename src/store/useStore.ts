@@ -579,6 +579,7 @@ export const useStore = create<AppState>()(
         set((state) => {
           const updatedProducts = [...state.products];
           const newMovements = [...state.movements];
+          const affectedProductIds = new Set<string>();
           
           if (invoice.status !== 'cancelled') {
             invoice.items.forEach(item => {
@@ -594,6 +595,7 @@ export const useStore = create<AppState>()(
                         const subProd = updatedProducts[ciIndex];
                         const newStock = Math.max(0, subProd.stock - (ci.quantity * item.quantity));
                         updatedProducts[ciIndex] = { ...subProd, stock: newStock };
+                        affectedProductIds.add(ci.productId);
                         newMovements.push({
                           id: crypto.randomUUID(),
                           tenantId: invoice.tenantId,
@@ -610,6 +612,7 @@ export const useStore = create<AppState>()(
                   } else {
                     const newStock = Math.max(0, product.stock - item.quantity);
                     updatedProducts[productIndex] = { ...product, stock: newStock };
+                    affectedProductIds.add(product.id);
                     newMovements.push({
                       id: crypto.randomUUID(),
                       tenantId: invoice.tenantId,
@@ -627,9 +630,10 @@ export const useStore = create<AppState>()(
             });
           }
 
+          const productsToSync = updatedProducts.filter(p => affectedProductIds.has(p.id));
           import("@/lib/supabaseSync").then(m => {
             m.upsertInvoices([invoice]);
-            m.upsertProducts(updatedProducts);
+            if (productsToSync.length > 0) m.upsertProducts(productsToSync);
             if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
           });
 
@@ -685,6 +689,7 @@ export const useStore = create<AppState>()(
           const oldInvoice = state.invoices.find(inv => inv.id === id);
           const updatedProducts = [...state.products];
           const newMovements = [...state.movements];
+          const affectedProductIds = new Set<string>();
 
           if (oldInvoice && updates.status === 'cancelled' && oldInvoice.status !== 'cancelled') {
             oldInvoice.items.forEach(item => {
@@ -698,6 +703,7 @@ export const useStore = create<AppState>()(
                       if (ciIndex !== -1) {
                         const subProd = updatedProducts[ciIndex];
                         updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock + (ci.quantity * item.quantity) };
+                        affectedProductIds.add(ci.productId);
                         newMovements.push({
                           id: crypto.randomUUID(),
                           tenantId: oldInvoice.tenantId,
@@ -712,6 +718,7 @@ export const useStore = create<AppState>()(
                     });
                   } else {
                     updatedProducts[productIndex] = { ...product, stock: product.stock + item.quantity };
+                    affectedProductIds.add(product.id);
                     newMovements.push({
                       id: crypto.randomUUID(),
                       tenantId: oldInvoice.tenantId,
@@ -731,10 +738,11 @@ export const useStore = create<AppState>()(
           const updatedInvoices = state.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv));
           const invToSync = updatedInvoices.find(inv => inv.id === id);
           if (invToSync) {
+            const productsToSync = updatedProducts.filter(p => affectedProductIds.has(p.id));
             import("@/lib/supabaseSync").then(m => {
               m.upsertInvoices([invToSync]);
-              if (updates.status === 'cancelled') {
-                m.upsertProducts(updatedProducts);
+              if (updates.status === 'cancelled' && productsToSync.length > 0) {
+                m.upsertProducts(productsToSync);
                 if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
               }
             });

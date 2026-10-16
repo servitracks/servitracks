@@ -106,131 +106,324 @@ function maintenanceItemToDb(m: MaintenanceItem) {
 
 // ─── Load from Supabase ────────────────────────────────────────────────────────
 
+async function fetchAllRowsPaginated<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>,
+  mapper: (row: any) => T,
+  pageSize = 1000
+): Promise<T[]> {
+  let allRows: T[] = [];
+  let from = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) {
+      console.error("[sync] pagination error:", error);
+      break;
+    }
+    if (data && data.length > 0) {
+      for (let i = 0; i < data.length; i++) {
+        allRows.push(mapper(data[i]));
+      }
+      if (data.length < pageSize) {
+        hasMore = false;
+      } else {
+        from += pageSize;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allRows;
+}
+
 export async function loadCustomersFromSupabase(tenantId: string): Promise<Customer[]> {
-  const { data, error } = await supabaseAdmin
-    .from("customers")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
-  if (error) { console.error("[sync] customers:", error); return []; }
-  return (data || []).map(dbToCustomer);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("customers")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToCustomer
+  );
 }
 
 export async function loadVehiclesFromSupabase(tenantId: string): Promise<Vehicle[]> {
-  const { data, error } = await supabaseAdmin
-    .from("vehicles")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
-  if (error) { console.error("[sync] vehicles:", error); return []; }
-  return (data || []).map(dbToVehicle);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("vehicles")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToVehicle
+  );
 }
 
 export async function loadMaintenanceItemsFromSupabase(tenantId: string): Promise<MaintenanceItem[]> {
-  const { data, error } = await supabaseAdmin
-    .from("maintenance_items")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("id");
-  if (error) { console.error("[sync] maintenance_items:", error); return []; }
-  return (data || []).map(dbToMaintenanceItem);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("maintenance_items")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToMaintenanceItem
+  );
 }
 
 export async function loadServicesFromSupabase(tenantId: string): Promise<Service[]> {
-  const { data, error } = await supabaseAdmin.from("services").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] services:", error); return []; }
-  return (data || []).map(dbToService);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("services")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToService
+  );
 }
 
 export async function loadProductsFromSupabase(tenantId: string): Promise<Product[]> {
-  const { data, error } = await supabaseAdmin.from("products").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] products:", error); return []; }
-  return (data || []).map(dbToProduct);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("products")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToProduct
+  );
 }
 
 export async function loadOrdersFromSupabase(tenantId: string): Promise<WorkOrder[]> {
-  const { data, error } = await supabaseAdmin.from("orders").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] orders:", error); return []; }
-  return (data || []).map(dbToWorkOrder);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("orders")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToWorkOrder
+  );
 }
 
 export async function loadQuotesFromSupabase(tenantId: string): Promise<Quote[]> {
-  const { data, error } = await supabaseAdmin.from("quotes").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] quotes:", error); return []; }
-  return (data || []).map(dbToQuote);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("quotes")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToQuote
+  );
 }
 
 export async function loadInvoicesFromSupabase(tenantId: string): Promise<Invoice[]> {
-  const { data, error } = await supabaseAdmin.from("invoices").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] invoices:", error); return []; }
-  return (data || []).map(dbToInvoice);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("invoices")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToInvoice
+  );
 }
-
 
 export async function loadCajasFromSupabase(tenantId: string): Promise<Caja[]> {
-  const { data, error } = await supabaseAdmin.from("cajas").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] cajas:", error); return []; }
-  return (data || []).map(dbToCaja);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("cajas")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("abierta_en", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToCaja
+  );
 }
+
 export async function loadMovimientosCajaFromSupabase(tenantId: string): Promise<MovimientoCaja[]> {
-  const { data, error } = await supabaseAdmin.from("movimientos_caja").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] movimientos_caja:", error); return []; }
-  return (data || []).map(dbToMovimientoCaja);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("movimientos_caja")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("creado_en", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToMovimientoCaja
+  );
 }
+
 export async function loadTechniciansFromSupabase(tenantId: string): Promise<Technician[]> {
-  const { data, error } = await supabaseAdmin.from("technicians").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] technicians:", error); return []; }
-  return (data || []).map(dbToTechnician);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("technicians")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToTechnician
+  );
 }
+
 export async function loadInventoryMovementsFromSupabase(tenantId: string): Promise<InventoryMovement[]> {
-  const { data, error } = await supabaseAdmin.from("movements").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] movements:", error); return []; }
-  return (data || []).map(dbToInventoryMovement);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("movements")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("date", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToInventoryMovement
+  );
 }
+
 export async function loadInspectionsFromSupabase(tenantId: string): Promise<Inspection[]> {
-  const { data, error } = await supabaseAdmin.from("inspections").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] inspections:", error); return []; }
-  return (data || []).map(dbToInspection);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("inspections")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToInspection
+  );
 }
+
 export async function loadMaintenanceAlertsFromSupabase(tenantId: string): Promise<MaintenanceAlert[]> {
-  const { data, error } = await supabaseAdmin.from("maintenance_alerts").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] maintenance_alerts:", error); return []; }
-  return (data || []).map(dbToMaintenanceAlert);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("maintenance_alerts")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToMaintenanceAlert
+  );
 }
+
 export async function loadMaintenanceHistoryFromSupabase(tenantId: string): Promise<MaintenanceHistoryItem[]> {
-  const { data, error } = await supabaseAdmin.from("maintenance_history").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] maintenance_history:", error); return []; }
-  return (data || []).map(dbToMaintenanceHistoryItem);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("maintenance_history")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToMaintenanceHistoryItem
+  );
 }
+
 export async function loadSuppliersFromSupabase(tenantId: string): Promise<Supplier[]> {
-  const { data, error } = await supabaseAdmin.from("suppliers").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] suppliers:", error); return []; }
-  return (data || []).map(dbToSupplier);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("suppliers")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToSupplier
+  );
 }
+
 export async function loadSupplierProductsFromSupabase(tenantId: string): Promise<SupplierProduct[]> {
-  const { data, error } = await supabaseAdmin.from("supplier_products").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] supplier_products:", error); return []; }
-  return (data || []).map(dbToSupplierProduct);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("supplier_products")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToSupplierProduct
+  );
 }
+
 export async function loadPurchaseOrdersFromSupabase(tenantId: string): Promise<PurchaseOrder[]> {
-  const { data, error } = await supabaseAdmin.from("purchase_orders").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] purchase_orders:", error); return []; }
-  return (data || []).map(dbToPurchaseOrder);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("purchase_orders")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToPurchaseOrder
+  );
 }
+
 export async function loadGoodsReceiptsFromSupabase(tenantId: string): Promise<GoodsReceipt[]> {
-  const { data, error } = await supabaseAdmin.from("goods_receipts").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] goods_receipts:", error); return []; }
-  return (data || []).map(dbToGoodsReceipt);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("goods_receipts")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("received_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToGoodsReceipt
+  );
 }
+
 export async function loadAccountsPayableFromSupabase(tenantId: string): Promise<AccountPayable[]> {
-  const { data, error } = await supabaseAdmin.from("accounts_payable").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] accounts_payable:", error); return []; }
-  return (data || []).map(dbToAccountPayable);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("accounts_payable")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToAccountPayable
+  );
 }
+
 export async function loadQuoteRequestsFromSupabase(tenantId: string): Promise<QuoteRequest[]> {
-  const { data, error } = await supabaseAdmin.from("quote_requests").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] quote_requests:", error); return []; }
-  return (data || []).map(dbToQuoteRequest);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("quote_requests")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToQuoteRequest
+  );
 }
 
 export async function loadActivityLogsFromSupabase(tenantId: string): Promise<ActivityLog[]> {
@@ -240,46 +433,64 @@ export async function loadActivityLogsFromSupabase(tenantId: string): Promise<Ac
 }
 
 export async function loadUsersFromSupabase(tenantId: string) {
-  const { data, error } = await supabaseAdmin.from("tenant_users").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] users:", error); return []; }
-  return (data || []).map((row: any) => ({
-    id: row.user_id || row.id,
-    tenantId: row.tenant_id,
-    name: row.name,
-    email: row.email,
-    role: row.role,
-    status: row.status,
-    pin: row.pin || undefined,
-    createdAt: row.created_at
-  }));
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("tenant_users")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    (row: any) => ({
+      id: row.user_id || row.id,
+      tenantId: row.tenant_id,
+      name: row.name,
+      email: row.email,
+      role: row.role,
+      status: row.status,
+      pin: row.pin || undefined,
+      createdAt: row.created_at
+    })
+  );
 }
 
 export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTab[]> {
-  const { data, error } = await supabaseAdmin.from("open_tabs").select("*").eq("tenant_id", tenantId);
-  if (error) { console.error("[sync] open_tabs:", error); return []; }
-  return (data || []).map((row: any) => ({
-    id: row.id,
-    tenantId: row.tenant_id,
-    tabName: row.tab_name,
-    customerId: row.customer_id,
-    mechanicId: row.mechanic_id,
-    orderId: row.order_id,
-    discount: row.discount || undefined,
-    discountType: row.discount_type || undefined,
-    items: row.items,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
-  }));
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("open_tabs")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("id", { ascending: true })
+        .range(from, to),
+    (row: any) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      tabName: row.tab_name,
+      customerId: row.customer_id,
+      mechanicId: row.mechanic_id,
+      orderId: row.order_id,
+      discount: row.discount || undefined,
+      discountType: row.discount_type || undefined,
+      items: row.items,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    })
+  );
 }
 
 export async function loadInventorySessionsFromSupabase(tenantId: string): Promise<InventorySession[]> {
-  const { data, error } = await supabaseAdmin
-    .from("inventory_sessions")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .order("created_at", { ascending: false });
-  if (error) { console.error("[sync] inventory_sessions:", error); return []; }
-  return (data || []).map(dbToInventorySession);
+  return fetchAllRowsPaginated(
+    (from, to) =>
+      supabaseAdmin
+        .from("inventory_sessions")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+    dbToInventorySession
+  );
 }
 
 export async function downloadFullStateFromSupabase(tenantId: string) {
@@ -740,8 +951,12 @@ export async function upsertServices(items: Service[]): Promise<void> {
 
 export async function upsertProducts(items: Product[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("products").upsert(items.map(productToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert products:", error);
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabaseAdmin.from("products").upsert(chunk.map(productToDb), { onConflict: "id" });
+    if (error) console.error("[sync] upsert products chunk error:", error);
+  }
 }
 
 export async function upsertOrders(items: WorkOrder[]): Promise<void> {
@@ -780,8 +995,12 @@ export async function upsertTechnicians(items: Technician[]): Promise<void> {
 }
 export async function upsertInventoryMovements(items: InventoryMovement[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("movements").upsert(items.map(inventoryMovementToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert movements:", error);
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabaseAdmin.from("movements").upsert(chunk.map(inventoryMovementToDb), { onConflict: "id" });
+    if (error) console.error("[sync] upsert movements chunk error:", error);
+  }
 }
 export async function upsertInspections(items: Inspection[]): Promise<void> {
   if (items.length === 0) return;
