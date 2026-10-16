@@ -253,7 +253,18 @@ export default function LoginPage() {
       }
 
       toast.success(`¡Bienvenido de nuevo, ${tenantUser?.name || tenant.name}!`);
-      navigate(`/${tenant.slug}`);
+
+      const userRole = tenantUser?.role || "owner";
+      let targetPath = `/${tenant.slug}`;
+      if (userRole === "warehouse") {
+        targetPath = `/${tenant.slug}/inventory`;
+      } else if (userRole === "mechanic") {
+        targetPath = `/${tenant.slug}/orders`;
+      } else if (userRole === "cashier") {
+        targetPath = `/${tenant.slug}/pos`;
+      }
+
+      navigate(targetPath);
     } catch (error: any) {
       console.error("Error en login:", error);
       toast.error("Error al iniciar sesión. Intenta de nuevo.");

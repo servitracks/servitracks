@@ -139,8 +139,9 @@ export default function POSPage() {
   const { tenant } = useParams();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
+  const quoteId = searchParams.get("quoteId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab } = useStore();
+  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab, quotes, updateQuote } = useStore();
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
@@ -444,15 +445,105 @@ export default function POSPage() {
     // Limpiar carrito por completo antes de cargar la orden para evitar arrastrar residuos
     setCart([]);
 
+    // 1. Si la orden tiene items completos guardados (ej. desde una cotización), cargarlos directamente
+    if ((order as any).items && (order as any).items.length > 0) {
+      const rawItems = (order as any).items;
+      // REGLA: Los servicios que no tienen un monto establecido (o monto < 1) NO deben pasar a facturación
+      const itemsToLoad = rawItems.filter((it: any) => {
+        const isService = Boolean(
+          it.serviceId || 
+          it.type === "service" ||
+          it.category === "Servicios" ||
+          tenantServices.some(s => s.id === it.serviceId || s.name.toLowerCase().trim() === it.name?.toLowerCase().trim()) ||
+          (!it.productId && (
+            it.name?.toLowerCase().includes("mantenimiento") ||
+            it.name?.toLowerCase().includes("servicio") ||
+            it.name?.toLowerCase().includes("mano de obra") ||
+            it.name?.toLowerCase().includes("alineación") ||
+            it.name?.toLowerCase().includes("alineacion") ||
+            it.name?.toLowerCase().includes("diagnostico") ||
+            it.name?.toLowerCase().includes("diagnóstico") ||
+            it.name?.toLowerCase().includes("revisión") ||
+            it.name?.toLowerCase().includes("revision") ||
+            it.name?.toLowerCase().includes("chequeo") ||
+            it.name?.toLowerCase().includes("labor")
+          ))
+        );
+
+        const price = Number(it.unitPrice ?? it.price ?? it.salePrice ?? 0);
+        if (isService && price < 1) {
+          return false;
+        }
+        return true;
+      });
+
+      const newCart: CartItem[] = itemsToLoad.map((it: any) => {
+        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : 18;
+        const grossPrice = it.unitPrice ? it.unitPrice * (1 + taxRate / 100) : (it.price || it.salePrice || 0);
+
+        const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
+        const existingService = it.serviceId ? tenantServices.find((s) => s.id === it.serviceId) : null;
+
+        if (existingProduct) {
+          return {
+            ...existingProduct,
+            name: it.name || existingProduct.name,
+            salePrice: grossPrice,
+            tax: taxRate,
+            quantity: it.quantity || 1,
+          };
+        }
+
+        if (existingService) {
+          return {
+            ...serviceToProduct(existingService),
+            name: it.name || existingService.name,
+            salePrice: grossPrice,
+            tax: taxRate,
+            quantity: it.quantity || 1,
+          };
+        }
+
+        const isService = Boolean(
+          it.serviceId || 
+          it.name?.toLowerCase().includes("mano de obra") || 
+          it.name?.toLowerCase().includes("servicio") ||
+          it.name?.toLowerCase().includes("diagnostico") ||
+          it.name?.toLowerCase().includes("diagnóstico")
+        );
+
+        return {
+          id: it.productId || it.serviceId || it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          tenantId: tenantId || order.tenantId,
+          name: it.name,
+          sku: isService ? "MANO-OBRA" : "REPUESTO",
+          category: isService ? "Servicios" : "Repuestos",
+          costPrice: 0,
+          salePrice: grossPrice,
+          laborPrice: isService ? grossPrice : undefined,
+          stock: 9999,
+          minStock: 0,
+          tax: taxRate,
+          quantity: it.quantity || 1,
+        };
+      });
+
+      setCart(newCart);
+      toast.success(`Orden vinculada — ${newCart.length} ítems agregados al carrito`);
+      return;
+    }
+
     if (sids.length > 0 || (order.parts && order.parts.length > 0) || (order.customServices && order.customServices.length > 0) || (order.customParts && order.customParts.length > 0)) {
       setCart(() => {
         let newCart: CartItem[] = [];
         
-        // Add services
+        // Add services con precio establecido >= 1
         if (sids.length > 0) {
           const servicesToAdd = tenantServices.filter(s => s && sids.includes(s.id));
           servicesToAdd.forEach(s => {
-            if (s.price > 0 || s.laborPrice) {
+            const sPrice = Number(s.price || 0);
+            const sLabor = Number(s.laborPrice || 0);
+            if (sPrice >= 1 || sLabor >= 1) {
               const productForm = serviceToProduct(s);
               const ex = newCart.find(i => i.id === productForm.id);
               if (ex) {
@@ -471,6 +562,7 @@ export default function POSPage() {
             const product = allPosItems.find(p => p && p.id && p.id === part.productId);
             if (product) {
               const ex = newCart.find(i => i.id === product.id);
+              const finalPrice = (part as any).price || product.salePrice;
               if (ex) {
                 newCart = newCart.map(i => i.id === product.id ? { ...i, quantity: i.quantity + (part.quantity || 1) } : i);
               } else {
@@ -478,8 +570,23 @@ export default function POSPage() {
                 const calculatedLaborPrice = isService
                   ? product.laborPrice
                   : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined);
-                newCart.push({ ...product, quantity: part.quantity || 1, laborPrice: calculatedLaborPrice });
+                newCart.push({ ...product, salePrice: finalPrice, quantity: part.quantity || 1, laborPrice: calculatedLaborPrice });
               }
+            } else {
+              // Fallback para repuestos no encontrados en el catálogo
+              newCart.push({
+                id: part.productId,
+                tenantId: tenantId,
+                name: (part as any).name || "Repuesto de Cotización",
+                sku: "REPUESTO",
+                category: "Repuestos",
+                costPrice: 0,
+                salePrice: (part as any).price || 0,
+                stock: 9999,
+                minStock: 0,
+                tax: (part as any).tax ?? 18,
+                quantity: part.quantity || 1,
+              });
             }
           });
         }
@@ -488,6 +595,8 @@ export default function POSPage() {
         if (order.customServices && order.customServices.length > 0) {
           order.customServices.forEach((cs: any) => {
             if (!cs || !cs.name) return;
+            const csPrice = Number(cs.price || 0);
+            if (csPrice < 1) return; // REGLA: Los servicios sin monto establecido (< 1) no pasan a facturación
             newCart.push({
               id: `labor-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
               tenantId: tenantId,
@@ -495,8 +604,8 @@ export default function POSPage() {
               sku: "MANO-OBRA",
               category: "Servicios",
               costPrice: 0,
-              salePrice: cs.price || 0,
-              laborPrice: cs.price || 0,
+              salePrice: csPrice,
+              laborPrice: csPrice,
               stock: 9999,
               minStock: 0,
               tax: typeof cs.tax === 'number' ? cs.tax : 0,
@@ -533,17 +642,142 @@ export default function POSPage() {
     }
   };
 
-  const autoLoadedOrderIdRef = useRef<string | null>(null);
+  // Cargar directamente desde una Cotización
+  const handleLoadFromQuote = (targetQuote: any, linkedOrderId?: string) => {
+    if (linkedOrderId) {
+      setActiveOrderId(linkedOrderId);
+    }
+    setAllowExtraInventory(false);
+    if (targetQuote.customerId) {
+      setPosCustomerId(targetQuote.customerId);
+    }
+    if (targetQuote.discount && targetQuote.discount > 0) {
+      setDiscount(targetQuote.discount);
+      setDiscountType("fixed");
+    } else {
+      setDiscount(0);
+      setDiscountType("fixed");
+    }
+
+    setCategory("Todos");
+    setCart([]);
+
+    const rawItems = targetQuote.items || [];
+    // REGLA: Los servicios que no tienen un monto establecido (o monto < 1) NO deben pasar a facturación
+    const itemsToLoad = rawItems.filter((it: any) => {
+      const isService = Boolean(
+        it.serviceId || 
+        it.type === "service" ||
+        it.category === "Servicios" ||
+        tenantServices.some(s => s.id === it.serviceId || s.name.toLowerCase().trim() === it.name?.toLowerCase().trim()) ||
+        (!it.productId && (
+          it.name?.toLowerCase().includes("mantenimiento") ||
+          it.name?.toLowerCase().includes("servicio") ||
+          it.name?.toLowerCase().includes("mano de obra") ||
+          it.name?.toLowerCase().includes("alineación") ||
+          it.name?.toLowerCase().includes("alineacion") ||
+          it.name?.toLowerCase().includes("diagnostico") ||
+          it.name?.toLowerCase().includes("diagnóstico") ||
+          it.name?.toLowerCase().includes("revisión") ||
+          it.name?.toLowerCase().includes("revision") ||
+          it.name?.toLowerCase().includes("chequeo") ||
+          it.name?.toLowerCase().includes("labor")
+        ))
+      );
+
+      const price = Number(it.unitPrice ?? it.price ?? it.salePrice ?? 0);
+      if (isService && price < 1) {
+        return false;
+      }
+      return true;
+    });
+    if (itemsToLoad.length > 0) {
+      const newCart: CartItem[] = itemsToLoad.map((it: any) => {
+        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : 18;
+        // In Quote, unitPrice is net. In POS Cart, salePrice is gross (net * (1 + taxRate/100))
+        const grossPrice = it.unitPrice ? it.unitPrice * (1 + taxRate / 100) : (it.salePrice || 0);
+
+        const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
+        const existingService = it.serviceId ? tenantServices.find((s) => s.id === it.serviceId) : null;
+
+        if (existingProduct) {
+          return {
+            ...existingProduct,
+            name: it.name || existingProduct.name,
+            salePrice: grossPrice,
+            tax: taxRate,
+            quantity: it.quantity || 1,
+          };
+        }
+
+        if (existingService) {
+          return {
+            ...serviceToProduct(existingService),
+            name: it.name || existingService.name,
+            salePrice: grossPrice,
+            tax: taxRate,
+            quantity: it.quantity || 1,
+          };
+        }
+
+        const isService = Boolean(
+          it.serviceId || 
+          it.name?.toLowerCase().includes("mano de obra") || 
+          it.name?.toLowerCase().includes("servicio") ||
+          it.name?.toLowerCase().includes("diagnostico") ||
+          it.name?.toLowerCase().includes("diagnóstico")
+        );
+
+        return {
+          id: it.productId || it.serviceId || it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          tenantId: tenantId || targetQuote.tenantId,
+          name: it.name,
+          sku: isService ? "MANO-OBRA" : "REPUESTO",
+          category: isService ? "Servicios" : "Repuestos",
+          costPrice: 0,
+          salePrice: grossPrice,
+          laborPrice: isService ? grossPrice : undefined,
+          stock: 9999,
+          minStock: 0,
+          tax: taxRate,
+          quantity: it.quantity || 1,
+        };
+      });
+
+      setCart(newCart);
+      toast.success(`Cotización ${targetQuote.quoteNumber || ""} cargada al carrito (${newCart.length} ítems)`);
+    } else {
+      toast.info("La cotización no tiene artículos registrados");
+    }
+  };
+
+  const autoLoadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (orderId && autoLoadedOrderIdRef.current !== orderId && tenantOrders.length > 0) {
-      const targetOrder = tenantOrders.find((o) => o.id === orderId);
-      if (targetOrder) {
-        autoLoadedOrderIdRef.current = orderId;
-        handleSelectOrder(targetOrder);
+    const currentKey = `${orderId || ""}_${quoteId || ""}`;
+    if (!currentKey || currentKey === "_") return;
+    if (autoLoadedKeyRef.current === currentKey) return;
+
+    // 1. Intentar cargar directamente desde cotización si quoteId está en la URL
+    if (quoteId) {
+      const targetQuote = quotes.find((q) => q.id === quoteId);
+      if (targetQuote && targetQuote.items && targetQuote.items.length > 0) {
+        autoLoadedKeyRef.current = currentKey;
+        handleLoadFromQuote(targetQuote, orderId || undefined);
+        return;
       }
     }
-  }, [orderId, tenantOrders]);
+
+    // 2. Intentar cargar desde orden de trabajo
+    if (orderId) {
+      const targetOrder = orders.find((o) => o.id === orderId) || tenantOrders.find((o) => o.id === orderId);
+      if (targetOrder) {
+        autoLoadedKeyRef.current = currentKey;
+        handleSelectOrder(targetOrder);
+        return;
+      }
+    }
+  }, [orderId, quoteId, orders, quotes, tenantOrders]);
 
   const handleCheckout = async (checkoutData: CheckoutConfirmData) => {
     if (!posMechanicId || posMechanicId === "none") {
@@ -756,6 +990,9 @@ export default function POSPage() {
     }
     if (activeOrderId) {
       updateOrder(activeOrderId, { status: "invoiced" });
+    }
+    if (quoteId) {
+      updateQuote(quoteId, { status: "accepted" });
     }
     setLastInvoice(inv);
     setIsCheckout(false);

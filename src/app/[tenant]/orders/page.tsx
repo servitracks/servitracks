@@ -423,7 +423,13 @@ export default function OrdersPage() {
       {/* Lazy-loaded Dialogs */}
       <Suspense fallback={null}>
         {isCreateOpen && <LazyCreateDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />}
-        {selectedOrder && isDetailOpen && <LazyDetailDialog open={isDetailOpen} onOpenChange={setIsDetailOpen} order={selectedOrder} />}
+        {selectedOrder && isDetailOpen && (
+          <LazyDetailDialog 
+            open={isDetailOpen} 
+            onOpenChange={setIsDetailOpen} 
+            order={allOrders.find(o => o.id === selectedOrder.id) || selectedOrder} 
+          />
+        )}
       </Suspense>
     </div>
   );

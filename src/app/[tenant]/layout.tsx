@@ -211,16 +211,21 @@ export default function DashboardLayout() {
       
       if (!allowedRoles.includes(userRole)) {
         console.warn("[RBAC] Access denied to path:", subpath, "for role:", userRole);
-        // Encontrar la primera página permitida para este rol
-        const allowedItems = [
-          { href: "", roles: ['owner', 'receptionist', 'superadmin'] },
-          { href: "/orders", roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
-          { href: "/mis-comisiones", roles: ['mechanic', 'owner', 'superadmin'] },
-          { href: "/inventory", roles: ['owner', 'warehouse', 'superadmin'] },
-        ];
+        // Encontrar la página principal predeterminada para este rol
+        let redirectPath = `/${tenantSlug}/orders`;
+        if (userRole === "warehouse") {
+          redirectPath = `/${tenantSlug}/inventory`;
+        } else if (userRole === "cashier") {
+          redirectPath = `/${tenantSlug}/pos`;
+        } else if (userRole === "mechanic") {
+          redirectPath = `/${tenantSlug}/orders`;
+        }
 
-        const firstAllowed = allowedItems.find(item => item.roles.includes(userRole));
-        const redirectPath = firstAllowed ? `/${tenantSlug}${firstAllowed.href}` : `/${tenantSlug}/orders`;
+        // Si solo estaba entrando a la raíz y no tiene permiso para el dashboard principal, redirigir sin error intimidante
+        if (subpath === "" || subpath === "/") {
+          navigate(redirectPath);
+          return;
+        }
 
         toast.error("No tienes permisos para acceder a esta sección. Redirigiendo...");
         navigate(redirectPath);

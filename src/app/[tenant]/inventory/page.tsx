@@ -491,7 +491,7 @@ export default function InventoryPage() {
     : users.find((u) => u.id === currentUserId);
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
-  const isOwner = activeRole === 'owner';
+  const isOwner = activeRole === 'owner' || activeRole === 'superadmin';
 
   const { addProduct, updateProduct, deleteProduct, bulkImportProducts, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();
   const allProducts = useStore((s) => s.products);
@@ -534,7 +534,7 @@ export default function InventoryPage() {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const handleDeleteAllInventory = async () => {
-    if (!tenantId) return;
+    if (!tenantId || !isOwner) return;
     setIsDeletingAll(true);
     try {
       const { supabaseAdmin } = await import("@/lib/supabase");
@@ -1094,18 +1094,20 @@ export default function InventoryPage() {
           <p className="text-neutral-500">Gestiona tus productos, repuestos y suministros.</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
-            className="flex items-center gap-2 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 font-bold text-xs h-9 cursor-pointer transition-colors shadow-2xs"
-            onClick={() => {
-              setConfirmDeleteText("");
-              setIsDeleteAllModalOpen(true);
-            }}
-            title="Eliminar todo el inventario de la base de datos"
-          >
-            <Trash2 className="h-4 w-4 text-rose-500" />
-            <span className="hidden sm:inline">Vaciar Inventario</span>
-          </Button>
+          {isOwner && (
+            <Button 
+              variant="outline" 
+              className="flex items-center gap-2 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 font-bold text-xs h-9 cursor-pointer transition-colors shadow-2xs"
+              onClick={() => {
+                setConfirmDeleteText("");
+                setIsDeleteAllModalOpen(true);
+              }}
+              title="Eliminar todo el inventario de la base de datos"
+            >
+              <Trash2 className="h-4 w-4 text-rose-500" />
+              <span className="hidden sm:inline">Vaciar Inventario</span>
+            </Button>
+          )}
 
           <Button variant="outline" className="hidden rounded-lg md:flex gap-2" onClick={handleExportCSV}>
             <Download className="h-4 w-4" /> Exportar CSV
@@ -2121,69 +2123,71 @@ export default function InventoryPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal Confirmación de Eliminación Total de Inventario */}
-      <Dialog open={isDeleteAllModalOpen} onOpenChange={setIsDeleteAllModalOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
-          <DialogHeader>
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 mb-3">
-              <AlertTriangle className="h-6 w-6" />
+      {/* Modal Confirmación de Eliminación Total de Inventario (Solo dueño / admin) */}
+      {isOwner && (
+        <Dialog open={isDeleteAllModalOpen} onOpenChange={setIsDeleteAllModalOpen}>
+          <DialogContent className="sm:max-w-md rounded-2xl p-6">
+            <DialogHeader>
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600 mb-3">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <DialogTitle className="text-center text-lg font-black text-neutral-900">
+                ¿Eliminar TODO el inventario?
+              </DialogTitle>
+              <DialogDescription className="text-center text-xs text-neutral-500 leading-relaxed mt-1">
+                Esta acción eliminará de forma <strong>permanente y directa de la base de datos</strong> todos los productos ({products.length}) y movimientos de inventario ({movements.length}) del taller <strong>{currentTenant?.name}</strong>.
+                <br /><br />
+                Esta operación <span className="text-rose-600 font-bold">NO se puede deshacer</span>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 pt-2">
+              <Label className="text-xs font-bold text-neutral-700">
+                Para confirmar, escribe <span className="font-mono text-rose-600 font-black">ELIMINAR</span> abajo:
+              </Label>
+              <Input
+                value={confirmDeleteText}
+                onChange={(e) => setConfirmDeleteText(e.target.value)}
+                placeholder="Escribe ELIMINAR para confirmar"
+                className="h-10 text-center font-mono font-bold border-rose-200 focus:border-rose-500 rounded-xl"
+              />
             </div>
-            <DialogTitle className="text-center text-lg font-black text-neutral-900">
-              ¿Eliminar TODO el inventario?
-            </DialogTitle>
-            <DialogDescription className="text-center text-xs text-neutral-500 leading-relaxed mt-1">
-              Esta acción eliminará de forma <strong>permanente y directa de la base de datos</strong> todos los productos ({products.length}) y movimientos de inventario ({movements.length}) del taller <strong>{currentTenant?.name}</strong>.
-              <br /><br />
-              Esta operación <span className="text-rose-600 font-bold">NO se puede deshacer</span>.
-            </DialogDescription>
-          </DialogHeader>
 
-          <div className="space-y-3 pt-2">
-            <Label className="text-xs font-bold text-neutral-700">
-              Para confirmar, escribe <span className="font-mono text-rose-600 font-black">ELIMINAR</span> abajo:
-            </Label>
-            <Input
-              value={confirmDeleteText}
-              onChange={(e) => setConfirmDeleteText(e.target.value)}
-              placeholder="Escribe ELIMINAR para confirmar"
-              className="h-10 text-center font-mono font-bold border-rose-200 focus:border-rose-500 rounded-xl"
-            />
-          </div>
-
-          <DialogFooter className="grid grid-cols-2 gap-2 sm:gap-2 mt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl font-bold cursor-pointer"
-              onClick={() => {
-                setIsDeleteAllModalOpen(false);
-                setConfirmDeleteText("");
-              }}
-              disabled={isDeletingAll}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-              disabled={confirmDeleteText.trim().toUpperCase() !== "ELIMINAR" || isDeletingAll}
-              onClick={handleDeleteAllInventory}
-            >
-              {isDeletingAll ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                  Eliminando...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="h-4 w-4 mr-1.5" />
-                  Eliminar Todo
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter className="grid grid-cols-2 gap-2 sm:gap-2 mt-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl font-bold cursor-pointer"
+                onClick={() => {
+                  setIsDeleteAllModalOpen(false);
+                  setConfirmDeleteText("");
+                }}
+                disabled={isDeletingAll}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                disabled={confirmDeleteText.trim().toUpperCase() !== "ELIMINAR" || isDeletingAll}
+                onClick={handleDeleteAllInventory}
+              >
+                {isDeletingAll ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                    Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    Eliminar Todo
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

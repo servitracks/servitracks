@@ -228,6 +228,8 @@ export interface WorkOrder {
   estimatedTime?: string;
   notes?: string;
   checklist?: { item: string; completed: boolean }[];
+  quoteId?: string;
+  items?: any[];
   total: number;
   createdAt: string;
   updatedAt: string;

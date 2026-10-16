@@ -464,7 +464,15 @@ export default function SettingsPage() {
 
     if (dbError) {
       console.error("Error inserting tenant_user:", dbError);
-      // Fallback a solo local si la DB falla
+      // Revertir creación en Supabase Auth para no dejar cuentas huérfanas
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(newUserId);
+      } catch (delErr) {
+        console.error("Error rolling back auth user:", delErr);
+      }
+      toast.error(`Error al registrar en la base de datos: ${dbError.message || "Error desconocido"}`);
+      setIsInviting(false);
+      return;
     }
 
     // 3. Guardar en store local
@@ -1340,10 +1348,20 @@ export default function SettingsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold">{r.label}</span>
-                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5", r.color)}>{r.value === "owner" ? "Admin" : r.value === "cashier" ? "POS" : r.value === "mechanic" ? "OT" : "CRM"}</Badge>
+                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5", r.color)}>
+                          {r.value === "owner" ? "Admin" : r.value === "cashier" ? "POS" : r.value === "mechanic" ? "OT" : r.value === "warehouse" ? "Stock" : "CRM"}
+                        </Badge>
                       </div>
                       <p className="text-xs text-neutral-400">
-                        {r.value === "owner" ? "Control total del taller" : r.value === "mechanic" ? "Ver y actualizar órdenes asignadas" : r.value === "cashier" ? "Acceso al POS y facturación" : "Registrar clientes y vehículos"}
+                        {r.value === "owner"
+                          ? "Control total del taller"
+                          : r.value === "mechanic"
+                          ? "Ver y actualizar órdenes asignadas"
+                          : r.value === "cashier"
+                          ? "Acceso al POS y facturación"
+                          : r.value === "warehouse"
+                          ? "Gestión de inventario, compras y repuestos"
+                          : "Registrar clientes y vehículos"}
                       </p>
                     </div>
                   </div>
@@ -1422,7 +1440,7 @@ export default function SettingsPage() {
                   <Label>Rol</Label>
                   <div className="grid grid-cols-2 gap-2">
                     {ROLES.filter(r => editUserTarget?.role === "owner" ? r.value === "owner" : r.value !== "owner").map(r => (
-                      <button key={r.value} onClick={() => setEditUserForm({ ...editUserForm, role: r.value })}
+                      <button key={r.value} type="button" onClick={() => setEditUserForm({ ...editUserForm, role: r.value })}
                         className={cn("py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer",
                           editUserForm.role === r.value ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
                         {r.label}
@@ -1719,7 +1737,7 @@ export default function SettingsPage() {
               <Label>Rol</Label>
               <div className="grid grid-cols-2 gap-2">
                 {ROLES.filter(r => r.value !== "owner").map(r => (
-                  <button key={r.value} onClick={() => setInviteForm({ ...inviteForm, role: r.value })}
+                  <button key={r.value} type="button" onClick={() => setInviteForm({ ...inviteForm, role: r.value })}
                     className={cn("py-2.5 rounded-xl border text-sm font-bold transition-all cursor-pointer",
                       inviteForm.role === r.value ? "bg-black text-white border-black" : "border-neutral-200 text-neutral-600 hover:bg-neutral-50")}>
                     {r.label}

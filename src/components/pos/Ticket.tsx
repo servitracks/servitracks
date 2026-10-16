@@ -158,6 +158,10 @@ export interface TicketProps {
     km?: number | string;
     color?: string;
   };
+  tipoDocumento?: string;
+  esCotizacion?: boolean;
+  validUntil?: string;
+  observation?: string;
 }
 
 const NCF_NOMBRES: Record<string, string> = {
@@ -244,6 +248,10 @@ export function Ticket({
   signatureDate,
   discount,
   vehicle,
+  tipoDocumento: propTipoDocumento,
+  esCotizacion = false,
+  validUntil,
+  observation,
 }: TicketProps) {
   // Reconciliación de Tenant
   const tenantObj = {
@@ -326,8 +334,10 @@ export function Ticket({
       ? `https://fc.dgii.gov.do/ecf/consulta?rncemisor=${tenantObj.rnc.replace(/\D/g, "")}&encf=${fiscalNCF}&codigoSeguridad=${ordenObj.ecf_security_code || ""}&montoTotal=${ordenObj.total}`
       : "");
 
-  let tipoDocumento = "RECIBO DE VENTA";
-  if (!esProduccion && fiscalNCF) {
+  let tipoDocumento = propTipoDocumento || "RECIBO DE VENTA";
+  if (esCotizacion) {
+    tipoDocumento = propTipoDocumento || "COTIZACIÓN / PRESUPUESTO";
+  } else if (!esProduccion && fiscalNCF) {
     const prefix = fiscalNCF.substring(0, 3);
     const nombreOficial = NCF_NOMBRES[prefix];
     if (nombreOficial) {
@@ -387,8 +397,13 @@ export function Ticket({
               </div>
             )}
             <div className="text-xs text-neutral-500 mt-1">
-              Orden Nº: <b className="text-neutral-900">{ordenObj.numero}</b> • Fecha: {humanizeDate(ordenObj.creado_en, true)}
+              {esCotizacion ? "Cotización Nº: " : "Orden Nº: "}<b className="text-neutral-900">{ordenObj.numero}</b> • Fecha: {humanizeDate(ordenObj.creado_en, true)}
             </div>
+            {esCotizacion && validUntil && (
+              <div className="text-xs text-neutral-600 mt-0.5">
+                Válido hasta: <b className="text-neutral-900">{humanizeDate(validUntil, false)}</b>
+              </div>
+            )}
           </div>
         </div>
 
@@ -481,6 +496,19 @@ export function Ticket({
                 </div>
               </div>
             )}
+            {esCotizacion && (
+              <div className="text-xs text-neutral-500 bg-neutral-50 p-3.5 rounded-xl border border-neutral-200 space-y-1.5">
+                <div className="font-bold text-neutral-800 uppercase tracking-wide text-[10px]">Condiciones del Presupuesto:</div>
+                <p className="leading-relaxed text-[11px] italic text-neutral-600">
+                  * Este documento es un presupuesto estimativo de servicios y/o repuestos. No constituye una factura fiscal ni comprobante de pago definitivo. Precios y disponibilidad sujetos a confirmación.
+                </p>
+                {observation && (
+                  <div className="pt-1 text-neutral-800 not-italic font-medium text-[11px] border-t border-neutral-200">
+                    <b>Observación:</b> {observation}
+                  </div>
+                )}
+              </div>
+            )}
             {cleanWarranty && (
               <div className="text-xs text-neutral-800 bg-neutral-50 p-3 rounded-xl border border-neutral-200 flex items-center gap-2">
                 <span><b>Garantía del Taller:</b> {cleanWarranty}</span>
@@ -506,10 +534,10 @@ export function Ticket({
               </div>
             )}
             <div className="pt-2 border-t-2 border-neutral-200 flex justify-between items-center text-sm font-black text-neutral-900">
-              <span>TOTAL A PAGAR:</span>
+              <span>{esCotizacion ? "TOTAL ESTIMADO:" : "TOTAL A PAGAR:"}</span>
               <span className="text-xl text-[#0051A8]">{formatRD(ordenObj.total)}</span>
             </div>
-            {vuelto > 0 && (
+            {!esCotizacion && vuelto > 0 && (
               <div className="flex justify-between text-emerald-700 font-bold pt-1 border-t border-dashed border-neutral-300">
                 <span>Cambio:</span>
                 <span>{formatRD(vuelto)}</span>
@@ -583,7 +611,7 @@ export function Ticket({
           <div className="flex items-center gap-1.5 min-w-0">
             <ClipboardList className="h-3.5 w-3.5 shrink-0 text-black" />
             <span>
-              <b>Orden No°:</b> <span className="font-bold tabular-nums ml-0.5">{ordenObj.numero}</span>
+              <b>{esCotizacion ? "Cotización No°:" : "Orden No°:"}</b> <span className="font-bold tabular-nums ml-0.5">{ordenObj.numero}</span>
             </span>
           </div>
           {ordenObj.es_urgente && (
@@ -612,6 +640,18 @@ export function Ticket({
             </span>
           </span>
         </div>
+
+        {esCotizacion && validUntil && (
+          <div className="flex items-center gap-1.5 text-[10.5px]">
+            <Calendar className="h-3.5 w-3.5 shrink-0 text-black" />
+            <span>
+              <b>Válido hasta:</b>{" "}
+              <span className="font-semibold tabular-nums ml-0.5">
+                {humanizeDate(validUntil, false)}
+              </span>
+            </span>
+          </div>
+        )}
 
         {ordenObj.notas && !ocultarNotas && (
           <div className="border border-black px-1.5 py-0.5 my-1 text-[10px] leading-tight bg-black/5">
@@ -801,7 +841,7 @@ export function Ticket({
         <div className="flex justify-between items-center py-0.5 gap-2">
           <div className="flex items-center gap-1.5 text-[12.5px] font-black tracking-tight shrink-0">
             <CircleDollarSign className="h-4 w-4 shrink-0 text-black" />
-            <span>TOTAL</span>
+            <span>{esCotizacion ? "TOTAL ESTIMADO" : "TOTAL"}</span>
           </div>
           <span className="font-black text-[14.5px] tabular-nums tracking-tight whitespace-nowrap">
             {formatRD(ordenObj.total)}
@@ -817,33 +857,50 @@ export function Ticket({
 
       <Sep />
 
-      {/* 9. DETALLES DE PAGO */}
-      <div className="space-y-1 text-[11px] pr-3">
-        <div className="flex justify-between items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold shrink-0">
-            <CreditCard className="h-3.5 w-3.5 shrink-0 text-black" />
-            <span>Método de pago:</span>
+      {/* 9. DETALLES DE PAGO / CONDICIONES */}
+      {!esCotizacion ? (
+        <div className="space-y-1 text-[11px] pr-3">
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex items-center gap-1.5 font-semibold shrink-0">
+              <CreditCard className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>Método de pago:</span>
+            </div>
+            <span className="font-bold uppercase truncate">{ordenObj.metodo_pago}</span>
           </div>
-          <span className="font-bold uppercase truncate">{ordenObj.metodo_pago}</span>
-        </div>
 
-        <div className="flex justify-between items-center gap-2">
-          <div className="flex items-center gap-1.5 font-semibold shrink-0">
-            <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
-            <span>Estado de factura:</span>
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex items-center gap-1.5 font-semibold shrink-0">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>Estado de factura:</span>
+            </div>
+            <span className="font-black uppercase tracking-wide shrink-0">
+              {ordenObj.saldo === 0 ? "PAGADA" : "PENDIENTE DE PAGO"}
+            </span>
           </div>
-          <span className="font-black uppercase tracking-wide shrink-0">
-            {ordenObj.saldo === 0 ? "PAGADA" : "PENDIENTE DE PAGO"}
-          </span>
-        </div>
 
-        {effectivePagoRecibido !== undefined && (
-          <>
-            <Row k="Recibido" v={formatRD(effectivePagoRecibido)} icon={Coins} />
-            {vuelto > 0 && <Row k="Su Cambio" v={formatRD(vuelto)} icon={ArrowRightLeft} boldValue />}
-          </>
-        )}
-      </div>
+          {effectivePagoRecibido !== undefined && (
+            <>
+              <Row k="Recibido" v={formatRD(effectivePagoRecibido)} icon={Coins} />
+              {vuelto > 0 && <Row k="Su Cambio" v={formatRD(vuelto)} icon={ArrowRightLeft} boldValue />}
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-1 text-[10.5px] pr-3">
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex items-center gap-1.5 font-semibold shrink-0">
+              <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
+              <span>Condición:</span>
+            </div>
+            <span className="font-bold uppercase text-[10px]">PRESUPUESTO ESTIMADO</span>
+          </div>
+          {observation && (
+            <div className="border border-black px-1.5 py-0.5 my-1 text-[10px] leading-tight bg-black/5">
+              <b>OBSERVACIÓN:</b> {observation}
+            </div>
+          )}
+        </div>
+      )}
 
       {cleanWarranty && (
         <>
@@ -867,11 +924,13 @@ export function Ticket({
 
       <Sep />
       <div className="text-center py-0.5 text-[10.5px] font-bold uppercase tracking-wider text-black">
-        {tenantObj.config?.ticket_pie || "¡GRACIAS POR SU PREFERENCIA!"}
+        {esCotizacion 
+          ? "¡GRACIAS POR PREFERIRNOS! PRECIOS SUJETOS A CONFIRMACIÓN."
+          : (tenantObj.config?.ticket_pie || "¡GRACIAS POR SU PREFERENCIA!")}
       </div>
 
       {/* 11. SECCIÓN FISCAL DGII E-CF / QR CODE */}
-      {isECF && (
+      {!esCotizacion && isECF && (
         <div className="mt-2.5 flex flex-col items-center gap-1 pt-1 border-t-[1.5px] border-dashed border-black">
           <div className="text-[9.5px] font-black uppercase text-center tracking-wide">
             {tipoDocumento}

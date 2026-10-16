@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useStore, Customer, Vehicle, Product, Service } from "@/store/useStore";
 import { X, Send, Printer, FileText, Check, Ban, ShoppingCart, RefreshCw, MessageSquare, Archive } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useRouter, useParams } from "@/lib/next-compat";
 import { cn } from "@/lib/utils";
 import type { Quote, QuoteItem, QuoteStatus, WorkOrder } from "@/store/types";
+import { Ticket } from "@/components/pos/Ticket";
 
 interface QuotationDetailDialogProps {
   open: boolean;
@@ -48,9 +49,23 @@ export default function QuotationDetailDialog({
   const customers = useStore((s) => s.customers);
   const vehicles = useStore((s) => s.vehicles);
   const tenants = useStore((s) => s.tenants);
+  const printSettings = useStore((s) => s.printSettings);
   
   const updateQuote = useStore((s) => s.updateQuote);
   const addOrder = useStore((s) => s.addOrder);
+
+  const [paperFormat, setPaperFormat] = useState<"80mm" | "A4">(() => 
+    printSettings.paperSize === "A4" ? "A4" : "80mm"
+  );
+  const componentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (printSettings.paperSize === "A4") {
+      setPaperFormat("A4");
+    } else {
+      setPaperFormat("80mm");
+    }
+  }, [printSettings.paperSize]);
 
   const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
   const [archiveObsInput, setArchiveObsInput] = useState("");
@@ -95,17 +110,29 @@ export default function QuotationDetailDialog({
 
       const customServices = quote.items
         .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
-        .map((i) => ({ name: i.name, price: i.unitPrice, tax: i.taxPercentage ?? 0 }));
+        .map((i) => ({ 
+          name: i.name, 
+          price: i.unitPrice * (1 + (i.taxPercentage ?? 0) / 100), 
+          tax: i.taxPercentage ?? 0 
+        }));
 
       const customParts = quote.items
         .filter((i) => !i.productId && (!i.serviceId || !i.serviceId.startsWith('custom-')))
-        .map((i) => ({ name: i.name, price: i.unitPrice, quantity: i.quantity, tax: i.taxPercentage ?? 18 }));
+        .map((i) => ({ 
+          name: i.name, 
+          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100), 
+          quantity: i.quantity, 
+          tax: i.taxPercentage ?? 18 
+        }));
 
       const parts = quote.items
         .filter((i) => i.productId && typeof i.productId === 'string' && i.productId.trim().length > 0)
         .map((i) => ({
           productId: i.productId!.trim(),
+          name: i.name,
+          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100),
           quantity: i.quantity,
+          tax: i.taxPercentage ?? 18,
         }));
 
       const newOrder: WorkOrder = {
@@ -115,6 +142,18 @@ export default function QuotationDetailDialog({
         vehicleId: quote.vehicleId || "general",
         status: "pending",
         description: `Servicios importados de Cotización ${quote.quoteNumber}`,
+        quoteId: quote.id,
+        items: quote.items.map((i) => ({
+          id: i.id,
+          productId: i.productId,
+          serviceId: i.serviceId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          taxPercentage: i.taxPercentage ?? 18,
+          discountPercentage: i.discountPercentage ?? 0,
+          total: i.total,
+        })),
         serviceIds: serviceIds,
         customServices: customServices.length > 0 ? customServices : undefined,
         customParts: customParts.length > 0 ? customParts : undefined,
@@ -136,8 +175,8 @@ export default function QuotationDetailDialog({
       onClose();
 
       if (shouldRedirectToPos) {
-        // Redirect directly to POS with orderId parameter to autoload cart
-        router.push(`/${tenantSlug}/pos?orderId=${orderId}`);
+        // Redirect directly to POS with orderId and quoteId parameters to autoload cart
+        router.push(`/${tenantSlug}/pos?orderId=${orderId}&quoteId=${quote.id}`);
       } else {
         // Redirect to work orders
         router.push(`/${tenantSlug}/orders`);
@@ -191,85 +230,171 @@ export default function QuotationDetailDialog({
   };
 
   const handlePrint = () => {
-    window.print();
+    const printElement = componentRef.current;
+    if (!printElement) return;
+
+    // Crear un iframe oculto para impresión aislada idéntica a factura POS
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "absolute";
+    iframe.style.width = "0px";
+    iframe.style.height = "0px";
+    iframe.style.border = "none";
+    
+    document.body.appendChild(iframe);
+
+    // Obtener los estilos de Tailwind y de la aplicación actual
+    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+      .map((tag) => tag.outerHTML)
+      .join("");
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) return;
+
+    doc.open();
+    const formatSize = paperFormat === "A4" 
+      ? "A4" 
+      : "80mm 297mm";
+
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Cotizacion_${quote?.quoteNumber || "COT"}</title>
+          ${styles}
+          <style>
+            @media print {
+              @page { size: ${formatSize}; margin: 0; }
+              * {
+                color: black !important;
+                border-color: black !important;
+                -webkit-font-smoothing: none !important;
+                font-smooth: never !important;
+                text-rendering: optimizeSpeed !important;
+              }
+              img {
+                filter: grayscale(100%) contrast(1000%) !important;
+              }
+            }
+            html, body { 
+              background: white !important; 
+              color: black !important;
+              display: block !important;
+              height: auto !important;
+              min-height: auto !important;
+              overflow: visible !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            body {
+              padding-top: 10px !important;
+            }
+            .thermal-ticket {
+              box-shadow: none !important;
+              margin: 0 auto !important;
+            }
+          </style>
+        </head>
+        <body>
+          ${printElement.innerHTML}
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+              }, 250);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    // Limpiar el iframe después de imprimir
+    iframe.contentWindow?.addEventListener("afterprint", () => {
+      document.body.removeChild(iframe);
+    });
   };
+
+  const modalWidth = paperFormat === "A4" ? "sm:max-w-4xl" : "sm:max-w-2xl";
 
   return (
     <>
       <style>{`
-        @media print {
-          /* Hide main app layout and overlays */
-          body > div:first-child,
-          .print\\:hidden,
-          [class*="backdrop-blur"],
-          .bg-black\\/80 {
-            display: none !important;
-          }
-
-          /* Ensure body background is white */
-          body {
-            background: white !important;
-          }
-
-          /* Flatten Radix Dialog wrapper, positioners, and overlays */
-          div.fixed, [role="dialog"] {
-            position: relative !important;
-            left: 0 !important;
-            top: 0 !important;
-            transform: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            display: block !important;
-            border: none !important;
-            box-shadow: none !important;
-            background: white !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          /* Hide default close button in print */
-          [role="dialog"] > button {
-            display: none !important;
-          }
-
-          /* Print sheet styling */
-          #quotation-print-sheet {
-            padding: 10mm !important;
-            width: 100% !important;
-            height: auto !important;
-            overflow: visible !important;
-          }
+        .receipt-scroll-container::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 9999px;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-thumb {
+          background: #94a3b8;
+          border-radius: 9999px;
+          border: 2px solid #f1f5f9;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-thumb:hover {
+          background: #64748b;
         }
       `}</style>
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className="sm:max-w-3xl rounded-2xl p-0 bg-white overflow-hidden max-h-[95vh] flex flex-col">
+        <DialogContent className={cn(modalWidth, "w-[96vw] sm:w-full rounded-2xl p-0 bg-white overflow-hidden h-[92vh] max-h-[92vh] flex flex-col shadow-2xl transition-all duration-200")}>
           
           {/* Actions Header bar */}
-          <div className="bg-neutral-50 px-6 py-4 border-b border-neutral-100 flex items-center justify-between shrink-0 print:hidden">
+          <div className="bg-neutral-50 px-6 py-3.5 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-neutral-800">{quote.quoteNumber}</span>
-              <Badge className={cn("text-xs font-bold border rounded-full px-2 py-0.5", statusColors[quote.status])}>
+              <span className="font-black text-neutral-900 tracking-tight">{quote.quoteNumber}</span>
+              <Badge className={cn("text-xs font-bold border rounded-full px-2.5 py-0.5", statusColors[quote.status])}>
                 {statusLabels[quote.status]}
               </Badge>
               {customer && (
                 <>
-                  <div className="h-4 w-px bg-neutral-200 mx-1" />
-                  <span className="text-sm font-semibold text-neutral-600 truncate max-w-[200px]" title={customer.name}>
+                  <div className="h-4 w-px bg-neutral-200 mx-1 hidden sm:block" />
+                  <span className="text-sm font-semibold text-neutral-600 truncate max-w-[200px] hidden sm:inline" title={customer.name}>
                     {customer.name}
                   </span>
                 </>
               )}
             </div>
-            <div className="flex items-center gap-2.5">
+
+            <div className="flex items-center gap-2">
+              {/* Selector de formato: 80mm vs A4 */}
+              <div className="flex items-center bg-neutral-200/70 p-0.5 rounded-lg text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("80mm")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs",
+                    paperFormat === "80mm" 
+                      ? "bg-white text-neutral-900 shadow-xs font-black" 
+                      : "text-neutral-600 hover:text-neutral-900"
+                  )}
+                  title="Formato Ticket POS (80mm)"
+                >
+                  <span>🧾 Ticket 80mm</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("A4")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs",
+                    paperFormat === "A4" 
+                      ? "bg-white text-neutral-900 shadow-xs font-black" 
+                      : "text-neutral-600 hover:text-neutral-900"
+                  )}
+                  title="Formato Hoja A4"
+                >
+                  <span>📄 Hoja A4</span>
+                </button>
+              </div>
+
+              <div className="h-4 w-px bg-neutral-200 mx-1 hidden sm:block" />
+
               {quote.status === "draft" && (
                 <>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 text-xs text-rose-600 border-rose-100 hover:bg-rose-50 hover:text-rose-700 font-bold cursor-pointer"
+                    className="h-8 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 font-bold cursor-pointer"
                     onClick={() => handleUpdateStatus("rejected")}
                   >
                     <Ban className="h-3 w-3 mr-1" /> Rechazar
@@ -277,7 +402,7 @@ export default function QuotationDetailDialog({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 text-xs text-emerald-600 border-emerald-100 hover:bg-emerald-50 hover:text-emerald-700 font-bold cursor-pointer"
+                    className="h-8 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 font-bold cursor-pointer"
                     onClick={() => handleUpdateStatus("accepted")}
                   >
                     <Check className="h-3 w-3 mr-1" /> Aprobar
@@ -288,7 +413,7 @@ export default function QuotationDetailDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 text-xs text-blue-600 border-blue-100 hover:bg-blue-50 hover:text-blue-700 font-bold cursor-pointer"
+                  className="h-8 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 font-bold cursor-pointer"
                   onClick={() => handleConvertToOrder(true)}
                 >
                   <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Facturar / Orden
@@ -328,195 +453,171 @@ export default function QuotationDetailDialog({
               </Button>
               
               <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 rounded-lg cursor-pointer mr-8"
+                variant="default"
+                size="sm"
+                className="h-8 rounded-lg bg-neutral-900 text-white hover:bg-black font-bold cursor-pointer gap-1.5"
                 onClick={handlePrint}
-                title="Imprimir / PDF"
+                title="Imprimir presupuesto"
               >
-                <Printer className="h-4 w-4 text-neutral-600" />
+                <Printer className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Imprimir</span>
               </Button>
 
             </div>
           </div>
 
-          {/* Printable Area */}
-          <div className="flex-1 overflow-y-auto p-8 custom-scrollbar print:p-0" id="quotation-print-sheet">
-            
-            {/* Centered Document Header */}
-            <div className="flex flex-col items-center text-center pb-6 border-b-2 border-neutral-800">
-              {currentTenant.logo ? (
-                <img 
-                  src={currentTenant.logo} 
-                  alt="Logo" 
-                  className="h-16 w-auto max-w-[200px] object-contain mb-3 filter grayscale contrast-125 print:h-14" 
-                />
-              ) : (
-                <h2 className="text-2xl font-black text-neutral-900 tracking-wider uppercase mb-1">{currentTenant.name}</h2>
+          {/* Printable Area - Vista previa con el Ticket idéntico al POS */}
+          <div 
+            className="receipt-scroll-container bg-neutral-100/90 p-3 sm:p-6 overflow-y-auto flex-1 min-h-0 flex justify-center items-start scroll-smooth"
+            style={{
+              scrollbarWidth: "auto",
+              scrollbarColor: "#94a3b8 #f1f5f9",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div 
+              ref={componentRef} 
+              className={cn(
+                "print-container bg-white shadow-lg rounded-xl transition-all duration-200 my-2 pb-6 self-start",
+                paperFormat === "A4" ? "w-full max-w-[850px] p-2 sm:p-4" : "w-auto"
               )}
-              <div className="text-xs text-neutral-500 font-medium space-y-1">
-                {currentTenant.rnc && <p>RNC: <span className="font-bold text-neutral-700">{currentTenant.rnc}</span></p>}
-                <p className="max-w-md mx-auto leading-relaxed">
-                  {currentTenant.address && <span>{currentTenant.address}</span>}
-                  {currentTenant.address && currentTenant.phone && <span className="mx-2 text-neutral-300">|</span>}
-                  {currentTenant.phone && <span>Tel: <span className="font-bold text-neutral-700">{currentTenant.phone}</span></span>}
-                </p>
-              </div>
+            >
+              <Ticket
+                invoiceId={quote.quoteNumber}
+                tipoDocumento="COTIZACIÓN / PRESUPUESTO"
+                esCotizacion={true}
+                validUntil={quote.validUntil}
+                observation={quote.observation}
+                notes={quote.notes}
+                createdAt={quote.createdAt}
+                tenant={{
+                  nombre: currentTenant.name,
+                  name: currentTenant.name,
+                  logo: currentTenant.logo,
+                  logo_url: currentTenant.logo,
+                  direccion: currentTenant.address,
+                  address: currentTenant.address,
+                  telefono: currentTenant.phone,
+                  phone: currentTenant.phone,
+                  rnc: currentTenant.rnc,
+                }}
+                customer={customer ? {
+                  nombre: customer.name,
+                  name: customer.name,
+                  telefono: customer.phone,
+                  phone: customer.phone,
+                  rnc: customer.rnc,
+                  cedula: customer.rnc,
+                  direccion: customer.address,
+                  address: customer.address,
+                } : undefined}
+                cliente={customer ? {
+                  nombre: customer.name,
+                  telefono: customer.phone,
+                  phone: customer.phone,
+                  rnc: customer.rnc,
+                  cedula: customer.rnc,
+                  direccion: customer.address,
+                  address: customer.address,
+                } : undefined}
+                vehicle={vehicle ? {
+                  brand: vehicle.brand,
+                  model: vehicle.model,
+                  year: vehicle.year,
+                  plate: vehicle.plate,
+                  color: vehicle.color,
+                  km: vehicle.km,
+                } : undefined}
+                items={quote.items.map((i) => ({
+                  id: i.id,
+                  name: i.name,
+                  descripcion: i.name,
+                  quantity: i.quantity,
+                  cantidad: i.quantity,
+                  unitPrice: i.unitPrice,
+                  precio_unitario: i.unitPrice,
+                  salePrice: i.unitPrice,
+                  total: i.total,
+                }))}
+                subtotal={quote.subtotal}
+                itbis={quote.tax}
+                discount={quote.discount}
+                total={quote.total}
+                formato={paperFormat}
+                orden={{
+                  numero: quote.quoteNumber,
+                  creado_en: quote.createdAt,
+                  subtotal: quote.subtotal,
+                  itbis: quote.tax,
+                  descuento: quote.discount || 0,
+                  total: quote.total,
+                  saldo: 0,
+                  pagado: 0,
+                  metodo_pago: "Cotización",
+                  notas: quote.notes,
+                  items: quote.items.map((i) => ({
+                    id: i.id,
+                    name: i.name,
+                    descripcion: i.name,
+                    quantity: i.quantity,
+                    cantidad: i.quantity,
+                    unitPrice: i.unitPrice,
+                    precio_unitario: i.unitPrice,
+                    salePrice: i.unitPrice,
+                    total: i.total,
+                  })),
+                  vehicle: vehicle ? {
+                    brand: vehicle.brand,
+                    model: vehicle.model,
+                    year: vehicle.year,
+                    plate: vehicle.plate,
+                    color: vehicle.color,
+                    km: vehicle.km,
+                  } : undefined,
+                }}
+              />
             </div>
-
-            {/* Document Title, Client & Vehicle Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6 border-b border-neutral-200">
-              {/* Left side: Quote Meta */}
-              <div className="space-y-2">
-                <div>
-                  <h1 className="text-xl font-black tracking-tight text-neutral-900">PRESUPUESTO</h1>
-                  <p className="text-xs font-bold text-neutral-500 font-mono mt-0.5">{quote.quoteNumber}</p>
-                </div>
-                
-                <div className="text-xs text-neutral-600 space-y-1 pt-1">
-                  <p><span className="font-bold text-neutral-700">Fecha de Emisión:</span> {new Date(quote.createdAt).toLocaleDateString("es-DO")}</p>
-                  {quote.validUntil && (
-                    <p><span className="font-bold text-neutral-700">Válido hasta:</span> {new Date(quote.validUntil).toLocaleDateString("es-DO")}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Right side: Client & Vehicle Combined details */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <h3 className="text-[9px] font-black uppercase text-neutral-400 tracking-wider">Cliente</h3>
-                  <p className="text-xs font-bold text-neutral-800 leading-snug">{customer?.name || "Cliente General"}</p>
-                  {customer?.phone && <p className="text-[11px] text-neutral-500">Tel: {customer.phone}</p>}
-                  {customer?.email && <p className="text-[11px] text-neutral-500 truncate max-w-[140px]" title={customer.email}>{customer.email}</p>}
-                </div>
-
-                <div className="space-y-1.5">
-                  <h3 className="text-[9px] font-black uppercase text-neutral-400 tracking-wider">Vehículo</h3>
-                  {vehicle ? (
-                    <>
-                      <p className="text-xs font-bold text-neutral-800 leading-snug">{vehicle.brand} {vehicle.model} ({vehicle.year})</p>
-                      <p className="text-[11px] text-neutral-500 font-mono">Placa: {vehicle.plate.toUpperCase()}</p>
-                      {vehicle.color && <p className="text-[11px] text-neutral-500">Color: {vehicle.color}</p>}
-                    </>
-                  ) : (
-                    <p className="text-[11px] text-neutral-400 italic">Sin vehículo vinculado</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Items Table */}
-            <div className="py-6">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b-2 border-neutral-800 text-neutral-800 font-bold uppercase text-[9px] tracking-wider pb-2">
-                    <th className="py-2.5 pr-4">Descripción / Artículo</th>
-                    <th className="py-2.5 px-3 text-center w-[70px]">Cant.</th>
-                    <th className="py-2.5 px-3 text-right w-[110px]">Precio Unit.</th>
-                    <th className="py-2.5 px-3 text-right w-[90px]">Desc.</th>
-                    <th className="py-2.5 px-3 text-right w-[110px]">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-200">
-                  {quote.items.map((item) => (
-                    <tr key={item.id} className="py-3 hover:bg-neutral-50/50">
-                      <td className="py-3 pr-4 font-semibold text-neutral-800">
-                        {item.name}
-                      </td>
-                      <td className="py-3 px-3 text-center text-neutral-600 font-medium">
-                        {item.serviceId ? <span className="text-neutral-400 font-bold">—</span> : item.quantity}
-                      </td>
-                      <td className="py-3 px-3 text-right text-neutral-600 font-mono">
-                        RD$ {Number(item.unitPrice.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3 px-3 text-right text-neutral-600 font-mono">
-                        {item.discountPercentage ? `${item.discountPercentage}%` : "—"}
-                      </td>
-                      <td className="py-3 px-3 text-right font-black text-neutral-900 font-mono">
-                        RD$ {Number(item.total.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Financial Summary & Notes */}
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 pt-6 border-t-2 border-neutral-800">
-              <div className="md:col-span-7 text-xs text-neutral-500 space-y-3">
-                {quote.notes && (
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-[9px] uppercase tracking-wider text-neutral-400">Notas y Condiciones:</h4>
-                    <p className="bg-neutral-50/50 p-3 rounded-xl border border-neutral-100 text-neutral-500 italic whitespace-pre-line leading-relaxed text-[11px]">
-                      {quote.notes}
-                    </p>
-                  </div>
-                )}
-
-                <div className="space-y-1">
-                  <h4 className="font-bold text-[9px] uppercase tracking-wider text-neutral-400">Observación:</h4>
-                  {quote.observation ? (
-                    <p className="bg-neutral-50/50 p-3 rounded-xl border border-neutral-100 text-neutral-800 font-medium whitespace-pre-line leading-relaxed text-[11px]">
-                      {quote.observation}
-                    </p>
-                  ) : (
-                    <p className="bg-neutral-50/30 p-3 rounded-xl border border-dashed border-neutral-200 text-neutral-400 italic text-[11px]">
-                      Sin observación registrada.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="md:col-span-5 text-xs text-neutral-600 space-y-2 font-medium ml-auto w-full max-w-[280px]">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span className="font-semibold text-neutral-900 font-mono">RD$ {Number(quote.subtotal.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
-                </div>
-                {quote.discount && quote.discount > 0 ? (
-                  <div className="flex justify-between text-rose-600">
-                    <span>Descuento:</span>
-                    <span className="font-semibold font-mono">- RD$ {Number(quote.discount.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
-                  </div>
-                ) : null}
-                <div className="flex justify-between">
-                  <span>ITBIS (18%):</span>
-                  <span className="font-semibold text-neutral-900 font-mono">RD$ {Number(quote.tax.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex justify-between text-sm font-black text-neutral-900 pt-2.5 border-t-2 border-neutral-800">
-                  <span>TOTAL ESTIMADO:</span>
-                  <span className="font-mono">RD$ {Number(quote.total.toFixed(2)).toLocaleString("es-DO", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-            </div>
-
           </div>
 
           {/* Actions Footer */}
-          <DialogFooter className="gap-2 shrink-0 border-t border-neutral-100 p-4 bg-neutral-50/50 flex justify-end print:hidden">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="rounded-xl h-10 px-4 font-bold text-neutral-700 hover:bg-neutral-150 cursor-pointer"
-            >
-              Cerrar
-            </Button>
+          <DialogFooter className="gap-2 shrink-0 border-t border-neutral-100 p-4 bg-neutral-50/50 flex flex-col sm:flex-row justify-between items-center print:hidden">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handlePrint}
+                className="w-full sm:w-auto rounded-xl h-10 px-4 font-bold text-neutral-800 border-neutral-300 hover:bg-neutral-100 gap-2 cursor-pointer"
+              >
+                <Printer className="h-4 w-4" /> Imprimir ({paperFormat === "A4" ? "Hoja A4" : "Ticket 80mm"})
+              </Button>
+            </div>
             
-            <Button
-              type="button"
-              onClick={() => handleConvertToOrder(false)}
-              className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 gap-2 h-10 px-4 font-bold cursor-pointer"
-            >
-              <FileText className="h-4 w-4" /> Crear Orden
-            </Button>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                className="rounded-xl h-10 px-4 font-bold text-neutral-700 hover:bg-neutral-150 cursor-pointer"
+              >
+                Cerrar
+              </Button>
+              
+              <Button
+                type="button"
+                onClick={() => handleConvertToOrder(false)}
+                className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 gap-2 h-10 px-4 font-bold cursor-pointer"
+              >
+                <FileText className="h-4 w-4" /> Crear Orden
+              </Button>
 
-            <Button
-              type="button"
-              onClick={() => handleConvertToOrder(true)}
-              className="rounded-xl bg-black text-white hover:bg-neutral-850 gap-2 h-10 px-4 font-bold cursor-pointer"
-            >
-              <ShoppingCart className="h-4 w-4" /> Facturar POS
-            </Button>
+              <Button
+                type="button"
+                onClick={() => handleConvertToOrder(true)}
+                className="rounded-xl bg-black text-white hover:bg-neutral-850 gap-2 h-10 px-4 font-bold cursor-pointer"
+              >
+                <ShoppingCart className="h-4 w-4" /> Facturar POS
+              </Button>
+            </div>
           </DialogFooter>
           
         </DialogContent>
