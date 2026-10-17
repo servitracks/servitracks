@@ -447,6 +447,13 @@ export default function DashboardLayout() {
         console.log("[Broadcast] 📡 Notificación recibida → refrescando");
         scheduleRemoteRefresh();
       })
+      .on("broadcast", { event: "inventory_wiped" }, () => {
+        console.log("[Broadcast] 🧹 Inventario vaciado en otro dispositivo o pestaña");
+        useStore.setState((state) => ({
+          products: state.products.filter((p) => p.tenantId !== currentTenant.id),
+          movements: state.movements.filter((m) => m.tenantId !== currentTenant.id),
+        }));
+      })
       .subscribe();
 
     // 2. Descarga Inicial
@@ -477,8 +484,34 @@ export default function DashboardLayout() {
               const localArr = (localState as any)[key] || [];
               
               if (localArr.length > 0) {
-                const dbIds = new Set(dbArr.map((item: any) => item.id));
-                const missingLocals = localArr.filter((item: any) => !dbIds.has(item.id));
+                let missingLocals: any[] = [];
+                if (key === "products") {
+                  // Si en Supabase ya hay 0 productos para este taller, NO resucitar
+                  // productos obsoletos o eliminados de la memoria/localStorage local
+                  if (dbArr.length === 0) {
+                    missingLocals = [];
+                  } else {
+                    const dbIds = new Set(dbArr.map((item: any) => item.id));
+                    const dbSkus = new Set(
+                      dbArr
+                        .map((p: any) => (p.sku || "").toLowerCase().trim())
+                        .filter(Boolean)
+                    );
+                    missingLocals = localArr.filter((item: any) => {
+                      if (item.tenantId && item.tenantId !== currentTenant!.id) return false;
+                      if (dbIds.has(item.id)) return false;
+                      const itemSku = (item.sku || "").toLowerCase().trim();
+                      if (itemSku && dbSkus.has(itemSku)) return false;
+                      return true;
+                    });
+                  }
+                } else {
+                  const dbIds = new Set(dbArr.map((item: any) => item.id));
+                  missingLocals = localArr.filter((item: any) => {
+                    if (item.tenantId && item.tenantId !== currentTenant!.id) return false;
+                    return !dbIds.has(item.id);
+                  });
+                }
                 
                 if (missingLocals.length > 0) {
                   const merged = [...dbArr, ...missingLocals];

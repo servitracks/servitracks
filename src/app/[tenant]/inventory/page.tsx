@@ -28,6 +28,7 @@ import {
   ChevronRight,
   ArrowLeftRight,
   Truck,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -491,7 +492,7 @@ export default function InventoryPage() {
     : users.find((u) => u.id === currentUserId);
   const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
   const activeRole = simulatedRole || currentUser?.role || 'receptionist';
-  const isOwner = activeRole === 'owner' || activeRole === 'superadmin';
+  const isOwner = ['owner', 'superadmin', 'super_admin', 'admin'].includes((activeRole || '').toLowerCase());
 
   const { addProduct, updateProduct, deleteProduct, bulkImportProducts, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();
   const allProducts = useStore((s) => s.products);
@@ -534,32 +535,66 @@ export default function InventoryPage() {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const handleDeleteAllInventory = async () => {
-    if (!tenantId || !isOwner) return;
+    if (!tenantId) {
+      toast.error("No se encontró el taller activo.");
+      return;
+    }
+    if (!isOwner) {
+      toast.error("No tienes permisos suficientes para vaciar el inventario.");
+      return;
+    }
     setIsDeletingAll(true);
     try {
-      const { supabaseAdmin } = await import("@/lib/supabase");
+      const { wipeEntireInventoryFromSupabase } = await import("@/lib/supabaseSync");
       
-      // 1. Eliminar movimientos de inventario de este tenant en Supabase
-      const { error: movErr } = await supabaseAdmin
-        .from("movements")
-        .delete()
-        .eq("tenant_id", tenantId);
-      if (movErr) console.warn("Error borrando movimientos en BD:", movErr);
+      // 1. Ejecutar el vaciado total definitivo en Supabase (movimientos, sesiones, productos)
+      const res = await wipeEntireInventoryFromSupabase(tenantId);
+      if (!res.success) {
+        throw res.error || new Error("Error eliminando productos en la base de datos.");
+      }
 
-      // 2. Eliminar productos de este tenant en Supabase
-      const { error: prodErr } = await supabaseAdmin
-        .from("products")
-        .delete()
-        .eq("tenant_id", tenantId);
-      if (prodErr) throw prodErr;
-
-      // 3. Limpiar estado en Zustand local
+      // 2. Limpiar el estado en memoria de Zustand
       useStore.setState((state) => ({
         products: state.products.filter((p) => p.tenantId !== tenantId),
         movements: state.movements.filter((m) => m.tenantId !== tenantId),
+        inventorySessions: (state.inventorySessions || []).filter((s) => s.tenantId !== tenantId),
       }));
 
-      toast.success("El inventario ha sido vaciado por completo de la base de datos.");
+      // 3. Limpiar de raíz localStorage para evitar que la caché resucite productos
+      try {
+        const raw = localStorage.getItem("servitracks-storage");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.state) {
+            if (Array.isArray(parsed.state.products)) {
+              parsed.state.products = parsed.state.products.filter((p: any) => p.tenantId !== tenantId);
+            }
+            if (Array.isArray(parsed.state.movements)) {
+              parsed.state.movements = parsed.state.movements.filter((m: any) => m.tenantId !== tenantId);
+            }
+            if (Array.isArray(parsed.state.inventorySessions)) {
+              parsed.state.inventorySessions = parsed.state.inventorySessions.filter((s: any) => s.tenantId !== tenantId);
+            }
+            localStorage.setItem("servitracks-storage", JSON.stringify(parsed));
+          }
+        }
+      } catch (e) {
+        console.warn("[Vaciar Inventario] Error purgando localStorage:", e);
+      }
+
+      // 4. Notificar a todas las demás pestañas/dispositivos para que sincronicen el vaciado
+      try {
+        const { supabase } = await import("@/lib/supabase");
+        supabase.channel(`sync_tenant_${tenantId}`).send({
+          type: "broadcast",
+          event: "inventory_wiped",
+          payload: { tenantId, timestamp: Date.now() },
+        });
+      } catch (e) {
+        console.warn("[Vaciar Inventario] Broadcast notification error:", e);
+      }
+
+      toast.success("El inventario ha sido vaciado por completo tanto de Supabase como de la aplicación.");
       setIsDeleteAllModalOpen(false);
       setConfirmDeleteText("");
     } catch (err: any) {
@@ -567,6 +602,63 @@ export default function InventoryPage() {
       toast.error(err?.message || "Ocurrió un error al vaciar el inventario.");
     } finally {
       setIsDeletingAll(false);
+    }
+  };
+
+  // Detección y depuración de productos duplicados (mismo SKU y tenant)
+  const duplicatesInfo = useMemo(() => {
+    const skuMap = new Map<string, Product[]>();
+    products.forEach((p) => {
+      const key = (p.sku || "").trim().toLowerCase();
+      if (!key) return;
+      const list = skuMap.get(key) || [];
+      list.push(p);
+      skuMap.set(key, list);
+    });
+
+    let duplicateCount = 0;
+    const duplicateIdsToDelete: string[] = [];
+
+    skuMap.forEach((prods) => {
+      if (prods.length > 1) {
+        duplicateCount += (prods.length - 1);
+        for (let i = 1; i < prods.length; i++) {
+          duplicateIdsToDelete.push(prods[i].id);
+        }
+      }
+    });
+
+    return { duplicateCount, duplicateIdsToDelete };
+  }, [products]);
+
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
+
+  const handleCleanDuplicates = async () => {
+    if (!tenantId || duplicatesInfo.duplicateIdsToDelete.length === 0) return;
+    setIsCleaningDuplicates(true);
+    try {
+      const idsToDelete = new Set(duplicatesInfo.duplicateIdsToDelete);
+      
+      // 1. Limpiar en Zustand local inmediatamente
+      useStore.setState((state) => ({
+        products: state.products.filter((p) => !idsToDelete.has(p.id)),
+      }));
+
+      // 2. Eliminar en Supabase en lotes
+      const { supabaseAdmin } = await import("@/lib/supabase");
+      const idArray = Array.from(idsToDelete);
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < idArray.length; i += CHUNK_SIZE) {
+        const chunk = idArray.slice(i, i + CHUNK_SIZE);
+        await supabaseAdmin.from("products").delete().in("id", chunk).eq("tenant_id", tenantId);
+      }
+
+      toast.success(`Se eliminaron con éxito ${duplicatesInfo.duplicateCount} productos duplicados.`);
+    } catch (err: any) {
+      console.error("Error al limpiar duplicados:", err);
+      toast.error(err?.message || "Error al eliminar duplicados.");
+    } finally {
+      setIsCleaningDuplicates(false);
     }
   };
 
@@ -934,22 +1026,26 @@ export default function InventoryPage() {
     const newMovements: InventoryMovement[] = [];
     const purchaseOrderItems: any[] = [];
 
-    // Fast O(1) maps to prevent duplicate queries on large arrays
+    // Tomar el estado fresco más reciente de Zustand para este tenant
+    const currentProds = useStore.getState().products.filter((p) => p.tenantId === tenantId);
     const existingBySku = new Map<string, Product>();
     const existingByName = new Map<string, Product>();
-    products.forEach((p) => {
+    const existingById = new Map<string, Product>();
+    currentProds.forEach((p) => {
+      existingById.set(p.id, p);
       if (p.sku) existingBySku.set(p.sku.toLowerCase().trim(), p);
       if (p.name) existingByName.set(p.name.toLowerCase().trim(), p);
     });
 
     const now = Date.now();
 
+    // 1. Pre-desduplicar filas del archivo en caso de que el archivo mismo contenga filas repetidas
+    const dedupedRowsMap = new Map<string, ImportRow>();
     rows.forEach((row) => {
       const cleanName = (row.name || "").trim();
       const cleanSku = (row.sku || "").trim();
       const n = cleanName.toUpperCase();
       
-      // Filtrar filas de totales del Excel sin afectar marcas reales como "TOTAL 5W30"
       if (
         !cleanName || 
         n === "TOTALES" || 
@@ -959,16 +1055,40 @@ export default function InventoryPage() {
         n === "RESUMEN" ||
         ((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !cleanSku)
       ) return;
+
+      const dedupeKey = cleanSku ? cleanSku.toLowerCase() : cleanName.toLowerCase();
+      if (dedupedRowsMap.has(dedupeKey)) {
+        const prev = dedupedRowsMap.get(dedupeKey)!;
+        const prevStock = Number(prev.stock !== undefined && !isNaN(prev.stock) ? prev.stock : (prev.quantity || 0)) || 0;
+        const currentStock = Number(row.stock !== undefined && !isNaN(row.stock) ? row.stock : (row.quantity || 0)) || 0;
+        dedupedRowsMap.set(dedupeKey, {
+          ...prev,
+          stock: prevStock + currentStock,
+          quantity: prevStock + currentStock,
+          costPrice: Number(row.costPrice) > 0 ? Number(row.costPrice) : prev.costPrice,
+          salePrice: Number(row.salePrice) > 0 ? Number(row.salePrice) : prev.salePrice,
+          barcode: prev.barcode || row.barcode,
+        });
+      } else {
+        dedupedRowsMap.set(dedupeKey, row);
+      }
+    });
+
+    dedupedRowsMap.forEach((row) => {
+      const cleanName = (row.name || "").trim();
+      const cleanSku = (row.sku || "").trim();
       
-      // Si tiene SKU propio, solo coincide por SKU (evita fusionar artículos distintos con igual nombre)
+      const safeSku = cleanSku ? cleanSku.toLowerCase().replace(/[^a-z0-9_-]/g, "_") : "";
+      const safeName = cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+      const deterministicId = `prod_${tenantId}_${safeSku || safeName}`;
+
       const existingProduct = cleanSku 
-        ? existingBySku.get(cleanSku.toLowerCase()) 
-        : existingByName.get(cleanName.toLowerCase());
+        ? (existingBySku.get(cleanSku.toLowerCase()) || existingById.get(deterministicId))
+        : (existingByName.get(cleanName.toLowerCase()) || existingById.get(deterministicId));
       
       let productId = "";
       let productName = cleanName;
 
-      // Usar exactamente la cantidad del archivo
       const itemQty = Number(row.stock !== undefined && !isNaN(row.stock) ? row.stock : (row.quantity || 0)) || 0;
       const costPrice = Number(row.costPrice) || 0;
       const salePrice = Number(row.salePrice) || 0;
@@ -978,7 +1098,7 @@ export default function InventoryPage() {
         productName = existingProduct.name;
         const updated: Product = {
           ...existingProduct,
-          stock: existingProduct.stock + itemQty,
+          stock: supplierId ? existingProduct.stock + itemQty : itemQty,
           costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
           salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
           barcode: existingProduct.barcode || row.barcode || undefined,
@@ -986,9 +1106,10 @@ export default function InventoryPage() {
         prodsToUpdate.push(updated);
         if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), updated);
         else existingByName.set(cleanName.toLowerCase(), updated);
+        existingById.set(updated.id, updated);
       } else {
         const newProduct: Product = {
-          id: `p${now}-${imported}-${Math.random().toString(36).substr(2, 5)}`,
+          id: deterministicId,
           tenantId: tenantId,
           name: cleanName,
           sku: cleanSku || `SKU-${now}-${imported}`,
@@ -998,7 +1119,7 @@ export default function InventoryPage() {
           supplier: supplierId ? suppliers.find(s => s.id === supplierId)?.commercialName || row.supplier : row.supplier || "",
           costPrice: costPrice,
           salePrice: salePrice,
-          stock: itemQty, // Cantidad exacta del archivo, NUNCA duplicada
+          stock: itemQty,
           minStock: row.minStock || 5,
           tax: row.tax || 18,
           location: row.location || "",
@@ -1007,6 +1128,7 @@ export default function InventoryPage() {
         prodsToCreate.push(newProduct);
         if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), newProduct);
         else existingByName.set(cleanName.toLowerCase(), newProduct);
+        existingById.set(newProduct.id, newProduct);
       }
       
       if (itemQty > 0) {
@@ -1131,6 +1253,44 @@ export default function InventoryPage() {
           </DropdownMenu>
         </div>
       </div>
+
+      {/* Banner de depuración de productos duplicados */}
+      {duplicatesInfo.duplicateCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-50/90 border border-amber-200 rounded-2xl text-amber-900 shadow-2xs animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-amber-100 border border-amber-300/60 flex items-center justify-center shrink-0 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-neutral-900">
+                Se detectaron {duplicatesInfo.duplicateCount} productos duplicados en el inventario
+              </p>
+              <p className="text-xs text-neutral-600 mt-0.5">
+                Existen artículos idénticos con el mismo código/SKU que están duplicando el conteo y el valor total de tu almacén.
+              </p>
+            </div>
+          </div>
+          {isOwner && (
+            <Button
+              onClick={handleCleanDuplicates}
+              disabled={isCleaningDuplicates}
+              className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0 gap-2 h-10 px-4 cursor-pointer shadow-sm transition-all"
+            >
+              {isCleaningDuplicates ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Depurando catálogo...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Depurar y Unificar Inventario ({duplicatesInfo.duplicateCount})
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* KPI Cards — estilo SaaS compacto (Linear / Stripe) */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

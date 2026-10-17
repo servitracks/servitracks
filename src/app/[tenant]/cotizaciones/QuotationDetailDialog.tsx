@@ -11,6 +11,7 @@ import { useRouter, useParams } from "@/lib/next-compat";
 import { cn } from "@/lib/utils";
 import type { Quote, QuoteItem, QuoteStatus, WorkOrder } from "@/store/types";
 import { Ticket } from "@/components/pos/Ticket";
+import { printThermalDocument } from "@/lib/thermalPrint";
 
 interface QuotationDetailDialogProps {
   open: boolean;
@@ -233,84 +234,10 @@ export default function QuotationDetailDialog({
     const printElement = componentRef.current;
     if (!printElement) return;
 
-    // Crear un iframe oculto para impresión aislada idéntica a factura POS
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "absolute";
-    iframe.style.width = "0px";
-    iframe.style.height = "0px";
-    iframe.style.border = "none";
-    
-    document.body.appendChild(iframe);
-
-    // Obtener los estilos de Tailwind y de la aplicación actual
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map((tag) => tag.outerHTML)
-      .join("");
-
-    const doc = iframe.contentWindow?.document;
-    if (!doc) return;
-
-    doc.open();
-    const formatSize = paperFormat === "A4" 
-      ? "A4" 
-      : "80mm 297mm";
-
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Cotizacion_${quote?.quoteNumber || "COT"}</title>
-          ${styles}
-          <style>
-            @media print {
-              @page { size: ${formatSize}; margin: 0; }
-              * {
-                color: black !important;
-                border-color: black !important;
-                -webkit-font-smoothing: none !important;
-                font-smooth: never !important;
-                text-rendering: optimizeSpeed !important;
-              }
-              img {
-                filter: grayscale(100%) contrast(1000%) !important;
-              }
-            }
-            html, body { 
-              background: white !important; 
-              color: black !important;
-              display: block !important;
-              height: auto !important;
-              min-height: auto !important;
-              overflow: visible !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            body {
-              padding-top: 10px !important;
-            }
-            .thermal-ticket {
-              box-shadow: none !important;
-              margin: 0 auto !important;
-            }
-          </style>
-        </head>
-        <body>
-          ${printElement.innerHTML}
-          <script>
-            window.onload = () => {
-              setTimeout(() => {
-                window.print();
-              }, 250);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    doc.close();
-
-    // Limpiar el iframe después de imprimir
-    iframe.contentWindow?.addEventListener("afterprint", () => {
-      document.body.removeChild(iframe);
+    printThermalDocument({
+      element: printElement,
+      title: `Cotizacion_${quote?.quoteNumber || "COT"}`,
+      paperSize: paperFormat,
     });
   };
 

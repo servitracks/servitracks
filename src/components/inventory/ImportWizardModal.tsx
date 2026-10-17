@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import StepSourceSelect from "./StepSourceSelect";
 import StepUploadProcess from "./StepUploadProcess";
 import StepPreviewEditor, { ImportRow } from "./StepPreviewEditor";
@@ -19,7 +19,7 @@ export type SourceType = "csv" | "pdf" | "image";
 interface ImportWizardModalProps {
   open: boolean;
   onClose: () => void;
-  onImport: (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => void;
+  onImport: (rows: ImportRow[], supplierId?: string, invoiceNumber?: string) => Promise<void> | void;
   suppliers: Supplier[];
 }
 
@@ -46,6 +46,7 @@ export default function ImportWizardModal({
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
   const [rows, setRows] = useState<ImportRow[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
 
   const handleReset = () => {
     setStep(1);
@@ -54,34 +55,44 @@ export default function ImportWizardModal({
     setInvoiceNumber("");
     setIsSupplierModalOpen(false);
     setRows([]);
+    setIsImporting(false);
   };
 
   const handleClose = () => {
+    if (isImporting) return;
     handleReset();
     onClose();
   };
 
-  const handleConfirmImport = () => {
-    const validRows = rows.filter((r) => {
-      const n = (r.name || "").trim().toUpperCase();
-      const s = (r.sku || "").trim();
-      return (
-        n !== "" &&
-        n !== "TOTALES" &&
-        n !== "TOTAL" &&
-        n !== "SUBTOTAL" &&
-        n !== "TOTAL GENERAL" &&
-        n !== "RESUMEN" &&
-        !((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !s)
-      );
-    });
-    onImport(validRows, selectedSupplierId, invoiceNumber);
-    handleReset();
-    onClose();
+  const handleConfirmImport = async () => {
+    if (isImporting) return;
+    setIsImporting(true);
+    try {
+      const validRows = rows.filter((r) => {
+        const n = (r.name || "").trim().toUpperCase();
+        const s = (r.sku || "").trim();
+        return (
+          n !== "" &&
+          n !== "TOTALES" &&
+          n !== "TOTAL" &&
+          n !== "SUBTOTAL" &&
+          n !== "TOTAL GENERAL" &&
+          n !== "RESUMEN" &&
+          !((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !s)
+        );
+      });
+      await onImport(validRows, selectedSupplierId, invoiceNumber);
+      handleReset();
+      onClose();
+    } catch (err) {
+      console.error("Error durante importación:", err);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && !isImporting && handleClose()}>
       <DialogContent 
         className={cn(
           "rounded-2xl overflow-hidden flex flex-col p-0 transition-all duration-300",
@@ -241,7 +252,7 @@ export default function ImportWizardModal({
               }
             }}
             className="rounded-xl"
-            disabled={step === 4 && rows.length > 0} // Si ya cargó filas, deshabilitar mientras procesa
+            disabled={isImporting || (step === 4 && rows.length > 0)}
           >
             {step === 1 ? "Cancelar" : "Atrás"}
           </Button>
@@ -274,11 +285,18 @@ export default function ImportWizardModal({
           )}
           {step === 5 && (
             <Button
-              className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 gap-2"
+              className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 gap-2 min-w-[190px]"
               onClick={handleConfirmImport}
-              disabled={rows.filter((r) => r.name.trim()).length === 0}
+              disabled={isImporting || rows.filter((r) => r.name.trim()).length === 0}
             >
-              ✓ Confirmar e Importar
+              {isImporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Importando catálogo...
+                </>
+              ) : (
+                "✓ Confirmar e Importar"
+              )}
             </Button>
           )}
         </div>

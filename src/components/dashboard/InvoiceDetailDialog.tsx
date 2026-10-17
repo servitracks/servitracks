@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { useStore, Invoice } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { Printer, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Ticket, translatePaymentMethod } from "@/components/pos/Ticket";
 import { useParams } from "@/lib/next-compat";
+import { printThermalDocument } from "@/lib/thermalPrint";
 
 interface InvoiceDetailDialogProps {
   open: boolean;
@@ -18,16 +20,22 @@ interface InvoiceDetailDialogProps {
 
 export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDialogProps) {
   const { tenant } = useParams();
-  const { customers, tenants } = useStore();
+  const { customers, tenants, printSettings } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
+  const printRef = useRef<HTMLDivElement>(null);
 
   if (!invoice) return null;
 
   const customer = customers.find((c) => c.id === invoice.customerId);
 
   const handlePrint = () => {
-    window.print();
+    if (!printRef.current) return;
+    printThermalDocument({
+      element: printRef.current,
+      title: `Factura_${invoice.id}`,
+      paperSize: (printSettings.paperSize as any) || "80mm",
+    });
   };
 
   const statusLabel =
@@ -41,28 +49,8 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
 
   return (
     <>
-      {/* Estilo para impresión térmica de 80mm */}
-      <style>{`
-        @media print {
-          body > * { display: none !important; }
-          #receipt-print-dialog { display: block !important; }
-          @page { size: 80mm auto; margin: 4mm; }
-          * {
-            color: black !important;
-            border-color: black !important;
-            -webkit-font-smoothing: none !important;
-            font-smooth: never !important;
-            text-rendering: optimizeSpeed !important;
-          }
-          img {
-            filter: grayscale(100%) contrast(1000%) !important;
-          }
-        }
-        #receipt-print-dialog { display: none; }
-      `}</style>
-
-      {/* 80mm Thermal Receipt (oculto en pantalla, visible al imprimir) */}
-      <div id="receipt-print-dialog">
+      {/* Contenedor de impresión oculto para Ticket Térmico con altura auto-ajustable */}
+      <div ref={printRef} style={{ display: "none" }} aria-hidden="true">
         <Ticket 
            invoiceId={invoice.id}
            ncf={invoice.ncf}

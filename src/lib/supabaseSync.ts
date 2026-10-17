@@ -1236,3 +1236,90 @@ export async function syncStoreToSupabase(
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);
 }
+
+/**
+ * Realiza un vaciado total y definitivo del inventario de un taller en Supabase.
+ * Elimina movimientos, sesiones, productos vinculados a proveedores y productos.
+ * Utiliza múltiples pasadas por lote si es necesario para garantizar que NINGÚN registro quede en el limbo.
+ */
+export async function wipeEntireInventoryFromSupabase(tenantId: string): Promise<{ success: boolean; error?: any }> {
+  try {
+    console.log(`[wipeInventory] Iniciando vaciado total de inventario para tenant ${tenantId}...`);
+
+    // 1. Eliminar movimientos de inventario en masa y por lotes de seguridad
+    await supabaseAdmin.from("movements").delete().eq("tenant_id", tenantId);
+    let hasMovements = true;
+    while (hasMovements) {
+      const { data: batch, error: batchErr } = await supabaseAdmin
+        .from("movements")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .limit(500);
+      if (batchErr || !batch || batch.length === 0) {
+        hasMovements = false;
+        break;
+      }
+      const ids = batch.map((r: any) => r.id);
+      await supabaseAdmin.from("movements").delete().in("id", ids);
+    }
+
+    // 2. Eliminar sesiones de inventario (si existen)
+    await supabaseAdmin.from("inventory_sessions").delete().eq("tenant_id", tenantId);
+
+    // 3. Eliminar productos de proveedores vinculados (supplier_products)
+    await supabaseAdmin.from("supplier_products").delete().eq("tenant_id", tenantId);
+
+    // 4. Eliminar productos en masa
+    const { error: directErr } = await supabaseAdmin.from("products").delete().eq("tenant_id", tenantId);
+    if (directErr) {
+      console.warn("[wipeInventory] Direct products delete error, trying chunked delete:", directErr);
+    }
+
+    // 5. Verificación activa y eliminación por lotes de IDs por si PostgREST dejó remanentes
+    let hasProducts = true;
+    let attempts = 0;
+    while (hasProducts && attempts < 25) {
+      attempts++;
+      const { data: batch, error: bErr } = await supabaseAdmin
+        .from("products")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .limit(500);
+
+      if (bErr) {
+        console.error("[wipeInventory] Error verificando remanentes de productos:", bErr);
+        break;
+      }
+
+      if (!batch || batch.length === 0) {
+        hasProducts = false;
+        break;
+      }
+
+      const ids = batch.map((p: any) => p.id);
+      console.log(`[wipeInventory] Eliminando remanentes de productos (lote de ${ids.length})...`);
+      const { error: delErr } = await supabaseAdmin.from("products").delete().in("id", ids);
+      if (delErr) {
+        console.error("[wipeInventory] Error borrando lote de productos:", delErr);
+        throw delErr;
+      }
+    }
+
+    // 6. Comprobación final en Supabase
+    const { count: finalCount } = await supabaseAdmin
+      .from("products")
+      .select("*", { count: "exact", head: true })
+      .eq("tenant_id", tenantId);
+
+    if (finalCount && finalCount > 0) {
+      throw new Error(`Quedaron ${finalCount} productos sin poder eliminarse en Supabase.`);
+    }
+
+    console.log(`[wipeInventory] ✅ Vaciado total completado con éxito para tenant ${tenantId}.`);
+    return { success: true };
+  } catch (err: any) {
+    console.error(`[wipeInventory] ❌ Error durante el vaciado de inventario:`, err);
+    return { success: false, error: err };
+  }
+}
+

@@ -510,8 +510,38 @@ export const useStore = create<AppState>()(
         set((state) => {
           const updatedMap = new Map(updatedProducts.map(p => [p.id, p]));
           const currentProducts = state.products.map(p => updatedMap.get(p.id) || p);
+
+          const existingById = new Map<string, Product>();
+          const existingByTenantSku = new Map<string, Product>();
+
+          currentProducts.forEach(p => {
+            existingById.set(p.id, p);
+            if (p.tenantId && p.sku) {
+              existingByTenantSku.set(`${p.tenantId}::${p.sku.toLowerCase().trim()}`, p);
+            }
+          });
+
+          const dedupedNew: Product[] = [];
+          for (const np of newProducts) {
+            const skuKey = np.tenantId && np.sku ? `${np.tenantId}::${np.sku.toLowerCase().trim()}` : null;
+            if (existingById.has(np.id)) {
+              const idx = currentProducts.findIndex(p => p.id === np.id);
+              if (idx !== -1) currentProducts[idx] = np;
+            } else if (skuKey && existingByTenantSku.has(skuKey)) {
+              const existing = existingByTenantSku.get(skuKey)!;
+              const idx = currentProducts.findIndex(p => p.id === existing.id);
+              if (idx !== -1) {
+                currentProducts[idx] = { ...existing, ...np, id: existing.id };
+              }
+            } else {
+              dedupedNew.push(np);
+              existingById.set(np.id, np);
+              if (skuKey) existingByTenantSku.set(skuKey, np);
+            }
+          }
+
           return {
-            products: [...currentProducts, ...newProducts],
+            products: [...currentProducts, ...dedupedNew],
             movements: [...state.movements, ...movements],
           };
         });

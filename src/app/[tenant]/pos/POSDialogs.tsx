@@ -40,6 +40,7 @@ import { Label } from "@/components/ui/label";
 
 import { useStore, WorkOrder, Customer, Vehicle, Invoice, OpenTab } from "@/store/useStore";
 import { Ticket } from "@/components/pos/Ticket";
+import { printThermalDocument } from "@/lib/thermalPrint";
 import { toast } from "sonner";
 
 type PayMethod = "cash" | "card" | "transfer";
@@ -956,87 +957,10 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
     const printElement = componentRef.current;
     if (!printElement) return;
 
-    // Crear un iframe oculto
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'absolute';
-    iframe.style.width = '0px';
-    iframe.style.height = '0px';
-    iframe.style.border = 'none';
-    
-    // Agregar el iframe al documento
-    document.body.appendChild(iframe);
-
-    // Obtener los estilos de Tailwind y de la aplicación actual
-    const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-      .map((tag) => tag.outerHTML)
-      .join("");
-
-    const doc = iframe.contentWindow?.document;
-    if (!doc) return;
-
-    doc.open();
-    const formatSize = printSettings.paperSize === "A4" 
-      ? "A4" 
-      : printSettings.paperSize === "58mm" 
-        ? "58mm 297mm" 
-        : "80mm 297mm";
-
-    doc.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Recibo_${lastInvoice?.id || "POS"}</title>
-          ${styles}
-          <style>
-            @media print {
-              @page { size: ${formatSize}; margin: 0; }
-              * {
-                color: black !important;
-                border-color: black !important;
-                -webkit-font-smoothing: none !important;
-                font-smooth: never !important;
-                text-rendering: optimizeSpeed !important;
-              }
-              img {
-                filter: grayscale(100%) contrast(1000%) !important;
-              }
-            }
-            html, body { 
-              background: white !important; 
-              color: black !important;
-              display: block !important;
-              height: auto !important;
-              min-height: auto !important;
-              overflow: visible !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            body {
-              padding-top: 10px !important;
-            }
-            .thermal-ticket {
-              box-shadow: none !important;
-              margin: 0 auto !important; /* Centrar para la vista y la impresión */
-            }
-          </style>
-        </head>
-        <body>
-          ${printElement.innerHTML}
-          <script>
-            window.onload = () => {
-              setTimeout(() => {
-                window.print();
-              }, 250);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    doc.close();
-
-    // Limpiar el iframe después de imprimir
-    iframe.contentWindow?.addEventListener("afterprint", () => {
-      document.body.removeChild(iframe);
+    printThermalDocument({
+      element: printElement,
+      title: `Recibo_${lastInvoice?.id || "POS"}`,
+      paperSize: (printSettings.paperSize as any) || "80mm",
     });
   };
 
