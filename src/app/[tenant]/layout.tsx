@@ -386,13 +386,44 @@ export default function DashboardLayout() {
       }
     }
 
-    // ── Debounce para la descarga remota (400ms) ──
+    // ── Debounce para la descarga remota completa (400ms) ──
     function scheduleRemoteRefresh() {
       if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
       remoteRefreshTimer = setTimeout(() => {
         remoteRefreshTimer = null;
         applyRemoteState();
       }, 400);
+    }
+
+    // ── Debounce para sincronización quirúrgica por tabla (150ms) ──
+    const pendingTablesToRefresh = new Set<string>();
+    function scheduleTableRefresh(table: string) {
+      if (table === "empleados_nomina" || table === "nominas_periodos") {
+        import("@/lib/nominaSync").then(async ({ loadEmpleadosFromSupabase, loadNominasFromSupabase }) => {
+          const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
+          const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
+          useNominaStore.setState({ empleados: dbEmpleados, nominas: dbNominas });
+        });
+        return;
+      }
+
+      pendingTablesToRefresh.add(table);
+      if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
+      remoteRefreshTimer = setTimeout(async () => {
+        remoteRefreshTimer = null;
+        const tables = Array.from(pendingTablesToRefresh);
+        pendingTablesToRefresh.clear();
+        const { syncTableFromSupabase } = await import("@/lib/supabaseSync");
+        syncDisabledRef.current = true;
+        try {
+          await Promise.all(tables.map(t => syncTableFromSupabase(t, currentTenant!.id)));
+          console.log("[RT Sync] ✅ Tablas sincronizadas en tiempo real:", tables);
+        } catch (e) {
+          console.error("[RT Sync] ❌ Error sincronizando tablas:", tables, e);
+        } finally {
+          setTimeout(() => { syncDisabledRef.current = false; }, 800);
+        }
+      }, 150);
     }
 
     // 1. Tablas a escuchar en tiempo real
@@ -408,14 +439,14 @@ export default function DashboardLayout() {
 
     const realtimeChannel = supabase.channel(`rt_tenant_${currentTenant.id}`);
 
-    // Tablas con tenant_id → filtradas
+    // Tablas con tenant_id → filtradas quirúrgicamente
     TABLES_WITH_TENANT.forEach((table) => {
       realtimeChannel.on(
         "postgres_changes" as any,
         { event: "*", schema: "public", table, filter: `tenant_id=eq.${currentTenant.id}` },
         (payload: any) => {
           console.log(`[RT Sync] 📡 Cambio remoto en '${table}':`, payload.eventType);
-          scheduleRemoteRefresh();
+          scheduleTableRefresh(table);
         }
       );
     });
@@ -426,7 +457,7 @@ export default function DashboardLayout() {
       { event: "*", schema: "public", table: "movimientos_caja" },
       (payload: any) => {
         console.log("[RT Sync] 📡 Cambio remoto en 'movimientos_caja':", payload.eventType);
-        scheduleRemoteRefresh();
+        scheduleTableRefresh("movimientos_caja");
       }
     );
 
@@ -443,9 +474,13 @@ export default function DashboardLayout() {
       .channel(`sync_tenant_${currentTenant.id}`, {
         config: { broadcast: { ack: true } }
       })
-      .on("broadcast", { event: "state_updated" }, () => {
-        console.log("[Broadcast] 📡 Notificación recibida → refrescando");
-        scheduleRemoteRefresh();
+      .on("broadcast", { event: "state_updated" }, (msg: any) => {
+        console.log("[Broadcast] 📡 Notificación recibida → refrescando", msg?.payload);
+        if (msg?.payload?.tables && Array.isArray(msg.payload.tables) && msg.payload.tables.length > 0) {
+          msg.payload.tables.forEach((t: string) => scheduleTableRefresh(t));
+        } else {
+          scheduleRemoteRefresh();
+        }
       })
       .on("broadcast", { event: "inventory_wiped" }, () => {
         console.log("[Broadcast] 🧹 Inventario vaciado en otro dispositivo o pestaña");
@@ -476,7 +511,7 @@ export default function DashboardLayout() {
               "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
               "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
               "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
-              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "openTabs", "users", "inventorySessions"
+              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "users", "inventorySessions"
             ] as const;
 
             for (const key of entitiesToMerge) {
@@ -617,49 +652,310 @@ export default function DashboardLayout() {
       loadData();
     }
     
-    // 3. Espía de Cambios Locales → sube a Supabase y notifica otros dispositivos
+    // 3. Espía de Cambios Locales → sincronización incremental y diferencial hacia Supabase
+    let pendingChangesPayload: any = {};
     const unsubscribe = useStore.subscribe((state, prevState) => {
       if (syncDisabledRef.current) return; // Ignorar cambios que vinieron de la DB (evitar loop)
 
-      const changed =
-        state.orders !== prevState.orders ||
-        state.invoices !== prevState.invoices ||
-        state.quotes !== prevState.quotes ||
-        state.products !== prevState.products ||
-        state.services !== prevState.services ||
-        state.customers !== prevState.customers ||
-        state.vehicles !== prevState.vehicles ||
-        state.maintenanceItems !== prevState.maintenanceItems ||
-        state.cajas !== prevState.cajas ||
-        state.cajaMovements !== prevState.cajaMovements ||
-        state.technicians !== prevState.technicians ||
-        state.movements !== prevState.movements ||
-        state.inspections !== prevState.inspections ||
-        state.maintenanceAlerts !== prevState.maintenanceAlerts ||
-        state.maintenanceHistory !== prevState.maintenanceHistory ||
-        state.suppliers !== prevState.suppliers ||
-        state.supplierProducts !== prevState.supplierProducts ||
-        state.purchaseOrders !== prevState.purchaseOrders ||
-        state.goodsReceipts !== prevState.goodsReceipts ||
-        state.accountsPayable !== prevState.accountsPayable ||
-        state.quoteRequests !== prevState.quoteRequests ||
-        state.activityLogs !== prevState.activityLogs ||
-        state.users !== prevState.users ||
-        state.openTabs !== prevState.openTabs ||
-        state.inventorySessions !== prevState.inventorySessions;
+      let hasNewChanges = false;
 
-      if (!changed) return;
+      // Invoices diff
+      if (state.invoices !== prevState.invoices) {
+        const prevMap = new Map((prevState.invoices || []).map(i => [i.id, i]));
+        const diff = (state.invoices || []).filter(i => {
+          const prev = prevMap.get(i.id);
+          return !prev || prev !== i;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.invoices = [...(pendingChangesPayload.invoices || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
 
-      // Debounce de 500ms para el upload local (timer independiente del remoteRefreshTimer)
+      // Orders diff
+      if (state.orders !== prevState.orders) {
+        const prevMap = new Map((prevState.orders || []).map(o => [o.id, o]));
+        const diff = (state.orders || []).filter(o => {
+          const prev = prevMap.get(o.id);
+          return !prev || prev !== o;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.orders = [...(pendingChangesPayload.orders || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Products diff
+      if (state.products !== prevState.products) {
+        const prevMap = new Map((prevState.products || []).map(p => [p.id, p]));
+        const diff = (state.products || []).filter(p => {
+          const prev = prevMap.get(p.id);
+          return !prev || prev !== p;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.products = [...(pendingChangesPayload.products || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Customers diff
+      if (state.customers !== prevState.customers) {
+        const prevMap = new Map((prevState.customers || []).map(c => [c.id, c]));
+        const diff = (state.customers || []).filter(c => {
+          const prev = prevMap.get(c.id);
+          return !prev || prev !== c;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.customers = [...(pendingChangesPayload.customers || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Vehicles diff
+      if (state.vehicles !== prevState.vehicles) {
+        const prevMap = new Map((prevState.vehicles || []).map(v => [v.id, v]));
+        const diff = (state.vehicles || []).filter(v => {
+          const prev = prevMap.get(v.id);
+          return !prev || prev !== v;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.vehicles = [...(pendingChangesPayload.vehicles || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Quotes diff
+      if (state.quotes !== prevState.quotes) {
+        const prevMap = new Map((prevState.quotes || []).map(q => [q.id, q]));
+        const diff = (state.quotes || []).filter(q => {
+          const prev = prevMap.get(q.id);
+          return !prev || prev !== q;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.quotes = [...(pendingChangesPayload.quotes || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Cajas diff
+      if (state.cajas !== prevState.cajas) {
+        const prevMap = new Map((prevState.cajas || []).map(c => [c.id, c]));
+        const diff = (state.cajas || []).filter(c => {
+          const prev = prevMap.get(c.id);
+          return !prev || prev !== c;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.cajas = [...(pendingChangesPayload.cajas || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Movimientos Caja diff
+      if (state.cajaMovements !== prevState.cajaMovements) {
+        const prevMap = new Map((prevState.cajaMovements || []).map(m => [m.id, m]));
+        const diff = (state.cajaMovements || []).filter(m => {
+          const prev = prevMap.get(m.id);
+          return !prev || prev !== m;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.cajaMovements = [...(pendingChangesPayload.cajaMovements || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Inventory Movements diff (solo movimientos nuevos agregados)
+      if (state.movements !== prevState.movements) {
+        const prevIds = new Set((prevState.movements || []).map(m => m.id));
+        const diff = (state.movements || []).filter(m => !prevIds.has(m.id));
+        if (diff.length > 0) {
+          pendingChangesPayload.movements = [...(pendingChangesPayload.movements || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Technicians diff
+      if (state.technicians !== prevState.technicians) {
+        const prevMap = new Map((prevState.technicians || []).map(t => [t.id, t]));
+        const diff = (state.technicians || []).filter(t => {
+          const prev = prevMap.get(t.id);
+          return !prev || prev !== t;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.technicians = [...(pendingChangesPayload.technicians || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Services diff
+      if (state.services !== prevState.services) {
+        const prevMap = new Map((prevState.services || []).map(s => [s.id, s]));
+        const diff = (state.services || []).filter(s => {
+          const prev = prevMap.get(s.id);
+          return !prev || prev !== s;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.services = [...(pendingChangesPayload.services || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Open tabs diff
+      if (state.openTabs !== prevState.openTabs) {
+        const prevMap = new Map((prevState.openTabs || []).map(t => [t.id, t]));
+        const diff = (state.openTabs || []).filter(t => {
+          const prev = prevMap.get(t.id);
+          return !prev || prev !== t;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.openTabs = [...(pendingChangesPayload.openTabs || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Suppliers diff
+      if (state.suppliers !== prevState.suppliers) {
+        const prevMap = new Map((prevState.suppliers || []).map(s => [s.id, s]));
+        const diff = (state.suppliers || []).filter(s => {
+          const prev = prevMap.get(s.id);
+          return !prev || prev !== s;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.suppliers = [...(pendingChangesPayload.suppliers || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Purchase orders diff
+      if (state.purchaseOrders !== prevState.purchaseOrders) {
+        const prevMap = new Map((prevState.purchaseOrders || []).map(p => [p.id, p]));
+        const diff = (state.purchaseOrders || []).filter(p => {
+          const prev = prevMap.get(p.id);
+          return !prev || prev !== p;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.purchaseOrders = [...(pendingChangesPayload.purchaseOrders || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Goods receipts diff
+      if (state.goodsReceipts !== prevState.goodsReceipts) {
+        const prevMap = new Map((prevState.goodsReceipts || []).map(g => [g.id, g]));
+        const diff = (state.goodsReceipts || []).filter(g => {
+          const prev = prevMap.get(g.id);
+          return !prev || prev !== g;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.goodsReceipts = [...(pendingChangesPayload.goodsReceipts || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Accounts payable diff
+      if (state.accountsPayable !== prevState.accountsPayable) {
+        const prevMap = new Map((prevState.accountsPayable || []).map(a => [a.id, a]));
+        const diff = (state.accountsPayable || []).filter(a => {
+          const prev = prevMap.get(a.id);
+          return !prev || prev !== a;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.accountsPayable = [...(pendingChangesPayload.accountsPayable || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Inspections diff
+      if (state.inspections !== prevState.inspections) {
+        const prevMap = new Map((prevState.inspections || []).map(i => [i.id, i]));
+        const diff = (state.inspections || []).filter(i => {
+          const prev = prevMap.get(i.id);
+          return !prev || prev !== i;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.inspections = [...(pendingChangesPayload.inspections || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Maintenance items diff
+      if (state.maintenanceItems !== prevState.maintenanceItems) {
+        const prevMap = new Map((prevState.maintenanceItems || []).map(m => [m.id, m]));
+        const diff = (state.maintenanceItems || []).filter(m => {
+          const prev = prevMap.get(m.id);
+          return !prev || prev !== m;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.maintenanceItems = [...(pendingChangesPayload.maintenanceItems || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Maintenance alerts diff
+      if (state.maintenanceAlerts !== prevState.maintenanceAlerts) {
+        const prevMap = new Map((prevState.maintenanceAlerts || []).map(a => [a.id, a]));
+        const diff = (state.maintenanceAlerts || []).filter(a => {
+          const prev = prevMap.get(a.id);
+          return !prev || prev !== a;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.maintenanceAlerts = [...(pendingChangesPayload.maintenanceAlerts || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Maintenance history diff
+      if (state.maintenanceHistory !== prevState.maintenanceHistory) {
+        const prevMap = new Map((prevState.maintenanceHistory || []).map(h => [h.id, h]));
+        const diff = (state.maintenanceHistory || []).filter(h => {
+          const prev = prevMap.get(h.id);
+          return !prev || prev !== h;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.maintenanceHistory = [...(pendingChangesPayload.maintenanceHistory || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Activity logs diff
+      if (state.activityLogs !== prevState.activityLogs) {
+        const prevIds = new Set((prevState.activityLogs || []).map(l => l.id));
+        const diff = (state.activityLogs || []).filter(l => !prevIds.has(l.id));
+        if (diff.length > 0) {
+          pendingChangesPayload.activityLogs = [...(pendingChangesPayload.activityLogs || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      // Inventory sessions diff
+      if (state.inventorySessions !== prevState.inventorySessions) {
+        const prevMap = new Map((prevState.inventorySessions || []).map(s => [s.id, s]));
+        const diff = (state.inventorySessions || []).filter(s => {
+          const prev = prevMap.get(s.id);
+          return !prev || prev !== s;
+        });
+        if (diff.length > 0) {
+          pendingChangesPayload.inventorySessions = [...(pendingChangesPayload.inventorySessions || []), ...diff];
+          hasNewChanges = true;
+        }
+      }
+
+      if (!hasNewChanges && Object.keys(pendingChangesPayload).length === 0) return;
+
+      // Debounce de 500ms para el upload local incremental
       if (localUploadTimer) clearTimeout(localUploadTimer);
       localUploadTimer = setTimeout(() => {
         localUploadTimer = null;
-        console.log("[Background Sync] ⬆️ Cambio local detectado → subiendo a Supabase...");
+        const payloadToUpload = { ...pendingChangesPayload };
+        pendingChangesPayload = {};
+        const changedTables = Object.keys(payloadToUpload);
+        if (changedTables.length === 0) return;
+
+        console.log("[Background Sync] ⬆️ Subiendo cambios incrementales a Supabase...", changedTables);
         import("@/lib/supabaseSync").then(({ syncStoreToSupabase }) => {
-          syncStoreToSupabase(currentTenant.id, state)
+          syncStoreToSupabase(currentTenant.id, payloadToUpload)
             .then(() => {
               // Notificar al resto de dispositivos vía Broadcast
-              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now() } })
+              syncChannel.send({ type: "broadcast", event: "state_updated", payload: { ts: Date.now(), tables: changedTables } })
                 .then(resp => console.log("[Broadcast] Envío ack:", resp))
                 .catch(err => console.error("[Broadcast] Error al enviar:", err));
             })

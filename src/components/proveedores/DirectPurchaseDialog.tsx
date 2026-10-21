@@ -20,6 +20,12 @@ interface Props {
   isOwner?: boolean;
 }
 
+interface EditablePOItem extends PurchaseOrderItem {
+  rawUnitPrice?: string;
+  rawSalePrice?: string;
+  rawQuantity?: string;
+}
+
 export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isOwner = true }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId && s.status === "activo");
   const products = useStore((s) => s.products).filter((p) => p.tenantId === tenantId);
@@ -37,7 +43,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
   const [supplierId, setSupplierId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'transfer' | 'check'>('pending');
-  const [items, setItems] = useState<PurchaseOrderItem[]>([]);
+  const [items, setItems] = useState<EditablePOItem[]>([]);
   const [notes, setNotes] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,6 +63,9 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
       unitPrice: 0,
       salePrice: 0,
       receivedQuantity: 0,
+      rawQuantity: "1",
+      rawUnitPrice: "",
+      rawSalePrice: "",
     }]);
   };
 
@@ -64,16 +73,18 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
     setItems((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const updateItem = (i: number, updates: Partial<PurchaseOrderItem>) => {
+  const updateItem = (i: number, updates: Partial<EditablePOItem>) => {
     setItems((prev) => prev.map((item, idx) => {
       if (idx !== i) return item;
       const newItem = { ...item, ...updates };
-      if (updates.productId) {
+      if (updates.productId && updates.productId !== item.productId) {
         const product = products.find((p) => p.id === updates.productId);
         if (product) {
           newItem.productName = product.name;
           newItem.unitPrice = product.costPrice;
           newItem.salePrice = product.salePrice;
+          newItem.rawUnitPrice = String(product.costPrice);
+          newItem.rawSalePrice = String(product.salePrice);
         }
       }
       return newItem;
@@ -688,12 +699,45 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
                         </datalist>
                       </div>
                       <div>
-                        <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs bg-white text-center"
-                          value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white text-center"
+                          placeholder="1"
+                          value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, "");
+                            const num = parseInt(val, 10);
+                            updateItem(i, {
+                              rawQuantity: val,
+                              quantity: isNaN(num) || num < 0 ? 0 : num,
+                            });
+                          }}
+                          onBlur={() => {
+                            if (!item.quantity || item.quantity < 1) {
+                              updateItem(i, { quantity: 1, rawQuantity: "1" });
+                            }
+                          }}
+                        />
                       </div>
                       <div>
-                        <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs bg-white" placeholder="RD$"
-                          value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
+                          placeholder="RD$"
+                          value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9.]/g, "");
+                            const parts = val.split(".");
+                            const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                            const num = parseFloat(cleanVal);
+                            updateItem(i, {
+                              rawUnitPrice: cleanVal,
+                              unitPrice: isNaN(num) ? 0 : num,
+                            });
+                          }}
+                        />
                         {item.unitPrice > 0 && (
                           <p className="text-[9px] text-neutral-500 font-bold text-center mt-0.5">
                             c/ITBIS: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
@@ -702,8 +746,23 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
                       </div>
                       {isOwner && (
                         <div>
-                          <Input type="number" className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium" placeholder="RD$"
-                            value={item.salePrice === 0 ? "" : item.salePrice} onChange={(e) => updateItem(i, { salePrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
+                            placeholder="RD$"
+                            value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9.]/g, "");
+                              const parts = val.split(".");
+                              const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                              const num = parseFloat(cleanVal);
+                              updateItem(i, {
+                                rawSalePrice: cleanVal,
+                                salePrice: isNaN(num) ? 0 : num,
+                              });
+                            }}
+                          />
                           {item.salePrice > 0 && (
                             <p className="text-[9px] text-emerald-600 font-bold text-center mt-0.5">
                               c/ITBIS: {Math.round(item.salePrice * (1 + supplierItbis / 100))}

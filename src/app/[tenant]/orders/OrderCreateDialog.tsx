@@ -286,7 +286,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                   )}
                 </div>
                 <Select 
-                  value={form.vehicleId || undefined} 
+                  value={form.vehicleId || ""} 
                   onValueChange={(v) => setForm(prev => ({ ...prev, vehicleId: v || "" }))} 
                   disabled={!form.customerId}
                   items={availableVehicles.map((v) => ({ value: v.id, label: `${v.brand} ${v.model} — ${v.plate}` }))}
@@ -450,7 +450,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               <div className="space-y-1">
                 <Label className="text-xs font-bold text-neutral-600">Técnico Asignado *</Label>
                 <Select 
-                  value={form.mechanicId || undefined} 
+                  value={form.mechanicId || ""} 
                   onValueChange={(v) => setForm(prev => ({ ...prev, mechanicId: v === "none" ? "" : (v || "") }))}
                   items={[
                     { value: "none", label: "Sin asignar" },

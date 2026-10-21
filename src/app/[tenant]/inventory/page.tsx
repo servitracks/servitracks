@@ -349,7 +349,7 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers, onB
       <div className="space-y-1.5">
         <Label>Proveedor *</Label>
         <Select 
-          value={form.supplier || undefined} 
+          value={form.supplier || ""} 
           onValueChange={(v) => setForm((prev) => ({ ...prev, supplier: v || "" }))}
           items={suppliers.map(s => ({ value: s.commercialName, label: s.commercialName }))}
         >
@@ -605,63 +605,6 @@ export default function InventoryPage() {
     }
   };
 
-  // Detección y depuración de productos duplicados (mismo SKU y tenant)
-  const duplicatesInfo = useMemo(() => {
-    const skuMap = new Map<string, Product[]>();
-    products.forEach((p) => {
-      const key = (p.sku || "").trim().toLowerCase();
-      if (!key) return;
-      const list = skuMap.get(key) || [];
-      list.push(p);
-      skuMap.set(key, list);
-    });
-
-    let duplicateCount = 0;
-    const duplicateIdsToDelete: string[] = [];
-
-    skuMap.forEach((prods) => {
-      if (prods.length > 1) {
-        duplicateCount += (prods.length - 1);
-        for (let i = 1; i < prods.length; i++) {
-          duplicateIdsToDelete.push(prods[i].id);
-        }
-      }
-    });
-
-    return { duplicateCount, duplicateIdsToDelete };
-  }, [products]);
-
-  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
-
-  const handleCleanDuplicates = async () => {
-    if (!tenantId || duplicatesInfo.duplicateIdsToDelete.length === 0) return;
-    setIsCleaningDuplicates(true);
-    try {
-      const idsToDelete = new Set(duplicatesInfo.duplicateIdsToDelete);
-      
-      // 1. Limpiar en Zustand local inmediatamente
-      useStore.setState((state) => ({
-        products: state.products.filter((p) => !idsToDelete.has(p.id)),
-      }));
-
-      // 2. Eliminar en Supabase en lotes
-      const { supabaseAdmin } = await import("@/lib/supabase");
-      const idArray = Array.from(idsToDelete);
-      const CHUNK_SIZE = 100;
-      for (let i = 0; i < idArray.length; i += CHUNK_SIZE) {
-        const chunk = idArray.slice(i, i + CHUNK_SIZE);
-        await supabaseAdmin.from("products").delete().in("id", chunk).eq("tenant_id", tenantId);
-      }
-
-      toast.success(`Se eliminaron con éxito ${duplicatesInfo.duplicateCount} productos duplicados.`);
-    } catch (err: any) {
-      console.error("Error al limpiar duplicados:", err);
-      toast.error(err?.message || "Error al eliminar duplicados.");
-    } finally {
-      setIsCleaningDuplicates(false);
-    }
-  };
-
   const productTableRef = useRef<HTMLDivElement>(null);
   const comboTableRef = useRef<HTMLDivElement>(null);
 
@@ -839,17 +782,45 @@ export default function InventoryPage() {
       toast.error("El nombre, categoría y proveedor son obligatorios");
       return;
     }
+
+    const trimmedName = form.name.trim();
+    const trimmedSku = form.sku.trim();
+    const trimmedBarcode = form.barcode.trim();
+
+    // Verificación preventiva de duplicidad contra productos existentes
+    if (trimmedSku) {
+      const existingSku = products.find((p) => (p.sku || "").trim().toLowerCase() === trimmedSku.toLowerCase());
+      if (existingSku) {
+        toast.error(`Ya existe un producto con el SKU "${trimmedSku}" ("${existingSku.name}"). Usa un SKU diferente o edita el producto existente.`);
+        return;
+      }
+    }
+
+    if (trimmedBarcode) {
+      const existingBarcode = products.find((p) => (p.barcode || "").trim().toLowerCase() === trimmedBarcode.toLowerCase());
+      if (existingBarcode) {
+        toast.error(`Ya existe un producto con el Código de Barras "${trimmedBarcode}" ("${existingBarcode.name}").`);
+        return;
+      }
+    }
+
+    const existingName = products.find((p) => (p.name || "").trim().toLowerCase() === trimmedName.toLowerCase());
+    if (existingName) {
+      toast.error(`Ya existe un producto registrado con el nombre "${existingName.name}" (SKU: ${existingName.sku || "N/A"}). Para evitar duplicidad, edítalo o dale un nombre único.`);
+      return;
+    }
+
     // Auto-generación de SKU y Código de barras si no se proveen
     const sequentialId = products.length + 1;
     const generatedCode = `STK${String(sequentialId).padStart(7, '0')}`;
     
-    const finalSku = form.sku.trim() || `SKU-${generatedCode}`;
-    const finalBarcode = form.barcode.trim() || generatedCode;
+    const finalSku = trimmedSku || `SKU-${generatedCode}`;
+    const finalBarcode = trimmedBarcode || generatedCode;
 
     const newProduct: Product = {
       id: `p${Date.now()}`,
       tenantId: tenantId,
-      name: form.name,
+      name: trimmedName,
       sku: finalSku,
       barcode: finalBarcode,
       category: form.category,
@@ -938,8 +909,35 @@ export default function InventoryPage() {
       toast.error("El nombre, categoría y proveedor son obligatorios");
       return;
     }
+
+    const trimmedName = form.name.trim();
+    const trimmedSku = form.sku.trim();
+    const trimmedBarcode = form.barcode.trim();
+
+    if (trimmedSku) {
+      const conflictSku = products.find((p) => p.id !== selectedProduct.id && (p.sku || "").trim().toLowerCase() === trimmedSku.toLowerCase());
+      if (conflictSku) {
+        toast.error(`El SKU "${trimmedSku}" ya está asignado al producto "${conflictSku.name}".`);
+        return;
+      }
+    }
+
+    if (trimmedBarcode) {
+      const conflictBarcode = products.find((p) => p.id !== selectedProduct.id && (p.barcode || "").trim().toLowerCase() === trimmedBarcode.toLowerCase());
+      if (conflictBarcode) {
+        toast.error(`El código de barras "${trimmedBarcode}" ya pertenece a "${conflictBarcode.name}".`);
+        return;
+      }
+    }
+
+    const conflictName = products.find((p) => p.id !== selectedProduct.id && (p.name || "").trim().toLowerCase() === trimmedName.toLowerCase());
+    if (conflictName) {
+      toast.error(`Ya existe otro producto llamado "${conflictName.name}" (SKU: ${conflictName.sku || "N/A"}).`);
+      return;
+    }
+
     updateProduct(selectedProduct.id, {
-      name: form.name, sku: form.sku, barcode: form.barcode,
+      name: trimmedName, sku: trimmedSku, barcode: trimmedBarcode,
       category: form.category, brand: form.brand, supplier: form.supplier,
       costPrice: Number(form.costPrice) || 0, salePrice: Number(form.salePrice) || 0,
       laborPrice: Number(form.laborPrice) || 0,
@@ -1029,11 +1027,13 @@ export default function InventoryPage() {
     // Tomar el estado fresco más reciente de Zustand para este tenant
     const currentProds = useStore.getState().products.filter((p) => p.tenantId === tenantId);
     const existingBySku = new Map<string, Product>();
+    const existingByBarcode = new Map<string, Product>();
     const existingByName = new Map<string, Product>();
     const existingById = new Map<string, Product>();
     currentProds.forEach((p) => {
       existingById.set(p.id, p);
       if (p.sku) existingBySku.set(p.sku.toLowerCase().trim(), p);
+      if (p.barcode && p.barcode !== "null") existingByBarcode.set(p.barcode.toLowerCase().trim(), p);
       if (p.name) existingByName.set(p.name.toLowerCase().trim(), p);
     });
 
@@ -1044,6 +1044,7 @@ export default function InventoryPage() {
     rows.forEach((row) => {
       const cleanName = (row.name || "").trim();
       const cleanSku = (row.sku || "").trim();
+      const cleanBarcode = (row.barcode || "").trim();
       const n = cleanName.toUpperCase();
       
       if (
@@ -1056,7 +1057,12 @@ export default function InventoryPage() {
         ((n.startsWith("TOTAL ") || n.startsWith("TOTALES ")) && !cleanSku)
       ) return;
 
-      const dedupeKey = cleanSku ? cleanSku.toLowerCase() : cleanName.toLowerCase();
+      const dedupeKey = cleanSku
+        ? `sku:${cleanSku.toLowerCase()}`
+        : cleanBarcode
+        ? `bc:${cleanBarcode.toLowerCase()}`
+        : `name:${cleanName.toLowerCase()}`;
+
       if (dedupedRowsMap.has(dedupeKey)) {
         const prev = dedupedRowsMap.get(dedupeKey)!;
         const prevStock = Number(prev.stock !== undefined && !isNaN(prev.stock) ? prev.stock : (prev.quantity || 0)) || 0;
@@ -1077,14 +1083,17 @@ export default function InventoryPage() {
     dedupedRowsMap.forEach((row) => {
       const cleanName = (row.name || "").trim();
       const cleanSku = (row.sku || "").trim();
+      const cleanBarcode = (row.barcode || "").trim();
       
       const safeSku = cleanSku ? cleanSku.toLowerCase().replace(/[^a-z0-9_-]/g, "_") : "";
       const safeName = cleanName.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
       const deterministicId = `prod_${tenantId}_${safeSku || safeName}`;
 
-      const existingProduct = cleanSku 
-        ? (existingBySku.get(cleanSku.toLowerCase()) || existingById.get(deterministicId))
-        : (existingByName.get(cleanName.toLowerCase()) || existingById.get(deterministicId));
+      const existingProduct = 
+        (cleanSku ? existingBySku.get(cleanSku.toLowerCase()) : null) ||
+        (cleanBarcode ? existingByBarcode.get(cleanBarcode.toLowerCase()) : null) ||
+        (cleanName ? existingByName.get(cleanName.toLowerCase()) : null) ||
+        existingById.get(deterministicId);
       
       let productId = "";
       let productName = cleanName;
@@ -1102,10 +1111,12 @@ export default function InventoryPage() {
           costPrice: costPrice > 0 ? costPrice : existingProduct.costPrice,
           salePrice: salePrice > 0 ? salePrice : existingProduct.salePrice,
           barcode: existingProduct.barcode || row.barcode || undefined,
+          sku: existingProduct.sku || cleanSku || "",
         };
         prodsToUpdate.push(updated);
         if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), updated);
-        else existingByName.set(cleanName.toLowerCase(), updated);
+        if (cleanBarcode) existingByBarcode.set(cleanBarcode.toLowerCase(), updated);
+        if (cleanName) existingByName.set(cleanName.toLowerCase(), updated);
         existingById.set(updated.id, updated);
       } else {
         const newProduct: Product = {
@@ -1121,13 +1132,14 @@ export default function InventoryPage() {
           salePrice: salePrice,
           stock: itemQty,
           minStock: row.minStock || 5,
-          tax: row.tax || 18,
+          tax: (typeof row.tax === 'number' && row.tax > 0 && row.tax <= 30) ? row.tax : 18,
           location: row.location || "",
         };
         productId = newProduct.id;
         prodsToCreate.push(newProduct);
         if (cleanSku) existingBySku.set(cleanSku.toLowerCase(), newProduct);
-        else existingByName.set(cleanName.toLowerCase(), newProduct);
+        if (cleanBarcode) existingByBarcode.set(cleanBarcode.toLowerCase(), newProduct);
+        if (cleanName) existingByName.set(cleanName.toLowerCase(), newProduct);
         existingById.set(newProduct.id, newProduct);
       }
       
@@ -1253,44 +1265,6 @@ export default function InventoryPage() {
           </DropdownMenu>
         </div>
       </div>
-
-      {/* Banner de depuración de productos duplicados */}
-      {duplicatesInfo.duplicateCount > 0 && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-50/90 border border-amber-200 rounded-2xl text-amber-900 shadow-2xs animate-in fade-in">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-amber-100 border border-amber-300/60 flex items-center justify-center shrink-0 text-amber-700">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="font-bold text-sm text-neutral-900">
-                Se detectaron {duplicatesInfo.duplicateCount} productos duplicados en el inventario
-              </p>
-              <p className="text-xs text-neutral-600 mt-0.5">
-                Existen artículos idénticos con el mismo código/SKU que están duplicando el conteo y el valor total de tu almacén.
-              </p>
-            </div>
-          </div>
-          {isOwner && (
-            <Button
-              onClick={handleCleanDuplicates}
-              disabled={isCleaningDuplicates}
-              className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0 gap-2 h-10 px-4 cursor-pointer shadow-sm transition-all"
-            >
-              {isCleaningDuplicates ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Depurando catálogo...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" />
-                  Depurar y Unificar Inventario ({duplicatesInfo.duplicateCount})
-                </>
-              )}
-            </Button>
-          )}
-        </div>
-      )}
 
       {/* KPI Cards — estilo SaaS compacto (Linear / Stripe) */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

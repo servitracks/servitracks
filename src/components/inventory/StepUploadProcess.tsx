@@ -276,7 +276,9 @@ function toImportRow(raw: Record<string, unknown>, index: number): ImportRow {
     : quantity;
 
   const minStock = parseNumber(getVal(raw, ["minstock", "stockminimo", "stockmínimo"])) || 5;
-  const tax = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"])) || 18;
+    const rawTaxParsed = parseNumber(getVal(raw, ["tax", "impuesto", "itbis", "iva"]));
+  // Si no se especifica o viene un monto absoluto en vez de porcentaje (> 30%), usar 18%
+  const tax = (rawTaxParsed > 0 && rawTaxParsed <= 30) ? rawTaxParsed : 18;
   const location = String(getVal(raw, ["location", "ubicacion", "ubicación", "estante", "tramo"]) ?? "").trim();
 
   return {

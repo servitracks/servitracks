@@ -62,6 +62,7 @@ export interface TicketItem {
   unitPrice?: number;
   salePrice?: number;
   is_exento?: boolean;
+  tax?: number;
   notas?: string;
   servicio_origen?: string;
 }
@@ -278,15 +279,33 @@ export function Ticket({
 
   // Reconciliación de Ítems
   const rawItems = orden?.items || items || [];
-  const normalizedItems: TicketItem[] = rawItems.map((it: any) => ({
-    id: it.id,
-    descripcion: it.descripcion || it.name || "Servicio / Repuesto",
-    cantidad: it.cantidad ?? it.quantity ?? 1,
-    precio_unitario: it.precio_unitario ?? it.unitPrice ?? it.salePrice ?? 0,
-    is_exento: it.is_exento,
-    notas: it.notas,
-    servicio_origen: it.servicio_origen,
-  }));
+  const normalizedItems: TicketItem[] = rawItems.map((it: any) => {
+    const isExento = Boolean(
+      it.is_exento ||
+      it.tax === 0 ||
+      it.id?.startsWith?.("labor-") ||
+      it.sku === "MANO-OBRA" ||
+      it.name?.toLowerCase().includes("mano de obra") ||
+      it.descripcion?.toLowerCase().includes("mano de obra") ||
+      (it.tax !== undefined && Number(it.tax) === 0)
+    );
+
+    let explicitTax: number | undefined = undefined;
+    if (typeof it.tax === 'number') {
+      explicitTax = it.tax;
+    }
+
+    return {
+      id: it.id,
+      descripcion: it.descripcion || it.name || "Servicio / Repuesto",
+      cantidad: it.cantidad ?? it.quantity ?? 1,
+      precio_unitario: it.precio_unitario ?? it.unitPrice ?? it.salePrice ?? 0,
+      is_exento: isExento,
+      tax: isExento ? 0 : explicitTax,
+      notas: it.notas,
+      servicio_origen: it.servicio_origen,
+    };
+  });
 
   const ordenObj = {
     numero:
@@ -460,7 +479,14 @@ export function Ticket({
                 const qty = it.cantidad || 1;
                 const price = it.precio_unitario || 0;
                 const totalItem = qty * price;
-                const itbisItem = ordenObj.itbis > 0 && !it.is_exento ? totalItem * 0.18 : 0;
+                let itbisItem = 0;
+                if (!it.is_exento && ordenObj.itbis > 0) {
+                  if (typeof it.tax === 'number') {
+                    itbisItem = it.tax;
+                  } else {
+                    itbisItem = totalItem * 0.18;
+                  }
+                }
                 return (
                   <tr key={idx} className="hover:bg-neutral-50/50">
                     <td className="py-3 px-4 font-semibold text-neutral-900">
@@ -469,7 +495,7 @@ export function Ticket({
                     </td>
                     <td className="py-3 px-4 text-center font-bold text-neutral-700">{qty}</td>
                     <td className="py-3 px-4 text-right text-neutral-700">{formatRD(price)}</td>
-                    <td className="py-3 px-4 text-right text-neutral-700">{formatRD(itbisItem)}</td>
+                    <td className="py-3 px-4 text-right text-neutral-700">{itbisItem > 0 ? formatRD(itbisItem) : "-"}</td>
                     <td className="py-3 px-4 text-right font-black text-neutral-900">{formatRD(totalItem)}</td>
                   </tr>
                 );
@@ -554,7 +580,7 @@ export function Ticket({
   // =========================================================================
   return (
     <div
-      className={`thermal-ticket mx-auto ${w} ${cols} bg-white pl-2.5 pr-6 py-2 text-[11px] leading-snug text-black`}
+      className={`thermal-ticket mx-auto ${w} ${cols} bg-white px-2.5 py-1 text-[11px] leading-snug text-black`}
       style={{
         fontFamily: '"Plus Jakarta Sans", sans-serif',
         WebkitPrintColorAdjust: "exact",
@@ -763,7 +789,16 @@ export function Ticket({
             const qty = it.cantidad || 1;
             const price = it.precio_unitario || 0;
             const baseTotal = qty * price;
-            const itbisVal = ordenObj.itbis > 0 && !it.is_exento ? baseTotal * 0.18 : 0;
+            
+            // ITBIS del ítem: si es exento o mano de obra, es estrictamente 0
+            let itbisVal = 0;
+            if (!it.is_exento && ordenObj.itbis > 0) {
+              if (typeof it.tax === 'number') {
+                itbisVal = it.tax;
+              } else {
+                itbisVal = baseTotal * 0.18;
+              }
+            }
 
             return (
               <div key={idx} className="flex justify-between items-start py-1">
@@ -785,7 +820,7 @@ export function Ticket({
 
                 {ordenObj.itbis > 0 && (
                   <div className="w-[20%] text-right font-semibold pt-0.5 tabular-nums tracking-tight whitespace-nowrap text-[10px]">
-                    {itbisVal > 0 ? formatNumber(itbisVal) : "0.00"}
+                    {itbisVal > 0 ? formatNumber(itbisVal) : "-"}
                   </div>
                 )}
 

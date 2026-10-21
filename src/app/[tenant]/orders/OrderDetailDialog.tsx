@@ -211,6 +211,8 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
           quantity: item.quantity,
           reason: `Despacho a Orden #${currentOrder.id.slice(-6).toUpperCase()}`,
           date: new Date().toISOString(),
+          customerId: currentOrder.customerId,
+          technicianId: currentOrder.mechanicId,
         });
       }
     }
@@ -245,7 +247,9 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       type: "out",
       quantity: 1,
       reason: `Despacho adicional (+1) a Orden #${currentOrder.id.slice(-6).toUpperCase()}`,
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      customerId: currentOrder.customerId,
+      technicianId: currentOrder.mechanicId,
     });
 
     // Actualizar orden
@@ -278,7 +282,9 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
         type: "in",
         quantity: 1,
         reason: `Devolución de 1 unidad - Orden #${currentOrder.id.slice(-6).toUpperCase()}`,
-        date: new Date().toISOString()
+        date: new Date().toISOString(),
+        customerId: currentOrder.customerId,
+        technicianId: currentOrder.mechanicId,
       });
 
       // Actualizar orden
@@ -312,7 +318,9 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
         type: "in",
         quantity: quantityToRemove,
         reason: `Reversión de despacho (${quantityToRemove}x) - Orden #${currentOrder.id.slice(-6).toUpperCase()}`,
-        date: new Date().toISOString()
+        date: new Date().toISOString(),
+        customerId: currentOrder.customerId,
+        technicianId: currentOrder.mechanicId,
       });
     }
 

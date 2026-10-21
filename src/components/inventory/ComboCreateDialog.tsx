@@ -191,7 +191,7 @@ export default function ComboCreateDialog({ open, onOpenChange, tenantId }: Prop
                   <div key={item.id} className="grid grid-cols-[1fr_80px_100px_100px_32px] gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100">
                     <div>
                       <Select 
-                        value={item.productId || undefined} 
+                        value={item.productId || ""} 
                         onValueChange={(v) => updateItem(i, { productId: v || "" })}
                       >
                         <SelectTrigger className="h-9 rounded-lg border-neutral-200 text-xs bg-white"><SelectValue placeholder="Seleccionar" /></SelectTrigger>

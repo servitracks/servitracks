@@ -485,13 +485,93 @@ export const useStore = create<AppState>()(
           };
         }),
       deleteOrder: (id) => {
-        set((state) => ({ orders: state.orders.filter((o) => o.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('orders', id));
+        set((state) => {
+          const ord = state.orders.find((o) => o.id === id);
+          const updatedProducts = [...state.products];
+          const returnMovements: InventoryMovement[] = [];
+          const affectedProductIds = new Set<string>();
+
+          // Si la orden tenía repuestos despachados y no fue facturada, reincorporar stock al almacén
+          if (ord && ord.parts && ord.parts.length > 0 && ord.status !== 'invoiced') {
+            ord.parts.forEach((part) => {
+              const pIdx = updatedProducts.findIndex((p) => p.id === part.productId);
+              if (pIdx !== -1) {
+                const prod = updatedProducts[pIdx];
+                const qty = Number(part.quantity) || 1;
+                updatedProducts[pIdx] = { ...prod, stock: (Number(prod.stock) || 0) + qty };
+                affectedProductIds.add(prod.id);
+                returnMovements.push({
+                  id: `mov-ret-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                  tenantId: ord.tenantId,
+                  productId: prod.id,
+                  productName: prod.name,
+                  type: "in",
+                  quantity: qty,
+                  reason: `Retorno por eliminación de Orden #${ord.id.slice(-6).toUpperCase()}`,
+                  date: new Date().toISOString(),
+                  userId: state.currentUserId ?? undefined,
+                  customerId: ord.customerId,
+                  technicianId: ord.mechanicId,
+                });
+              }
+            });
+          }
+
+          const productsToSync = updatedProducts.filter((p) => affectedProductIds.has(p.id));
+          import("@/lib/supabaseSync").then((m) => {
+            m.deleteRecordFromSupabase('orders', id);
+            if (productsToSync.length > 0) m.upsertProducts(productsToSync);
+            if (returnMovements.length > 0) m.upsertInventoryMovements(returnMovements);
+          });
+
+          return {
+            orders: state.orders.filter((o) => o.id !== id),
+            products: updatedProducts,
+            movements: [...state.movements, ...returnMovements],
+          };
+        });
       },
 
       addProduct: (product) => {
-        set((state) => ({ products: [...state.products, product] }));
-        import("@/lib/supabaseSync").then(m => m.upsertProducts([product]));
+        let finalProduct: Product = product;
+        set((state) => {
+          const tenantId = product.tenantId;
+          const cleanSku = product.sku ? product.sku.trim().toLowerCase() : null;
+          const cleanBarcode = product.barcode ? product.barcode.trim().toLowerCase() : null;
+          const cleanName = product.name ? product.name.trim().toLowerCase() : null;
+
+          // Check if an identical product already exists for this tenant
+          const existingIdx = state.products.findIndex((p) => {
+            if (p.id === product.id) return true;
+            if (tenantId && p.tenantId === tenantId) {
+              if (cleanSku && p.sku && p.sku.trim().toLowerCase() === cleanSku) return true;
+              if (cleanBarcode && p.barcode && p.barcode.trim().toLowerCase() === cleanBarcode) return true;
+              if (cleanName && p.name && p.name.trim().toLowerCase() === cleanName) return true;
+            }
+            return false;
+          });
+
+          if (existingIdx !== -1) {
+            const existing = state.products[existingIdx];
+            finalProduct = {
+              ...existing,
+              ...product,
+              id: existing.id,
+              stock: (Number(existing.stock) || 0) + (Number(product.stock) || 0),
+              barcode: product.barcode || existing.barcode,
+              location: product.location || existing.location,
+              supplier: product.supplier || existing.supplier,
+              costPrice: Number(product.costPrice) > 0 ? Number(product.costPrice) : existing.costPrice,
+              salePrice: Number(product.salePrice) > 0 ? Number(product.salePrice) : existing.salePrice,
+            };
+            const updated = [...state.products];
+            updated[existingIdx] = finalProduct;
+            return { products: updated };
+          }
+
+          return { products: [...state.products, product] };
+        });
+        import("@/lib/supabaseSync").then(m => m.upsertProducts([finalProduct]));
       },
       updateProduct: (id, updates) =>
         set((state) => {
@@ -507,38 +587,78 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id));
       },
       bulkImportProducts: async (newProducts, updatedProducts, movements = []) => {
+        let finalToSync: Product[] = [];
         set((state) => {
           const updatedMap = new Map(updatedProducts.map(p => [p.id, p]));
           const currentProducts = state.products.map(p => updatedMap.get(p.id) || p);
 
           const existingById = new Map<string, Product>();
           const existingByTenantSku = new Map<string, Product>();
+          const existingByTenantBarcode = new Map<string, Product>();
+          const existingByTenantName = new Map<string, Product>();
 
           currentProducts.forEach(p => {
             existingById.set(p.id, p);
             if (p.tenantId && p.sku) {
               existingByTenantSku.set(`${p.tenantId}::${p.sku.toLowerCase().trim()}`, p);
             }
+            if (p.tenantId && p.barcode) {
+              existingByTenantBarcode.set(`${p.tenantId}::${p.barcode.toLowerCase().trim()}`, p);
+            }
+            if (p.tenantId && p.name) {
+              existingByTenantName.set(`${p.tenantId}::${p.name.toLowerCase().trim()}`, p);
+            }
           });
 
           const dedupedNew: Product[] = [];
+          const modifiedExisting: Product[] = [];
+
           for (const np of newProducts) {
             const skuKey = np.tenantId && np.sku ? `${np.tenantId}::${np.sku.toLowerCase().trim()}` : null;
+            const barcodeKey = np.tenantId && np.barcode ? `${np.tenantId}::${np.barcode.toLowerCase().trim()}` : null;
+            const nameKey = np.tenantId && np.name ? `${np.tenantId}::${np.name.toLowerCase().trim()}` : null;
+
+            let existing: Product | undefined = undefined;
             if (existingById.has(np.id)) {
-              const idx = currentProducts.findIndex(p => p.id === np.id);
-              if (idx !== -1) currentProducts[idx] = np;
+              existing = existingById.get(np.id);
             } else if (skuKey && existingByTenantSku.has(skuKey)) {
-              const existing = existingByTenantSku.get(skuKey)!;
-              const idx = currentProducts.findIndex(p => p.id === existing.id);
+              existing = existingByTenantSku.get(skuKey);
+            } else if (barcodeKey && existingByTenantBarcode.has(barcodeKey)) {
+              existing = existingByTenantBarcode.get(barcodeKey);
+            } else if (nameKey && existingByTenantName.has(nameKey)) {
+              existing = existingByTenantName.get(nameKey);
+            }
+
+            if (existing) {
+              const idx = currentProducts.findIndex(p => p.id === existing!.id);
+              const merged: Product = {
+                ...existing,
+                ...np,
+                id: existing.id,
+                stock: (Number(existing.stock) || 0) + (Number(np.stock) || 0),
+                barcode: np.barcode || existing.barcode,
+                sku: np.sku || existing.sku,
+                costPrice: Number(np.costPrice) > 0 ? Number(np.costPrice) : existing.costPrice,
+                salePrice: Number(np.salePrice) > 0 ? Number(np.salePrice) : existing.salePrice,
+              };
               if (idx !== -1) {
-                currentProducts[idx] = { ...existing, ...np, id: existing.id };
+                currentProducts[idx] = merged;
               }
+              existingById.set(merged.id, merged);
+              if (skuKey) existingByTenantSku.set(skuKey, merged);
+              if (barcodeKey) existingByTenantBarcode.set(barcodeKey, merged);
+              if (nameKey) existingByTenantName.set(nameKey, merged);
+              modifiedExisting.push(merged);
             } else {
               dedupedNew.push(np);
               existingById.set(np.id, np);
               if (skuKey) existingByTenantSku.set(skuKey, np);
+              if (barcodeKey) existingByTenantBarcode.set(barcodeKey, np);
+              if (nameKey) existingByTenantName.set(nameKey, np);
             }
           }
+
+          finalToSync = [...updatedProducts, ...modifiedExisting, ...dedupedNew];
 
           return {
             products: [...currentProducts, ...dedupedNew],
@@ -548,10 +668,9 @@ export const useStore = create<AppState>()(
 
         try {
           const { upsertProducts, upsertInventoryMovements } = await import("@/lib/supabaseSync");
-          const allProdsToSync = [...newProducts, ...updatedProducts];
           const CHUNK_SIZE = 100;
-          for (let i = 0; i < allProdsToSync.length; i += CHUNK_SIZE) {
-            await upsertProducts(allProdsToSync.slice(i, i + CHUNK_SIZE));
+          for (let i = 0; i < finalToSync.length; i += CHUNK_SIZE) {
+            await upsertProducts(finalToSync.slice(i, i + CHUNK_SIZE));
           }
           for (let i = 0; i < movements.length; i += CHUNK_SIZE) {
             await upsertInventoryMovements(movements.slice(i, i + CHUNK_SIZE));
@@ -587,7 +706,9 @@ export const useStore = create<AppState>()(
         }),
 
       addOpenTab: (tab) => {
-        set((state) => ({ openTabs: [tab, ...state.openTabs] }));
+        set((state) => ({
+          openTabs: [tab, ...state.openTabs.filter(t => t.id !== tab.id)]
+        }));
         import("@/lib/supabaseSync").then(m => m.upsertOpenTabs([tab]));
       },
       updateOpenTab: (id, updates) => {
@@ -608,7 +729,7 @@ export const useStore = create<AppState>()(
       addInvoice: (invoice) => {
         set((state) => {
           const updatedProducts = [...state.products];
-          const newMovements = [...state.movements];
+          const addedMovements: InventoryMovement[] = [];
           const affectedProductIds = new Set<string>();
           
           if (invoice.status !== 'cancelled') {
@@ -626,8 +747,8 @@ export const useStore = create<AppState>()(
                         const newStock = Math.max(0, subProd.stock - (ci.quantity * item.quantity));
                         updatedProducts[ciIndex] = { ...subProd, stock: newStock };
                         affectedProductIds.add(ci.productId);
-                        newMovements.push({
-                          id: crypto.randomUUID(),
+                        addedMovements.push({
+                          id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                           tenantId: invoice.tenantId,
                           productId: ci.productId,
                           productName: subProd.name,
@@ -636,6 +757,9 @@ export const useStore = create<AppState>()(
                           reason: `Venta combo (Factura #${invoice.id.slice(-6).toUpperCase()})`,
                           date: new Date().toISOString(),
                           userId: state.currentUserId ?? undefined,
+                          customerId: invoice.customerId,
+                          technicianId: invoice.mechanicId,
+                          invoiceId: invoice.id,
                         });
                       }
                     });
@@ -643,8 +767,8 @@ export const useStore = create<AppState>()(
                     const newStock = Math.max(0, product.stock - item.quantity);
                     updatedProducts[productIndex] = { ...product, stock: newStock };
                     affectedProductIds.add(product.id);
-                    newMovements.push({
-                      id: crypto.randomUUID(),
+                    addedMovements.push({
+                      id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                       tenantId: invoice.tenantId,
                       productId: item.productId,
                       productName: product.name,
@@ -653,6 +777,9 @@ export const useStore = create<AppState>()(
                       reason: `Venta (Factura #${invoice.id.slice(-6).toUpperCase()})`,
                       date: new Date().toISOString(),
                       userId: state.currentUserId ?? undefined,
+                      customerId: invoice.customerId,
+                      technicianId: invoice.mechanicId,
+                      invoiceId: invoice.id,
                     });
                   }
                 }
@@ -664,13 +791,13 @@ export const useStore = create<AppState>()(
           import("@/lib/supabaseSync").then(m => {
             m.upsertInvoices([invoice]);
             if (productsToSync.length > 0) m.upsertProducts(productsToSync);
-            if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
+            if (addedMovements.length > 0) m.upsertInventoryMovements(addedMovements);
           });
 
           return { 
             invoices: [...state.invoices, invoice],
             products: updatedProducts,
-            movements: newMovements
+            movements: [...state.movements, ...addedMovements]
           };
         });
         
@@ -718,7 +845,7 @@ export const useStore = create<AppState>()(
         set((state) => {
           const oldInvoice = state.invoices.find(inv => inv.id === id);
           const updatedProducts = [...state.products];
-          const newMovements = [...state.movements];
+          const addedMovements: InventoryMovement[] = [];
           const affectedProductIds = new Set<string>();
 
           if (oldInvoice && updates.status === 'cancelled' && oldInvoice.status !== 'cancelled') {
@@ -734,30 +861,38 @@ export const useStore = create<AppState>()(
                         const subProd = updatedProducts[ciIndex];
                         updatedProducts[ciIndex] = { ...subProd, stock: subProd.stock + (ci.quantity * item.quantity) };
                         affectedProductIds.add(ci.productId);
-                        newMovements.push({
-                          id: crypto.randomUUID(),
+                        addedMovements.push({
+                          id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                           tenantId: oldInvoice.tenantId,
                           productId: ci.productId,
                           productName: subProd.name,
                           type: "in",
                           quantity: ci.quantity * item.quantity,
                           reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
-                          date: new Date().toISOString()
+                          date: new Date().toISOString(),
+                          userId: state.currentUserId ?? undefined,
+                          customerId: oldInvoice.customerId,
+                          technicianId: oldInvoice.mechanicId,
+                          invoiceId: oldInvoice.id,
                         });
                       }
                     });
                   } else {
                     updatedProducts[productIndex] = { ...product, stock: product.stock + item.quantity };
                     affectedProductIds.add(product.id);
-                    newMovements.push({
-                      id: crypto.randomUUID(),
+                    addedMovements.push({
+                      id: `mov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                       tenantId: oldInvoice.tenantId,
                       productId: item.productId,
                       productName: product.name,
                       type: "in",
                       quantity: item.quantity,
                       reason: `Cancelación (Factura #${oldInvoice.id.slice(-6).toUpperCase()})`,
-                      date: new Date().toISOString()
+                      date: new Date().toISOString(),
+                      userId: state.currentUserId ?? undefined,
+                      customerId: oldInvoice.customerId,
+                      technicianId: oldInvoice.mechanicId,
+                      invoiceId: oldInvoice.id,
                     });
                   }
                 }
@@ -773,7 +908,7 @@ export const useStore = create<AppState>()(
               m.upsertInvoices([invToSync]);
               if (updates.status === 'cancelled' && productsToSync.length > 0) {
                 m.upsertProducts(productsToSync);
-                if (newMovements.length > 0) m.upsertInventoryMovements(newMovements);
+                if (addedMovements.length > 0) m.upsertInventoryMovements(addedMovements);
               }
             });
           }
@@ -781,7 +916,7 @@ export const useStore = create<AppState>()(
           return {
             invoices: updatedInvoices,
             products: updatedProducts,
-            movements: newMovements
+            movements: [...state.movements, ...addedMovements]
           };
         });
       },

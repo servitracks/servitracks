@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import type { PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, Supplier } from "@/store/types";
+import { useState } from "react";
+import type { PurchaseOrder, PurchaseOrderItem } from "@/store/types";
 import { useStore } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package, TrendingUp, TrendingDown, ImagePlus, X } from "lucide-react";
+import { Plus, Trash2, Package, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 
 interface Props {
@@ -19,18 +19,33 @@ interface Props {
   isOwner?: boolean;
 }
 
+interface EditablePOItem extends PurchaseOrderItem {
+  rawUnitPrice?: string;
+  rawSalePrice?: string;
+  rawQuantity?: string;
+}
+
 export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, editOrder, isOwner = true }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId && s.status === "activo");
   const products = useStore((s) => s.products).filter((p) => p.tenantId === tenantId);
   const purchaseOrders = useStore((s) => s.purchaseOrders).filter((po) => po.tenantId === tenantId);
-  const { addPurchaseOrder, updatePurchaseOrder, updateProduct } = useStore();
+  const { addPurchaseOrder, updatePurchaseOrder, updateProduct, addProduct } = useStore();
   const isEdit = !!editOrder;
 
   const [supplierId, setSupplierId] = useState(editOrder?.supplierId || "");
   const [notes, setNotes] = useState(editOrder?.notes || "");
   const [expectedDelivery, setExpectedDelivery] = useState(editOrder?.expectedDelivery || "");
-  const [items, setItems] = useState<PurchaseOrderItem[]>(
-    editOrder?.items || []
+  const [items, setItems] = useState<EditablePOItem[]>(
+    () => (editOrder?.items || []).map((it) => {
+      const prod = it.productId ? products.find((p) => p.id === it.productId) : null;
+      return {
+        ...it,
+        productName: it.productName || prod?.name || "",
+        rawUnitPrice: it.unitPrice ? String(it.unitPrice) : "",
+        rawSalePrice: it.salePrice ? String(it.salePrice) : "",
+        rawQuantity: it.quantity ? String(it.quantity) : "1",
+      };
+    })
   );
 
   const generateNumber = () => {
@@ -48,6 +63,9 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
       unitPrice: 0,
       salePrice: 0,
       receivedQuantity: 0,
+      rawQuantity: "1",
+      rawUnitPrice: "",
+      rawSalePrice: "",
     }]);
   };
 
@@ -55,16 +73,18 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
     setItems((prev) => prev.filter((_, idx) => idx !== i));
   };
 
-  const updateItem = (i: number, updates: Partial<PurchaseOrderItem>) => {
+  const updateItem = (i: number, updates: Partial<EditablePOItem>) => {
     setItems((prev) => prev.map((item, idx) => {
       if (idx !== i) return item;
       const newItem = { ...item, ...updates };
-      if (updates.productId) {
+      if (updates.productId && updates.productId !== item.productId) {
         const product = products.find((p) => p.id === updates.productId);
         if (product) {
           newItem.productName = product.name;
           newItem.unitPrice = product.costPrice;
           newItem.salePrice = product.salePrice;
+          newItem.rawUnitPrice = String(product.costPrice);
+          newItem.rawSalePrice = String(product.salePrice);
         }
       }
       return newItem;
@@ -73,12 +93,12 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
   const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const subtotal = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.unitPrice || 0), 0);
   const tax = Math.round(subtotal * (supplierItbis / 100));
   const total = subtotal + tax;
 
   // Proyección de venta
-  const totalVentaEstimado = items.reduce((sum, item) => sum + item.quantity * item.salePrice, 0);
+  const totalVentaEstimado = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.salePrice || 0), 0);
   const gananciaBruta = totalVentaEstimado - subtotal;
   const margenPromedio = subtotal > 0 ? Math.round((gananciaBruta / subtotal) * 100) : 0;
 
@@ -94,15 +114,58 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!supplierId) { toast.error("Selecciona un proveedor"); return; }
-    if (items.length === 0 || items.every((i) => !i.productId)) { toast.error("Agrega al menos un producto"); return; }
+    if (items.length === 0 || items.every((i) => !i.productId && !i.productName.trim())) {
+      toast.error("Agrega al menos un producto");
+      return;
+    }
 
-    const validItems = items.filter((i) => i.productId);
     const now = new Date().toISOString();
+
+    // Auto-crear productos nuevos si no existen en inventario
+    const processedItems: PurchaseOrderItem[] = items
+      .filter((i) => i.productId || i.productName.trim())
+      .map((item, idx) => {
+        let finalProductId = item.productId;
+        const finalProductName = item.productName.trim();
+
+        if (!finalProductId && finalProductName) {
+          const sequentialId = products.length + 1 + idx;
+          const generatedCode = `STK${String(sequentialId).padStart(7, "0")}`;
+          finalProductId = `p_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`;
+
+          addProduct({
+            id: finalProductId,
+            tenantId,
+            name: finalProductName,
+            sku: generatedCode,
+            costPrice: item.unitPrice || 0,
+            salePrice: item.salePrice || Math.round((item.unitPrice || 0) * 1.3),
+            stock: 0,
+            minStock: 2,
+            category: "Repuestos",
+            ubication: "Almacén General",
+            status: "active",
+            tax: 18,
+            createdAt: now,
+            updatedAt: now,
+          } as any);
+        }
+
+        return {
+          id: item.id,
+          productId: finalProductId,
+          productName: finalProductName,
+          quantity: item.quantity || 1,
+          unitPrice: item.unitPrice || 0,
+          salePrice: item.salePrice || 0,
+          receivedQuantity: item.receivedQuantity || 0,
+        };
+      });
 
     if (isEdit && editOrder) {
       updatePurchaseOrder(editOrder.id, {
         supplierId,
-        items: validItems,
+        items: processedItems,
         subtotal,
         tax,
         total,
@@ -118,7 +181,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
         number: generateNumber(),
         paymentStatus: 'pending',
         status: "borrador",
-        items: validItems,
+        items: processedItems,
         subtotal,
         tax,
         total,
@@ -133,7 +196,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
     }
 
     // Actualizar precios en inventario automáticamente
-    validItems.forEach((item) => {
+    processedItems.forEach((item) => {
       const updates: { costPrice?: number; salePrice?: number } = {};
       if (item.unitPrice > 0) updates.costPrice = item.unitPrice;
       if (item.salePrice > 0) updates.salePrice = item.salePrice;
@@ -159,7 +222,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
             <div className="space-y-1.5">
               <Label>Proveedor *</Label>
               <Select 
-                value={supplierId || undefined} 
+                value={supplierId || ""} 
                 onValueChange={(v) => setSupplierId(v || "")}
                 items={suppliers.map(s => ({ value: s.id, label: s.commercialName }))}
               >
@@ -187,7 +250,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
           {/* Items */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-black uppercase text-neutral-400 tracking-wider">Productos</p>
+              <p className="text-xs font-black uppercase text-neutral-400 tracking-wider">Productos / Repuestos</p>
               <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={addItem}>
                 <Plus className="h-3 w-3" /> Agregar Producto
               </Button>
@@ -206,7 +269,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                 {/* Column headers — layout adapts based on role */}
                 <div className={`grid gap-2 px-3 pb-1 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
                   <span className="text-[10px] font-bold text-neutral-400 uppercase">Producto</span>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Cant.</span>
+                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Cant.</span>
                   <span className="text-[10px] font-bold text-neutral-400 uppercase">{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
                   {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase">Venta Unit.</span>}
                   {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Margen</span>}
@@ -218,41 +281,111 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                   const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
                   return (
                     <div key={item.id} className={`grid gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
-                      {/* Producto */}
-                      <div>
-                        <Select 
-                          value={item.productId || undefined} 
-                          onValueChange={(v) => updateItem(i, { productId: v || "" })}
-                          items={products.map(p => ({ value: p.id, label: p.name }))}
-                        >
-                          <SelectTrigger className="h-8 rounded-lg border-neutral-200 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
-                          <SelectContent className="rounded-xl max-h-48">
-                            {products.map((p) => <SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                      {/* Producto: Input editable con autocompletado y búsqueda */}
+                      <div className="relative">
+                        <input
+                          list={`po-products-list-${item.id}`}
+                          className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-2.5 bg-white focus:outline-none focus:ring-1 focus:ring-black placeholder:text-neutral-400"
+                          placeholder="Buscar o escribir producto..."
+                          value={item.productName || ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const match = products.find(
+                              (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                            );
+                            if (match) {
+                              updateItem(i, {
+                                productId: match.id,
+                                productName: match.name,
+                                unitPrice: match.costPrice,
+                                salePrice: match.salePrice,
+                                rawUnitPrice: String(match.costPrice),
+                                rawSalePrice: String(match.salePrice),
+                              });
+                            } else {
+                              updateItem(i, { productId: "", productName: val });
+                            }
+                          }}
+                        />
+                        <datalist id={`po-products-list-${item.id}`}>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.name}>
+                              {p.sku ? `${p.sku} • ` : ""}Stock: {p.stock} • Costo: RD$ {p.costPrice} • Venta: RD$ {p.salePrice}
+                            </option>
+                          ))}
+                        </datalist>
                       </div>
-                      {/* Cantidad */}
+
+                      {/* Cantidad: editable y seguro */}
                       <div>
-                        <Input type="number" min="1" className="h-8 rounded-lg border-neutral-200 text-xs text-center"
-                          value={item.quantity === 0 ? "" : item.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          className="h-8 rounded-lg border-neutral-200 text-xs text-center bg-white"
+                          placeholder="1"
+                          value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, "");
+                            const num = parseInt(val, 10);
+                            updateItem(i, {
+                              rawQuantity: val,
+                              quantity: isNaN(num) || num < 0 ? 0 : num,
+                            });
+                          }}
+                          onBlur={() => {
+                            if (!item.quantity || item.quantity < 1) {
+                              updateItem(i, { quantity: 1, rawQuantity: "1" });
+                            }
+                          }}
+                        />
                       </div>
-                      {/* Costo Unit. */}
+
+                      {/* Costo Unit.: editable con decimales fluidos */}
                       <div>
-                        <Input type="number" className="h-8 rounded-lg border-neutral-200 text-xs"
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
                           placeholder="RD$"
-                          value={item.unitPrice === 0 ? "" : item.unitPrice} onChange={(e) => updateItem(i, { unitPrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                          value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9.]/g, "");
+                            const parts = val.split(".");
+                            const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                            const num = parseFloat(cleanVal);
+                            updateItem(i, {
+                              rawUnitPrice: cleanVal,
+                              unitPrice: isNaN(num) ? 0 : num,
+                            });
+                          }}
+                        />
                         {item.unitPrice > 0 && (
                           <p className="text-[9px] text-neutral-500 font-bold text-center mt-0.5">
                             c/ITBIS: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
                           </p>
                         )}
                       </div>
+
                       {/* Venta Unit. — solo owner */}
                       {isOwner && (
                         <div>
-                          <Input type="number" className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
                             placeholder="RD$"
-                            value={item.salePrice === 0 ? "" : item.salePrice} onChange={(e) => updateItem(i, { salePrice: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                            value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9.]/g, "");
+                              const parts = val.split(".");
+                              const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                              const num = parseFloat(cleanVal);
+                              updateItem(i, {
+                                rawSalePrice: cleanVal,
+                                salePrice: isNaN(num) ? 0 : num,
+                              });
+                            }}
+                          />
                           {item.salePrice > 0 && (
                             <p className="text-[9px] text-emerald-600 font-bold text-center mt-0.5">
                               c/ITBIS: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
@@ -260,6 +393,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                           )}
                         </div>
                       )}
+
                       {/* Margen — solo owner */}
                       {isOwner && (
                         <div className="flex justify-center">
@@ -272,12 +406,14 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
                           )}
                         </div>
                       )}
+
                       {/* Subtotal */}
                       <div className="text-right">
                         <p className="text-xs font-bold text-neutral-800">
-                          RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
+                          RD$ {((item.quantity || 0) * (item.unitPrice || 0)).toLocaleString("es-DO")}
                         </p>
                       </div>
+
                       {/* Delete */}
                       <div className="flex justify-end">
                         <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"

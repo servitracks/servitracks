@@ -193,7 +193,7 @@ export async function loadServicesFromSupabase(tenantId: string): Promise<Servic
 }
 
 export async function loadProductsFromSupabase(tenantId: string): Promise<Product[]> {
-  return fetchAllRowsPaginated(
+  const rows = await fetchAllRowsPaginated(
     (from, to) =>
       supabaseAdmin
         .from("products")
@@ -203,6 +203,48 @@ export async function loadProductsFromSupabase(tenantId: string): Promise<Produc
         .range(from, to),
     dbToProduct
   );
+  
+  // Consolidación automática y transparente: cero duplicados, existencias sumadas
+  const bySku = new Map<string, Product>();
+  const byBarcode = new Map<string, Product>();
+  const byName = new Map<string, Product>();
+  const byId = new Map<string, Product>();
+  const consolidated: Product[] = [];
+
+  for (const p of rows) {
+    const s = (p.sku || "").trim().toLowerCase();
+    const b = (p.barcode || "").trim().toLowerCase();
+    const n = (p.name || "").trim().toLowerCase();
+
+    const existing =
+      (s && s !== "n/a" && s !== "-" && s !== "null" ? bySku.get(s) : null) ||
+      (b && b !== "n/a" && b !== "-" && b !== "null" ? byBarcode.get(b) : null) ||
+      (n && n.length >= 3 ? byName.get(n) : null) ||
+      byId.get(p.id);
+
+    if (existing) {
+      // Consolidar existencias y metadatos en el registro maestro
+      existing.stock = (Number(existing.stock) || 0) + (Number(p.stock) || 0);
+      if ((!existing.barcode || existing.barcode === "null") && p.barcode && p.barcode !== "null") {
+        existing.barcode = p.barcode;
+        byBarcode.set(p.barcode.trim().toLowerCase(), existing);
+      }
+      if (!existing.brand && p.brand) existing.brand = p.brand;
+      if (!existing.supplier && p.supplier) existing.supplier = p.supplier;
+      if (!existing.location && p.location) existing.location = p.location;
+      if (Number(existing.costPrice) <= 0 && Number(p.costPrice) > 0) existing.costPrice = Number(p.costPrice);
+      if (Number(existing.salePrice) <= 0 && Number(p.salePrice) > 0) existing.salePrice = Number(p.salePrice);
+    } else {
+      const copy = { ...p };
+      consolidated.push(copy);
+      byId.set(copy.id, copy);
+      if (s && s !== "n/a" && s !== "-" && s !== "null") bySku.set(s, copy);
+      if (b && b !== "n/a" && b !== "-" && b !== "null") byBarcode.set(b, copy);
+      if (n && n.length >= 3) byName.set(n, copy);
+    }
+  }
+
+  return consolidated;
 }
 
 export async function loadOrdersFromSupabase(tenantId: string): Promise<WorkOrder[]> {
@@ -547,7 +589,25 @@ function dbToMovimientoCaja(row: any): MovimientoCaja {
 }
 function movimientoCajaToDb(m: MovimientoCaja) {
   const safeTipo = (m.tipo === 'PAGO_NOMINA' || (m.tipo as string) === 'GASTO') ? 'EGRESO' : m.tipo;
-  return { id: m.id, tenant_id: m.tenant_id, caja_id: m.caja_id, empleado_id: m.empleado_id, tecnico_id: m.tecnico_id, tipo: safeTipo, concepto: m.concepto, monto: m.monto, monto_mano_obra: m.monto_mano_obra, metodo: m.metodo, creado_en: m.creado_en };
+  let safeMetodo: 'EFECTIVO' | 'TARJETA' | 'TRANSFERENCIA' = 'EFECTIVO';
+  const rawMetodo = String(m.metodo || '').toUpperCase();
+  if (rawMetodo === 'TARJETA' || rawMetodo === 'CARD') safeMetodo = 'TARJETA';
+  else if (rawMetodo === 'TRANSFERENCIA' || rawMetodo === 'TRANSFER') safeMetodo = 'TRANSFERENCIA';
+  else safeMetodo = 'EFECTIVO';
+
+  return {
+    id: m.id,
+    tenant_id: m.tenant_id,
+    caja_id: m.caja_id,
+    empleado_id: m.empleado_id?.trim() ? m.empleado_id : 'cajero',
+    tecnico_id: (m.tecnico_id?.trim() && m.tecnico_id !== 'none') ? m.tecnico_id : null,
+    tipo: safeTipo,
+    concepto: m.concepto,
+    monto: Number(m.monto || 0),
+    monto_mano_obra: m.monto_mano_obra ? Number(m.monto_mano_obra) : null,
+    metodo: safeMetodo,
+    creado_en: m.creado_en || new Date().toISOString(),
+  };
 }
 
 function dbToTechnician(row: any): Technician {
@@ -558,10 +618,41 @@ function technicianToDb(t: Technician) {
 }
 
 function dbToInventoryMovement(row: any): InventoryMovement {
-  return { id: row.id, tenantId: row.tenant_id, productId: row.product_id, productName: row.product_name, variantId: row.variant_id, type: row.type, quantity: row.quantity, reason: row.reason, date: row.date, userId: row.user_id };
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    productId: row.product_id,
+    productName: row.product_name,
+    variantId: row.variant_id || undefined,
+    type: row.type,
+    quantity: Number(row.quantity) || 0,
+    reason: row.reason,
+    date: row.date,
+    userId: row.user_id || undefined,
+    technicianId: row.technician_id || undefined,
+    customerId: row.customer_id || undefined,
+    invoiceId: row.invoice_id || undefined,
+  };
 }
 function inventoryMovementToDb(m: InventoryMovement) {
-  return { id: m.id, tenant_id: m.tenantId, product_id: m.productId, product_name: m.productName, variant_id: m.variantId, type: m.type, quantity: m.quantity, reason: m.reason, date: m.date, user_id: m.userId };
+  const isValidUuid = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  return {
+    id: m.id,
+    tenant_id: m.tenantId,
+    product_id: m.productId,
+    product_name: m.productName,
+    variant_id: m.variantId || null,
+    type: m.type,
+    quantity: Number(m.quantity) || 0,
+    reason: m.reason || "",
+    date: m.date || new Date().toISOString(),
+    user_id: m.userId || null,
+    technician_id: m.technicianId || null,
+    customer_id: isValidUuid(m.customerId) ? m.customerId : null,
+    invoice_id: m.invoiceId || null,
+  };
 }
 
 function dbToInspection(row: any): Inspection {
@@ -710,7 +801,7 @@ function dbToProduct(row: any): Product {
     laborPrice: row.labor_price || undefined,
     stock: row.stock,
     minStock: row.min_stock,
-    tax: row.tax,
+    tax: (typeof row.tax === 'number' && row.tax > 0 && row.tax <= 30) ? row.tax : 18,
     image: row.image || undefined,
     supplier: row.supplier || undefined,
     location: row.location || undefined,
@@ -783,11 +874,14 @@ function dbToWorkOrder(row: any): WorkOrder {
 }
 
 function workOrderToDb(o: WorkOrder) {
+  const isValidUuid = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
   return {
     id: o.id,
     tenant_id: o.tenantId,
-    customer_id: o.customerId,
-    vehicle_id: o.vehicleId || "general",
+    customer_id: isValidUuid(o.customerId) ? o.customerId : null,
+    vehicle_id: isValidUuid(o.vehicleId) ? o.vehicleId : null,
     mechanic_id: o.mechanicId || null,
     km: o.km || null,
     km_unit: o.kmUnit || null,
@@ -835,6 +929,9 @@ function dbToQuote(row: any): Quote {
 }
 
 function quoteToDb(q: Quote) {
+  const isValidUuid = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
   let combinedNotes = q.notes || "";
   if (q.observation) {
     combinedNotes = combinedNotes ? `${combinedNotes}\n[OBS]: ${q.observation}` : `[OBS]: ${q.observation}`;
@@ -843,8 +940,8 @@ function quoteToDb(q: Quote) {
   return {
     id: q.id,
     tenant_id: q.tenantId,
-    customer_id: q.customerId || "",
-    vehicle_id: q.vehicleId || "",
+    customer_id: isValidUuid(q.customerId) ? q.customerId : null,
+    vehicle_id: isValidUuid(q.vehicleId) ? q.vehicleId : null,
     quote_number: q.quoteNumber,
     status: q.status,
     valid_until: q.validUntil || null,
@@ -889,37 +986,51 @@ function dbToInvoice(row: any): Invoice {
 }
 
 function invoiceToDb(i: Invoice) {
+  const isValidUuid = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  let safePaymentMethod: 'cash' | 'card' | 'transfer' | 'credit' = 'cash';
+  const pm = String(i.paymentMethod || '').toLowerCase();
+  if (pm.includes('card') || pm.includes('tarjeta') || pm.includes('mixt')) safePaymentMethod = 'card';
+  else if (pm.includes('transfer') || pm.includes('transf')) safePaymentMethod = 'transfer';
+  else if (pm.includes('credit') || pm.includes('cred')) safePaymentMethod = 'credit';
+  else safePaymentMethod = 'cash';
+
+  const safeCustomerId = isValidUuid(i.customerId) ? i.customerId : null;
+  const safeCustomerName = i.customerName || (i.customerId === 'walk-in' || !i.customerId ? 'Consumidor Final' : null);
+
   return {
     id: i.id,
     tenant_id: i.tenantId,
-    customer_id: i.customerId || null,
-    customer_name: i.customerName || null,
+    customer_id: safeCustomerId,
+    customer_name: safeCustomerName,
     customer_rnc: i.customerRnc || null,
-    vehicle_id: i.vehicleId || null,
-    order_id: i.orderId || null,
-    mechanic_id: i.mechanicId || null,
+    vehicle_id: (i.vehicleId && i.vehicleId !== 'none') ? i.vehicleId : null,
+    order_id: (i.orderId && i.orderId !== 'none') ? i.orderId : null,
+    mechanic_id: (i.mechanicId && i.mechanicId !== 'none') ? i.mechanicId : null,
     km: i.km || null,
     km_unit: i.kmUnit || null,
     items: i.items || [],
-    subtotal: i.subtotal,
-    tax: i.tax,
-    discount: i.discount || null,
-    total: i.total,
-    payment_method: i.paymentMethod,
-    status: i.status,
+    subtotal: Number(i.subtotal || 0),
+    tax: Number(i.tax || 0),
+    discount: i.discount ? Number(i.discount) : null,
+    total: Number(i.total || 0),
+    payment_method: safePaymentMethod,
+    status: i.status || 'paid',
     ncf: i.ncf || null,
     qr_url: i.qrUrl || null,
     security_code: i.securityCode || null,
     signature_date: i.signatureDate || null,
-    notes: i.notes || null,
+    notes: typeof i.notes === 'string' ? i.notes : (i.notes ? JSON.stringify(i.notes) : null),
     is_commission_paid: i.isCommissionPaid || null,
-    created_at: i.createdAt,
+    created_at: i.createdAt || new Date().toISOString(),
   };
 }
 
 // ─── Upsert to Supabase ───────────────────────────────────────────────────────
 
 export async function deleteRecordFromSupabase(table: string, id: string): Promise<void> {
+  // Si la tabla es open_tabs, el ID en Supabase se almacena textualmente en la columna id
   const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
   if (error) console.error(`[sync] delete ${table} error:`, error);
 }
@@ -1235,6 +1346,133 @@ export async function syncStoreToSupabase(
 
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);
+}
+
+/**
+ * Recarga de forma quirúrgica e instantánea una sola tabla desde Supabase e impacta directamente el store local.
+ * Esto evita re-descargar todo el sistema cuando solo cambió un pedido, factura, producto o caja.
+ */
+export async function syncTableFromSupabase(table: string, tenantId: string): Promise<void> {
+  const store = (await import("@/store/useStore")).useStore;
+  switch (table) {
+    case "products": {
+      const products = await loadProductsFromSupabase(tenantId);
+      store.setState({ products });
+      break;
+    }
+    case "orders": {
+      const orders = await loadOrdersFromSupabase(tenantId);
+      store.setState({ orders });
+      break;
+    }
+    case "invoices": {
+      const invoices = await loadInvoicesFromSupabase(tenantId);
+      store.setState({ invoices });
+      break;
+    }
+    case "cajas": {
+      const cajas = await loadCajasFromSupabase(tenantId);
+      store.setState({ cajas });
+      break;
+    }
+    case "movimientos_caja": {
+      const cajaMovements = await loadMovimientosCajaFromSupabase(tenantId);
+      store.setState({ cajaMovements });
+      break;
+    }
+    case "customers": {
+      const customers = await loadCustomersFromSupabase(tenantId);
+      store.setState({ customers });
+      break;
+    }
+    case "vehicles": {
+      const vehicles = await loadVehiclesFromSupabase(tenantId);
+      store.setState({ vehicles });
+      break;
+    }
+    case "quotes": {
+      const quotes = await loadQuotesFromSupabase(tenantId);
+      store.setState({ quotes });
+      break;
+    }
+    case "movements": {
+      const movements = await loadInventoryMovementsFromSupabase(tenantId);
+      store.setState({ movements });
+      break;
+    }
+    case "technicians": {
+      const technicians = await loadTechniciansFromSupabase(tenantId);
+      store.setState({ technicians });
+      break;
+    }
+    case "services": {
+      const services = await loadServicesFromSupabase(tenantId);
+      store.setState({ services });
+      break;
+    }
+    case "suppliers": {
+      const suppliers = await loadSuppliersFromSupabase(tenantId);
+      store.setState({ suppliers });
+      break;
+    }
+    case "purchase_orders": {
+      const purchaseOrders = await loadPurchaseOrdersFromSupabase(tenantId);
+      store.setState({ purchaseOrders });
+      break;
+    }
+    case "goods_receipts": {
+      const goodsReceipts = await loadGoodsReceiptsFromSupabase(tenantId);
+      store.setState({ goodsReceipts });
+      break;
+    }
+    case "accounts_payable": {
+      const accountsPayable = await loadAccountsPayableFromSupabase(tenantId);
+      store.setState({ accountsPayable });
+      break;
+    }
+    case "open_tabs": {
+      const openTabs = await loadOpenTabsFromSupabase(tenantId);
+      store.setState({ openTabs });
+      break;
+    }
+    case "inventory_sessions": {
+      const inventorySessions = await loadInventorySessionsFromSupabase(tenantId);
+      store.setState({ inventorySessions });
+      break;
+    }
+    case "inspections": {
+      const inspections = await loadInspectionsFromSupabase(tenantId);
+      store.setState({ inspections });
+      break;
+    }
+    case "maintenance_items": {
+      const maintenanceItems = await loadMaintenanceItemsFromSupabase(tenantId);
+      store.setState({ maintenanceItems });
+      break;
+    }
+    case "maintenance_alerts": {
+      const maintenanceAlerts = await loadMaintenanceAlertsFromSupabase(tenantId);
+      store.setState({ maintenanceAlerts });
+      break;
+    }
+    case "maintenance_history": {
+      const maintenanceHistory = await loadMaintenanceHistoryFromSupabase(tenantId);
+      store.setState({ maintenanceHistory });
+      break;
+    }
+    case "activity_logs": {
+      const activityLogs = await loadActivityLogsFromSupabase(tenantId);
+      store.setState({ activityLogs });
+      break;
+    }
+    case "tenant_users": {
+      const users = await loadUsersFromSupabase(tenantId);
+      store.setState({ users });
+      break;
+    }
+    default:
+      console.warn(`[sync] Tabla '${table}' no mapeada en syncTableFromSupabase`);
+  }
 }
 
 /**

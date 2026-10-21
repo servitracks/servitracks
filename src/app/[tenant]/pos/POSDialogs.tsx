@@ -211,20 +211,20 @@ export function CheckoutDialog({
     if (!isFiscalValid) return false;
 
     if (condicionCobro === "COBRAR_AHORA") {
-      if (instrumentoPago === "EFECTIVO") return efectivoNum >= total;
-      if (instrumentoPago === "TRANSFERENCIA") return referencia.trim().length > 0;
+      if (instrumentoPago === "EFECTIVO") return efectivoNum >= (total - 0.05);
+      if (instrumentoPago === "TRANSFERENCIA") return true;
       if (instrumentoPago === "MIXTO") {
-        return cuadreMixtoExacto && (pagoTransferencia === 0 || pagoTransferenciaRef.trim().length > 0);
+        return Math.abs(total - asignadoMixto) < 0.1;
       }
       return true;
     }
 
     if (condicionCobro === "ANTICIPO") {
       if (anticipoMonto <= 0 || anticipoMonto >= total) return false;
-      if (instrumentoPago === "EFECTIVO") return efectivoNum >= anticipoMonto;
-      if (instrumentoPago === "TRANSFERENCIA") return referencia.trim().length > 0;
+      if (instrumentoPago === "EFECTIVO") return efectivoNum >= (anticipoMonto - 0.05);
+      if (instrumentoPago === "TRANSFERENCIA") return true;
       if (instrumentoPago === "MIXTO") {
-        return cuadreMixtoExacto && (pagoTransferencia === 0 || pagoTransferenciaRef.trim().length > 0);
+        return Math.abs(anticipoMonto - asignadoMixto) < 0.1;
       }
       return true;
     }
@@ -242,10 +242,7 @@ export function CheckoutDialog({
     instrumentoPago,
     total,
     efectivoNum,
-    referencia,
-    cuadreMixtoExacto,
-    pagoTransferencia,
-    pagoTransferenciaRef,
+    asignadoMixto,
     anticipoMonto,
     isAnonymousClient,
     abonoCredito,
@@ -253,6 +250,9 @@ export function CheckoutDialog({
 
   const handleConfirm = () => {
     if (!isConfirmEnabled) return;
+    const finalRef = referencia.trim() || (instrumentoPago === "TRANSFERENCIA" ? `TRF-${Date.now().toString().slice(-6)}` : undefined);
+    const finalTransfRef = pagoTransferenciaRef.trim() || (pagoTransferencia > 0 ? `TRF-${Date.now().toString().slice(-6)}` : undefined);
+
     onConfirm({
       type: invoiceType,
       rnc: rnc.trim(),
@@ -265,14 +265,14 @@ export function CheckoutDialog({
       cashReceived: efectivoNum,
       change: cambio,
       creditDays: condicionCobro === "CREDITO" ? limiteDiasSel : undefined,
-      referencia: referencia.trim() || undefined,
+      referencia: finalRef,
       desgloseMixto:
         instrumentoPago === "MIXTO"
           ? {
               efectivo: pagoEfectivo,
               tarjeta: pagoTarjeta,
               transferencia: pagoTransferencia,
-              transferenciaRef: pagoTransferenciaRef.trim() || undefined,
+              transferenciaRef: finalTransfRef,
             }
           : undefined,
     });
@@ -617,20 +617,17 @@ export function CheckoutDialog({
                 <div className="space-y-0.5 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
                     <Label className="text-[9px] font-black uppercase tracking-wider text-[#1B4B73] dark:text-sky-200 block">
-                      NO. DE TRANSFERENCIA *
+                      NO. DE TRANSFERENCIA (OPCIONAL)
                     </Label>
                     {!referencia.trim() && (
-                      <span className="text-[9px] text-rose-500 font-black">* Requerida</span>
+                      <span className="text-[9px] text-slate-400 font-medium">Auto-genera si queda vacío</span>
                     )}
                   </div>
                   <Input
-                    placeholder="Número de confirmación bancaria..."
+                    placeholder="Número de confirmación bancaria (opcional)..."
                     value={referencia}
                     onChange={(e) => setReferencia(e.target.value)}
-                    className={cn(
-                      "h-8 bg-white dark:bg-slate-900 border rounded-lg font-medium text-xs px-2.5 shadow-2xs",
-                      !referencia.trim() ? "border-rose-400 focus-visible:ring-rose-400" : "border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/40"
-                    )}
+                    className="h-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/40 rounded-lg font-medium text-xs px-2.5 shadow-2xs"
                   />
                 </div>
               )}
@@ -693,13 +690,10 @@ export function CheckoutDialog({
 
                   {pagoTransferencia > 0 && (
                     <Input
-                      placeholder="Referencia de transferencia * (Obligatoria)"
+                      placeholder="Referencia de transferencia (opcional)..."
                       value={pagoTransferenciaRef}
                       onChange={(e) => setPagoTransferenciaRef(e.target.value)}
-                      className={cn(
-                        "h-7 text-xs rounded border px-2",
-                        !pagoTransferenciaRef.trim() ? "border-rose-400" : "border-slate-200"
-                      )}
+                      className="h-7 text-xs rounded border border-slate-200 px-2"
                     />
                   )}
 
@@ -710,9 +704,21 @@ export function CheckoutDialog({
                     </div>
                     <div>
                       {!cuadreMixtoExacto ? (
-                        <span className="text-rose-500 font-black">
-                          Falta: {formatRD(Math.max(0, targetMonto - asignadoMixto))}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-rose-500 font-black">
+                            {targetMonto > asignadoMixto ? `Falta: ${formatRD(targetMonto - asignadoMixto)}` : `Sobra: ${formatRD(asignadoMixto - targetMonto)}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const remaining = Math.max(0, targetMonto - (pagoEfectivo || 0) - (pagoTransferencia || 0));
+                              setPagoTarjetaStr(formatAmountInput(String(remaining)));
+                            }}
+                            className="text-[9px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-bold px-1.5 py-0.5 rounded border border-indigo-200 transition-colors cursor-pointer"
+                          >
+                            Ajustar Tarjeta
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-emerald-600 font-black flex items-center gap-0.5">
                           <Check className="h-3 w-3" /> Cuadre exacto
@@ -916,7 +922,7 @@ export function CheckoutDialog({
               <div className="h-3.5 w-3.5 rounded-full border-2 border-white flex items-center justify-center shrink-0">
                 <Check className="h-2 w-2 stroke-[3]" />
               </div>
-              <span>CONFIRMAR Y CREAR ORDEN</span>
+              <span>CONFIRMAR COBRO</span>
               <span className="ml-0.5 rounded bg-white/20 px-1 py-0.5 text-[8px] font-black uppercase tracking-wider text-white">
                 ESPACIO
               </span>
@@ -932,7 +938,7 @@ export function CheckoutDialog({
 interface PrintReceiptProps {
   open: boolean;
   onClose: () => void;
-  cart: { id: string; name: string; salePrice: number; quantity: number }[];
+  cart: { id: string; name: string; salePrice: number; quantity: number; sku?: string; tax?: number; is_exento?: boolean }[];
   subtotal: number;
   itbis: number;
   total: number;
@@ -992,7 +998,14 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
                     ? customers.find(c => c.id === lastInvoice.customerId) 
                     : undefined
               }
-              items={lastInvoice?.items || cart.map(c => ({ name: c.name, quantity: c.quantity, salePrice: c.salePrice }))}
+              items={lastInvoice?.items || cart.map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                quantity: c.quantity,
+                salePrice: c.salePrice,
+                tax: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0) ? 0 : c.tax,
+                is_exento: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0),
+              }))}
               subtotal={lastInvoice?.subtotal || subtotal}
               itbis={itbis}
               total={total}
@@ -1009,9 +1022,16 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
                 itbis: lastInvoice.tax,
                 descuento: lastInvoice.discount || 0,
                 total: lastInvoice.total,
-                saldo: lastInvoice.pendingAmount ?? 0,
-                pagado: lastInvoice.paidAmount ?? lastInvoice.total,
-                metodo_pago: lastInvoice.paymentMethod,
+                saldo: lastInvoice.status === "pending" ? (lastInvoice.total - (lastInvoice.paidAmount || 0)) : (lastInvoice.pendingAmount ?? 0),
+                pagado: lastInvoice.status === "pending" ? (lastInvoice.paidAmount || 0) : (lastInvoice.paidAmount ?? lastInvoice.total),
+                metodo_pago: (lastInvoice.notes ? (() => {
+                  try {
+                    const parsed = JSON.parse(lastInvoice.notes);
+                    return parsed.instrumentoPago || lastInvoice.paymentMethod;
+                  } catch {
+                    return lastInvoice.paymentMethod;
+                  }
+                })() : lastInvoice.paymentMethod) || payMethod,
                 items: lastInvoice.items || [],
                 ncf: lastInvoice.ncf,
                 ecf_qr: lastInvoice.qrUrl,
@@ -1040,32 +1060,46 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
 interface LaborModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (amount: number) => void;
+  onConfirm: (amount: number, concept?: string) => void;
 }
 
 export function LaborModal({ open, onOpenChange, onConfirm }: LaborModalProps) {
   const [laborAmount, setLaborAmount] = useState("");
-  
-  // Need to import useState
+  const [concept, setConcept] = useState("");
+
+  const parsedAmount = parseFloat(laborAmount) || 0;
+
   const handleConfirm = () => {
-    const amount = parseFloat(laborAmount);
-    if (isNaN(amount) || amount <= 0) return;
-    onConfirm(amount);
+    if (parsedAmount <= 0) return;
+    onConfirm(parsedAmount, concept.trim() || undefined);
     setLaborAmount("");
+    setConcept("");
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xs rounded-2xl">
+      <DialogContent className="sm:max-w-sm rounded-2xl p-6">
         <DialogHeader>
-          <DialogTitle className="text-xl font-black flex items-center gap-2">
-            <Wrench className="h-5 w-5" />
+          <DialogTitle className="text-xl font-black flex items-center gap-2 text-neutral-900">
+            <Wrench className="h-5 w-5 text-neutral-800" />
             Mano de Obra
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-neutral-700">Monto del servicio</label>
+          {/* Concepto opcional */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Concepto del Servicio (Opcional)</label>
+            <Input
+              placeholder="Ej: Mano de obra, Instalación, Chequeo..."
+              value={concept}
+              onChange={(e) => setConcept(e.target.value)}
+              className="h-10 rounded-xl text-sm"
+            />
+          </div>
+
+          {/* Monto del servicio */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Monto de Mano de Obra (Sin ITBIS)</label>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-neutral-400">RD$</span>
               <Input
@@ -1075,21 +1109,58 @@ export function LaborModal({ open, onOpenChange, onConfirm }: LaborModalProps) {
                 value={laborAmount}
                 onChange={(e) => setLaborAmount(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleConfirm()}
-                className="pl-14 h-12 rounded-xl text-lg font-bold"
+                className="pl-14 h-12 rounded-xl text-xl font-black tracking-tight"
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          {/* Botones rápidos */}
+          <div className="flex gap-1.5 flex-wrap">
+            {[300, 500, 800, 1000, 1500, 2000].map((quick) => (
+              <button
+                key={quick}
+                type="button"
+                onClick={() => setLaborAmount(quick.toString())}
+                className={cn(
+                  "px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors",
+                  parsedAmount === quick
+                    ? "bg-black text-white border-black"
+                    : "bg-neutral-50 hover:bg-neutral-100 text-neutral-700 border-neutral-200"
+                )}
+              >
+                RD$ {quick}
+              </button>
+            ))}
+          </div>
+
+          {/* Monto sólido sin ITBIS */}
+          {parsedAmount > 0 && (
+            <div className="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200/80 space-y-1.5 animate-in fade-in">
+              <div className="flex justify-between items-center text-xs text-neutral-500 font-medium">
+                <span>Régimen Fiscal:</span>
+                <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">Exento de ITBIS (0%)</span>
+              </div>
+              <div className="pt-2 border-t border-neutral-200 flex justify-between items-center text-sm font-black text-neutral-900">
+                <span>Total a Facturar:</span>
+                <span className="text-neutral-950 font-mono text-base font-black">RD$ {parsedAmount.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 pt-2">
             <Button
               variant="outline"
-              onClick={() => { onOpenChange(false); setLaborAmount(""); }}
-              className="h-12 rounded-xl font-bold"
+              type="button"
+              onClick={() => { onOpenChange(false); setLaborAmount(""); setConcept(""); }}
+              className="h-12 rounded-xl font-bold border-neutral-300 hover:bg-neutral-100"
             >
               Cancelar
             </Button>
             <Button
+              type="button"
               onClick={handleConfirm}
-              className="h-12 rounded-xl bg-black text-white font-bold hover:bg-neutral-800"
+              disabled={parsedAmount <= 0}
+              className="h-12 rounded-xl bg-black text-white font-bold hover:bg-neutral-800 disabled:opacity-50"
             >
               Autorizar
             </Button>

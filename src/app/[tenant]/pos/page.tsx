@@ -130,7 +130,7 @@ export const getCategoryDetails = (catName?: string, isService?: boolean) => {
   };
 };
 
-interface CartItem extends Product { quantity: number }
+interface CartItem extends Product { quantity: number; _fromTabId?: string; alreadyDeducted?: boolean; }
 
 type PayMethod = "cash" | "card" | "transfer";
 
@@ -164,6 +164,7 @@ export default function POSPage() {
   }, [openTabs, tenantId, currentTenant?.slug]);
 
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [allowExtraInventory, setAllowExtraInventory] = useState(false);
   const mountTimeRef = useRef<number>(Date.now());
 
@@ -195,7 +196,7 @@ export default function POSPage() {
     salePrice: s.price,
     stock: 9999,
     minStock: 0,
-    tax: s.tax || 0,
+    tax: (typeof s.tax === 'number' && s.tax >= 0 && s.tax <= 30) ? s.tax : 0,
   });
 
   const [search, setSearch]           = useState("");
@@ -291,7 +292,19 @@ export default function POSPage() {
     ? (rawTotal * (discount || 0)) / 100 
     : Math.min(rawTotal, Math.max(0, discount || 0));
   const total          = Math.max(0, rawTotal - discountAmount);
-  const rawSubtotal    = cart.reduce((acc, i) => acc + (i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity, 0);
+  // ITBIS: En Rep. Dominicana la tasa es porcentual (0% o 18%).
+  // La mano de obra y los servicios exentos van a 0% ITBIS (monto sólido).
+  const getItemTaxRate = (item: CartItem) => {
+    if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name.toLowerCase() === "mano de obra" || item.tax === 0) {
+      return 0;
+    }
+    const t = item.tax;
+    if (typeof t === 'number' && t > 0 && t <= 30) {
+      return t;
+    }
+    return 18;
+  };
+  const rawSubtotal    = cart.reduce((acc, i) => acc + (i.salePrice / (1 + getItemTaxRate(i) / 100)) * i.quantity, 0);
   const subtotal       = rawTotal > 0 ? (rawSubtotal * (total / rawTotal)) : 0;
   const itbis          = Math.max(0, total - subtotal);
   const cashNum        = parseFloat(cashReceived.replace(/,/g, "")) || 0;
@@ -363,7 +376,7 @@ export default function POSPage() {
         }
         return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
       }
-      return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice }];
+      return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice, tax: (typeof product.tax === 'number' && product.tax > 0 && product.tax <= 30) ? product.tax : 18 }];
     });
   };
 
@@ -405,24 +418,28 @@ export default function POSPage() {
     }
   };
 
-  const handleAddLabor = (amount: number) => {
+  const handleAddLabor = (amount: number, customConcept?: string) => {
+    const solidAmount = Math.round(amount * 100) / 100;
+    const laborName = customConcept?.trim() || "Mano de obra";
+
     const laborItem: CartItem = {
-      id: `labor-${Date.now()}`,
+      id: `labor-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       tenantId: tenantId,
-      name: "Mano de obra",
+      name: laborName,
       sku: "MANO-OBRA",
       category: "Servicios",
       costPrice: 0,
-      salePrice: amount,
-      laborPrice: amount,
+      salePrice: solidAmount,
+      laborPrice: solidAmount,
       stock: 9999,
       minStock: 0,
-      tax: 18,
+      tax: 0, // EXENTO DE ITBIS - MONTO SÓLIDO
       quantity: 1,
-    };
+      alreadyDeducted: true,
+    } as any;
     setCart((prev) => [...prev, laborItem]);
     setIsLaborModalOpen(false);
-    toast.success("Mano de obra agregada");
+    toast.success(`${laborName} agregada: RD$ ${solidAmount.toLocaleString("es-DO", { minimumFractionDigits: 2 })} (Sin ITBIS)`);
   };
 
   const handleSelectOrder = (order: WorkOrder) => {
@@ -483,6 +500,7 @@ export default function POSPage() {
 
         const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
         const existingService = it.serviceId ? tenantServices.find((s) => s.id === it.serviceId) : null;
+        const isPartDispatched = Boolean(it.alreadyDeducted || (it.productId && order.parts?.some((pt: any) => pt.productId === it.productId)));
 
         if (existingProduct) {
           return {
@@ -491,7 +509,8 @@ export default function POSPage() {
             salePrice: grossPrice,
             tax: taxRate,
             quantity: it.quantity || 1,
-          };
+            alreadyDeducted: isPartDispatched,
+          } as any;
         }
 
         if (existingService) {
@@ -499,7 +518,7 @@ export default function POSPage() {
             ...serviceToProduct(existingService),
             name: it.name || existingService.name,
             salePrice: grossPrice,
-            tax: taxRate,
+            tax: (typeof existingService.tax === 'number' && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0,
             quantity: it.quantity || 1,
           };
         }
@@ -523,7 +542,7 @@ export default function POSPage() {
           laborPrice: isService ? grossPrice : undefined,
           stock: 9999,
           minStock: 0,
-          tax: taxRate,
+          tax: isService ? 0 : taxRate,
           quantity: it.quantity || 1,
         };
       });
@@ -570,7 +589,7 @@ export default function POSPage() {
                 const calculatedLaborPrice = isService
                   ? product.laborPrice
                   : (product.laborPrice ? (product.salePrice * product.laborPrice) / 100 : undefined);
-                newCart.push({ ...product, salePrice: finalPrice, quantity: part.quantity || 1, laborPrice: calculatedLaborPrice });
+                newCart.push({ ...product, salePrice: finalPrice, quantity: part.quantity || 1, laborPrice: calculatedLaborPrice, alreadyDeducted: true });
               }
             } else {
               // Fallback para repuestos no encontrados en el catálogo
@@ -608,7 +627,7 @@ export default function POSPage() {
               laborPrice: csPrice,
               stock: 9999,
               minStock: 0,
-              tax: typeof cs.tax === 'number' ? cs.tax : 0,
+              tax: (typeof cs.tax === 'number' && cs.tax > 0) ? cs.tax : 18,
               quantity: 1,
             });
           });
@@ -707,7 +726,8 @@ export default function POSPage() {
             salePrice: grossPrice,
             tax: taxRate,
             quantity: it.quantity || 1,
-          };
+            alreadyDeducted: false,
+          } as any;
         }
 
         if (existingService) {
@@ -715,7 +735,7 @@ export default function POSPage() {
             ...serviceToProduct(existingService),
             name: it.name || existingService.name,
             salePrice: grossPrice,
-            tax: taxRate,
+            tax: (typeof existingService.tax === 'number' && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0,
             quantity: it.quantity || 1,
           };
         }
@@ -739,7 +759,7 @@ export default function POSPage() {
           laborPrice: isService ? grossPrice : undefined,
           stock: 9999,
           minStock: 0,
-          tax: taxRate,
+          tax: isService ? 0 : taxRate,
           quantity: it.quantity || 1,
         };
       });
@@ -780,8 +800,15 @@ export default function POSPage() {
   }, [orderId, quoteId, orders, quotes, tenantOrders]);
 
   const handleCheckout = async (checkoutData: CheckoutConfirmData) => {
-    if (!posMechanicId || posMechanicId === "none") {
-      toast.error("Debe asignar un técnico o mecánico a la factura"); return;
+    const hasServices = cart.some(i => isServiceItem(i, tenantServices));
+    let finalMechanicId = (posMechanicId && posMechanicId !== "none") ? posMechanicId : undefined;
+    
+    // Si hay servicios y no se seleccionó mecánico, asignar el primer técnico activo para no bloquear el cobro
+    if (hasServices && !finalMechanicId) {
+      const activeTech = tenantTechnicians.find(t => t.status === "active") || tenantTechnicians[0];
+      if (activeTech) {
+        finalMechanicId = activeTech.id;
+      }
     }
 
     const {
@@ -838,7 +865,7 @@ export default function POSPage() {
               name: i.name,
               quantity: i.quantity,
               salePrice: i.salePrice,
-              tax: typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : (i.tax > 0 ? i.tax / 100 : 0.18),
+              tax: (i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.name.toLowerCase() === "mano de obra" || i.tax === 0) ? 0 : (typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30 ? i.tax / 100 : 0.18)),
               category: i.category,
             })),
             subtotal,
@@ -885,8 +912,21 @@ export default function POSPage() {
       }
     }
 
-    const finalCustomerId = currentOrder?.customerId || posCustomerId || "walk-in";
-    const selectedTech = posMechanicId ? technicians.find(t => t.id === posMechanicId) : null;
+    const rawCustomerId = currentOrder?.customerId || posCustomerId;
+    const isValidUuid = (val?: string | null) =>
+      Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+    const finalCustomerId = (rawCustomerId && rawCustomerId !== "walk-in" && rawCustomerId !== "none" && isValidUuid(rawCustomerId))
+      ? rawCustomerId
+      : undefined;
+
+    const finalCustomerName = customerName || 
+      (finalCustomerId ? customers.find(c => c.id === finalCustomerId)?.name : undefined) ||
+      currentOrder?.customerBusinessName ||
+      (posCustomerSearch ? posCustomerSearch.trim() : undefined) ||
+      "Consumidor Final";
+
+    const selectedTech = finalMechanicId ? technicians.find(t => t.id === finalMechanicId) : null;
 
     const finalPayMethod: 'cash' | 'card' | 'transfer' | 'credit' = 
       condicionCobro === 'CREDITO' ? 'credit' :
@@ -901,11 +941,11 @@ export default function POSPage() {
       id: `inv-${Date.now()}`,
       tenantId: tenantId,
       customerId: finalCustomerId,
-      customerName: customerName || (finalCustomerId !== "walk-in" ? customers.find(c => c.id === finalCustomerId)?.name : undefined),
+      customerName: finalCustomerName,
       customerRnc: customerRnc || undefined,
       vehicleId: currentOrder?.vehicleId || undefined,
       orderId: activeOrderId || undefined,
-      mechanicId: posMechanicId || undefined,
+      mechanicId: finalMechanicId || undefined,
       items: cart.map((i) => {
         const itemIsService = isServiceItem(i, tenantServices);
         let itemCommission = 0;
@@ -919,16 +959,20 @@ export default function POSPage() {
           itemCommission = i.laborPrice ?? i.salePrice;
         }
 
+        const itemTaxRate = (itemIsService && (i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.name.toLowerCase() === "mano de obra")) || i.tax === 0
+          ? 0
+          : (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30 ? i.tax : 18);
+
         return { 
           id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          productId: i.id, 
+          productId: itemIsService ? undefined : i.id, 
           serviceId: itemIsService ? ((i as any).serviceId || i.id) : undefined,
           name: i.name, 
           quantity: i.quantity, 
-          unitPrice: i.salePrice / (1 + (i.tax ?? 18) / 100), 
-          tax: (i.salePrice * i.quantity) - ((i.salePrice / (1 + (i.tax ?? 18) / 100)) * i.quantity),
+          unitPrice: itemTaxRate === 0 ? i.salePrice : (i.salePrice / (1 + itemTaxRate / 100)), 
+          tax: itemTaxRate === 0 ? 0 : ((i.salePrice * i.quantity) - ((i.salePrice / (1 + itemTaxRate / 100)) * i.quantity)),
           laborPrice: itemCommission,
-          alreadyDeducted: (i as any).alreadyDeducted || false,
+          alreadyDeducted: Boolean((i as any).alreadyDeducted),
         };
       }),
       subtotal, tax: itbis, total, discount: discountAmount,
@@ -947,7 +991,7 @@ export default function POSPage() {
         paidAmount,
         pendingAmount,
         creditDays,
-        referencia,
+        referencia: referencia || (instrumentoPago === 'TRANSFERENCIA' ? `TRF-${Date.now().toString().slice(-6)}` : undefined),
         desgloseMixto,
       }),
       createdAt: new Date().toISOString(),
@@ -970,29 +1014,90 @@ export default function POSPage() {
         condicionCobro === 'CREDITO' ? `Abono Crédito POS - Factura` :
         `Venta POS - Factura`;
 
-      const cajaMetodo = 
-        instrumentoPago === 'EFECTIVO' ? 'EFECTIVO' :
-        instrumentoPago === 'TARJETA' ? 'TARJETA' :
-        instrumentoPago === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'TARJETA';
+      const safeEmpleadoId = activeCaja.empleado_id?.trim() || "cajero";
 
-      addCajaMovement({
-        id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        tenant_id: tenantId,
-        caja_id: activeCaja.id,
-        empleado_id: activeCaja.empleado_id,
-        tipo: 'VENTA',
-        concepto: `${conceptoLabel} ${inv.ncf || inv.id}`,
-        monto: paidAmount,
-        monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (paidAmount / total)) : undefined,
-        metodo: cajaMetodo,
-        creado_en: new Date().toISOString(),
-      });
+      if (instrumentoPago === 'MIXTO' && desgloseMixto) {
+        const ef = Number(desgloseMixto.efectivo || 0);
+        const tj = Number(desgloseMixto.tarjeta || 0);
+        const tr = Number(desgloseMixto.transferencia || 0);
+
+        if (ef > 0) {
+          addCajaMovement({
+            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            tenant_id: tenantId,
+            caja_id: activeCaja.id,
+            empleado_id: safeEmpleadoId,
+            tecnico_id: finalMechanicId || undefined,
+            tipo: 'VENTA',
+            concepto: `${conceptoLabel} (Mixto - Efectivo) ${inv.ncf || inv.id}`,
+            monto: ef,
+            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (ef / total)) : undefined,
+            metodo: 'EFECTIVO',
+            creado_en: new Date().toISOString(),
+          });
+        }
+        if (tj > 0) {
+          addCajaMovement({
+            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            tenant_id: tenantId,
+            caja_id: activeCaja.id,
+            empleado_id: safeEmpleadoId,
+            tecnico_id: finalMechanicId || undefined,
+            tipo: 'VENTA',
+            concepto: `${conceptoLabel} (Mixto - Tarjeta) ${inv.ncf || inv.id}`,
+            monto: tj,
+            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tj / total)) : undefined,
+            metodo: 'TARJETA',
+            creado_en: new Date().toISOString(),
+          });
+        }
+        if (tr > 0) {
+          addCajaMovement({
+            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            tenant_id: tenantId,
+            caja_id: activeCaja.id,
+            empleado_id: safeEmpleadoId,
+            tecnico_id: finalMechanicId || undefined,
+            tipo: 'VENTA',
+            concepto: `${conceptoLabel} (Mixto - Transf.) ${inv.ncf || inv.id}`,
+            monto: tr,
+            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tr / total)) : undefined,
+            metodo: 'TRANSFERENCIA',
+            creado_en: new Date().toISOString(),
+          });
+        }
+      } else {
+        const cajaMetodo = 
+          instrumentoPago === 'EFECTIVO' ? 'EFECTIVO' :
+          instrumentoPago === 'TARJETA' ? 'TARJETA' :
+          instrumentoPago === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'EFECTIVO';
+
+        addCajaMovement({
+          id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          tenant_id: tenantId,
+          caja_id: activeCaja.id,
+          empleado_id: safeEmpleadoId,
+          tecnico_id: finalMechanicId || undefined,
+          tipo: 'VENTA',
+          concepto: `${conceptoLabel} ${inv.ncf || inv.id}`,
+          monto: paidAmount,
+          monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (paidAmount / total)) : undefined,
+          metodo: cajaMetodo,
+          creado_en: new Date().toISOString(),
+        });
+      }
     }
     if (activeOrderId) {
       updateOrder(activeOrderId, { status: "invoiced" });
     }
     if (quoteId) {
       updateQuote(quoteId, { status: "accepted" });
+    }
+    // Si la venta provenía de una cuenta en espera (tab), eliminarla definitivamente para evitar duplicados
+    const tabSourceId = activeTabId || cart.find((i: any) => i._fromTabId)?._fromTabId;
+    if (tabSourceId) {
+      deleteOpenTab(tabSourceId);
+      setActiveTabId(null);
     }
     setLastInvoice(inv);
     setIsCheckout(false);
@@ -1005,6 +1110,7 @@ export default function POSPage() {
     setCashReceived(""); setPayMethod("cash");
     setDiscount(0); setDiscountType("fixed");
     setActiveOrderId(null);
+    setActiveTabId(null);
     setActiveServiceIds([]);
     setPosCustomerId("");
     setPosMechanicId("");
@@ -1573,7 +1679,10 @@ export default function POSPage() {
                   <div key={item.id} className="flex items-center gap-3 px-5 py-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
-                      <p className="text-xs text-neutral-400">RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u (Inc. ITBIS)</p>
+                      <p className="text-xs text-neutral-400">
+                        RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u
+                        {(item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name.toLowerCase() === "mano de obra" || item.tax === 0) ? " (Sin ITBIS)" : " (Inc. ITBIS)"}
+                      </p>
                     </div>
                     <div className="flex items-center gap-1.5">
                       {item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name === "Mano de obra" ? null : (
@@ -1650,6 +1759,7 @@ export default function POSPage() {
                   if (currentTenantConfig?.autoDeductInventory) {
                     cart.forEach(item => {
                       if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
+                      if ((item as any).alreadyDeducted) return; // Evitar descontar stock doblemente si fue recuperado de espera
                       updateProduct(item.id, { stock: Math.max(0, item.stock - item.quantity) });
                       addMovement({
                         id: `m-pos-tab-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1664,8 +1774,9 @@ export default function POSPage() {
                     });
                   }
 
+                  const tabIdToUse = activeTabId || cart.find((i: any) => i._fromTabId)?._fromTabId || `tab-${Date.now()}`;
                   const newTab = {
-                    id: `tab-${Date.now()}`,
+                    id: tabIdToUse,
                     tenantId: tenantId || currentTenant?.id || currentTenant?.slug || "general",
                     tabName,
                     customerId: posCustomerId || "walk-in",
@@ -1673,7 +1784,7 @@ export default function POSPage() {
                     orderId: activeOrderId || null,
                     discount: discount > 0 ? discount : 0,
                     discountType: discount > 0 ? discountType : "fixed",
-                    items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity })),
+                    items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity, alreadyDeducted: true })),
                     createdAt: new Date().toISOString(),
                     updatedAt: new Date().toISOString(),
                   };
@@ -1742,8 +1853,11 @@ export default function POSPage() {
                 setDiscountType("fixed");
               }
               setActiveOrderId(tab.orderId);
+              setActiveTabId(tab.id);
               setCart(tab.items.map(i => ({
                 ...i,
+                // Asegurar que tax siempre tenga un valor válido (18% ITBIS por defecto)
+                tax: (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30) ? i.tax : 18,
                 // El item ya fue descontado por su cantidad original al pausar.
                 alreadyDeducted: true,
                 _fromTabId: tab.id, 
