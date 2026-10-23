@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Users, FileText, Calculator, Plus, Search, CheckCircle, Download, Check, AlertCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, calculateInvoiceCommission } from "@/lib/utils";
 
 const formatRD = (amount: number) => {
   return `RD$ ${amount.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -23,7 +23,7 @@ const formatRD = (amount: number) => {
 
 export default function NominaPage() {
   const { tenant } = useParams();
-  const { tenants, technicians } = useStore();
+  const { tenants, technicians, invoices, services } = useStore();
   const { empleados, nominas, addEmpleado, updateEmpleado, addNomina, updateNomina } = useNominaStore();
   
   const currentTenant = tenants.find(t => t.slug === tenant) || null;
@@ -133,16 +133,41 @@ export default function NominaPage() {
       // Si es quincenal, se calcula retenciones sobre el salario de la quincena.
       // Ojo: TSS se reporta mensual, pero aquí simplificamos prorrateando el tope/calculo
       const salarioBaseCalculo = genTipo === 'quincenal' ? emp.salarioBase / 2 : emp.salarioBase;
-      const retenciones = calcularRetenciones(salarioBaseCalculo);
+      const fullEmpName = `${emp.nombres} ${emp.apellidos}`.toLowerCase().trim();
+      const matchedTech = technicians.find(
+        (t) =>
+          t.tenantId === tenantId &&
+          (t.name.toLowerCase().trim() === fullEmpName ||
+            t.name.toLowerCase().includes(emp.nombres.toLowerCase().trim()))
+      );
+
+      let pendingCommissions = 0;
+      if (matchedTech) {
+        const pendingInvs = invoices.filter(
+          (inv) =>
+            inv.tenantId === tenantId &&
+            inv.status === "paid" &&
+            !inv.isCommissionPaid &&
+            inv.mechanicId === matchedTech.id
+        );
+        pendingInvs.forEach((inv) => {
+          const { totalFila } = calculateInvoiceCommission(inv, matchedTech, services);
+          pendingCommissions += totalFila;
+        });
+      }
+      pendingCommissions = Math.round(pendingCommissions * 100) / 100;
+
+      const salarioBruto = Math.round((salarioBaseCalculo + pendingCommissions) * 100) / 100;
+      const retenciones = calcularRetenciones(salarioBruto);
       
       return {
         id: `det-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         empleadoId: emp.id,
         salarioBase: salarioBaseCalculo,
-        comisiones: 0, // Aquí se podría integrar con comisiones pendientes
+        comisiones: pendingCommissions,
         horasExtras: 0,
         otrosIngresos: 0,
-        salarioBruto: salarioBaseCalculo,
+        salarioBruto,
         sfs: retenciones.sfs,
         afp: retenciones.afp,
         isr: retenciones.isr,

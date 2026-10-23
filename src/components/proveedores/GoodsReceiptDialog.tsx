@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { PurchaseOrder, GoodsReceipt, GoodsReceiptItem, AccountPayable } from "@/store/types";
 import { useStore } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -36,6 +36,22 @@ export default function GoodsReceiptDialog({ open, onOpenChange, purchaseOrder, 
   });
   const [generalNotes, setGeneralNotes] = useState("");
 
+  useEffect(() => {
+    if (open && purchaseOrder) {
+      setItems(
+        purchaseOrder.items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          expectedQuantity: Math.max(0, item.quantity - item.receivedQuantity),
+          receivedQuantity: Math.max(0, item.quantity - item.receivedQuantity),
+          damagedQuantity: 0,
+          notes: "",
+        }))
+      );
+      setGeneralNotes("");
+    }
+  }, [open, purchaseOrder]);
+
   if (!purchaseOrder) return null;
 
   const supplier = suppliers.find((s) => s.id === purchaseOrder.supplierId);
@@ -54,7 +70,7 @@ export default function GoodsReceiptDialog({ open, onOpenChange, purchaseOrder, 
 
     // 1. Create goods receipt
     const receipt: GoodsReceipt = {
-      id: `gr_${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId,
       purchaseOrderId: purchaseOrder.id,
       supplierId: purchaseOrder.supplierId,
@@ -107,7 +123,7 @@ export default function GoodsReceiptDialog({ open, onOpenChange, purchaseOrder, 
     dueDate.setDate(dueDate.getDate() + (supplier?.creditDays || 30));
 
     const payable: AccountPayable = {
-      id: `ap_${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId,
       supplierId: purchaseOrder.supplierId,
       purchaseOrderId: purchaseOrder.id,

@@ -31,6 +31,7 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
   const vehicles = useStore((s) => s.vehicles);
   const technicians = useStore((s) => s.technicians);
   const products = useStore((s) => s.products);
+  const services = useStore((s) => s.services);
   const deleteOrder = useStore((s) => s.deleteOrder);
   const updateOrder = useStore((s) => s.updateOrder);
   const updateProduct = useStore((s) => s.updateProduct);
@@ -106,6 +107,69 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     const v = vehicles.find((v) => v.id === id);
     return v ? `${v.brand} ${v.model} (${v.plate})` : "Desconocido";
   };
+
+  // Cálculo financiero unificado de la Orden (Subtotal + ITBIS 18% + Total)
+  const computeOrderFinancials = (partsList = currentOrder.parts || []) => {
+    let subtotal = 0;
+    let tax = 0;
+
+    // 1. Servicios del catálogo asociados a la orden
+    const orderServiceIds = currentOrder.serviceIds || [];
+    orderServiceIds.forEach((sid) => {
+      // Si viene en currentOrder.items con tasa explícita, respetarla
+      const itemOverride = currentOrder.items?.find((it) => it.serviceId === sid);
+      const svc = services.find((s) => s.id === sid);
+      const price = itemOverride ? Number(itemOverride.unitPrice || 0) : Number(svc?.price || 0);
+      const taxRate = itemOverride && typeof itemOverride.taxPercentage === "number"
+        ? itemOverride.taxPercentage
+        : (typeof svc?.tax === "number" ? svc.tax : 18);
+      subtotal += price;
+      tax += price * (taxRate / 100);
+    });
+
+    // 2. Servicios personalizados (customServices)
+    (currentOrder.customServices || []).forEach((cs) => {
+      const price = Number(cs.price || 0);
+      const taxRate = typeof cs.tax === "number" ? cs.tax : 0;
+      subtotal += price;
+      tax += price * (taxRate / 100);
+    });
+
+    // 3. Repuestos despachados de almacén (parts) — 18% ITBIS
+    partsList.forEach((part) => {
+      const prod = products.find((p) => p.id === part.productId);
+      const unitPrice = Number((part as any).price ?? prod?.salePrice ?? 0);
+      const qty = Number(part.quantity || 1);
+      const taxRate = typeof (part as any).tax === "number"
+        ? (part as any).tax
+        : (typeof prod?.tax === "number" ? prod.tax : 18);
+      const lineSub = unitPrice * qty;
+      subtotal += lineSub;
+      tax += lineSub * (taxRate / 100);
+    });
+
+    // 4. Repuestos externos (customParts) — 18% ITBIS
+    (currentOrder.customParts || []).forEach((cp) => {
+      const unitPrice = Number(cp.price || 0);
+      const qty = Number(cp.quantity || 1);
+      const taxRate = typeof cp.tax === "number" ? cp.tax : 18;
+      const lineSub = unitPrice * qty;
+      subtotal += lineSub;
+      tax += lineSub * (taxRate / 100);
+    });
+
+    const roundedSubtotal = Math.round(subtotal * 100) / 100;
+    const roundedTax = Math.round(tax * 100) / 100;
+    const roundedTotal = Math.round((roundedSubtotal + roundedTax) * 100) / 100;
+
+    return {
+      subtotal: roundedSubtotal,
+      tax: roundedTax,
+      total: roundedTotal,
+    };
+  };
+
+  const orderFinancials = computeOrderFinancials(currentOrder.parts || []);
 
   const handleSaveChanges = () => {
     if (!editForm.description) {
@@ -217,7 +281,8 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       }
     }
 
-    updateOrder(currentOrder.id, { parts: newParts });
+    const nextFinancials = computeOrderFinancials(newParts);
+    updateOrder(currentOrder.id, { parts: newParts, total: nextFinancials.total });
 
     const totalUnits = pendingParts.reduce((acc, p) => acc + p.quantity, 0);
     toast.success(`Se despacharon ${pendingParts.length} repuestos (${totalUnits} unidades) a la orden`);
@@ -257,7 +322,8 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     const newParts = currentParts.map(p => 
       p.productId === productId ? { ...p, quantity: p.quantity + 1 } : p
     );
-    updateOrder(currentOrder.id, { parts: newParts });
+    const nextFinancials = computeOrderFinancials(newParts);
+    updateOrder(currentOrder.id, { parts: newParts, total: nextFinancials.total });
     toast.success(`+1 ${product.name} agregado`);
   };
 
@@ -291,7 +357,8 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
       const newParts = currentParts.map(p => 
         p.productId === productId ? { ...p, quantity: p.quantity - 1 } : p
       );
-      updateOrder(currentOrder.id, { parts: newParts });
+      const nextFinancials = computeOrderFinancials(newParts);
+      updateOrder(currentOrder.id, { parts: newParts, total: nextFinancials.total });
       toast.success(`1 unidad retornada al almacén (quedan ${part.quantity - 1})`);
     } else {
       // Si la cantidad es 1, eliminarla completamente
@@ -305,7 +372,8 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
     // 1. Quitar de la orden
     const currentParts = currentOrder.parts || [];
     const newParts = currentParts.filter(p => p.productId !== productId);
-    updateOrder(currentOrder.id, { parts: newParts });
+    const nextFinancials = computeOrderFinancials(newParts);
+    updateOrder(currentOrder.id, { parts: newParts, total: nextFinancials.total });
 
     // 2. Reversar inventario si el producto existe
     if (product) {
@@ -945,6 +1013,33 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
                 )}
               </div>
             </div>
+
+            {/* RESUMEN FINANCIERO DE LA ORDEN (Subtotal + ITBIS 18% + Total) */}
+            {orderFinancials.subtotal > 0 && (
+              <div className="bg-neutral-50 rounded-xl p-3.5 border border-neutral-200/80 space-y-1.5 text-xs">
+                <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">
+                  Desglose Financiero de la Orden
+                </p>
+                <div className="flex justify-between text-neutral-600">
+                  <span>Subtotal (Servicios y Repuestos):</span>
+                  <span className="font-semibold text-neutral-900">
+                    RD$ {orderFinancials.subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-neutral-600">
+                  <span>ITBIS (18%):</span>
+                  <span className="font-semibold text-neutral-900">
+                    RD$ {orderFinancials.tax.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm font-black text-neutral-950 pt-1.5 border-t border-neutral-200">
+                  <span>Total General (c/ITBIS):</span>
+                  <span>
+                    RD$ {orderFinancials.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-4 border-t border-neutral-100">
               <Button 

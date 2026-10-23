@@ -706,10 +706,79 @@ export const useStore = create<AppState>()(
         }),
 
       addOpenTab: (tab) => {
-        set((state) => ({
-          openTabs: [tab, ...state.openTabs.filter(t => t.id !== tab.id)]
-        }));
-        import("@/lib/supabaseSync").then(m => m.upsertOpenTabs([tab]));
+        const duplicateIdsToDelete: string[] = [];
+        let finalTab = tab;
+
+        const getItemsSig = (items: any[]) =>
+          (items || [])
+            .map((i: any) => `${i.productId || i.id}:${i.quantity}:${i.salePrice}`)
+            .sort()
+            .join("|");
+
+        set((state) => {
+          const newSig = getItemsSig(tab.items);
+          const filtered = state.openTabs.filter((t) => {
+            if (t.id === tab.id) return false;
+            if (t.tenantId && tab.tenantId && t.tenantId !== tab.tenantId) return true;
+
+            // 1. Misma orden de trabajo: nunca permitir dos cuentas en espera para la misma orden
+            if (tab.orderId && t.orderId && t.orderId === tab.orderId) {
+              duplicateIdsToDelete.push(t.id);
+              return false;
+            }
+
+            // 2. Mismo cliente registrado (no Consumidor Final): actualizar su cuenta en espera existente
+            const isRegisteredCustomer =
+              Boolean(tab.customerId && tab.customerId !== "walk-in" && tab.customerId !== "none") ||
+              Boolean(tab.tabName && tab.tabName.trim().toLowerCase() !== "consumidor final");
+
+            if (isRegisteredCustomer) {
+              const sameCustomerId =
+                tab.customerId &&
+                tab.customerId !== "walk-in" &&
+                t.customerId === tab.customerId;
+              const sameTabName =
+                tab.tabName &&
+                t.tabName &&
+                t.tabName.trim().toLowerCase() === tab.tabName.trim().toLowerCase() &&
+                tab.tabName.trim().toLowerCase() !== "consumidor final";
+
+              if (sameCustomerId || sameTabName) {
+                duplicateIdsToDelete.push(t.id);
+                return false;
+              }
+            } else {
+              // 3. Consumidor Final: evitar duplicado exacto creado por doble clic o re-pausa inmediata (< 2 min)
+              const timeDiff = Math.abs(
+                new Date(tab.createdAt || Date.now()).getTime() -
+                  new Date(t.createdAt || 0).getTime()
+              );
+              if (
+                t.mechanicId === tab.mechanicId &&
+                getItemsSig(t.items) === newSig &&
+                timeDiff < 120000
+              ) {
+                duplicateIdsToDelete.push(t.id);
+                return false;
+              }
+            }
+
+            return true;
+          });
+
+          return {
+            openTabs: [finalTab, ...filtered],
+          };
+        });
+
+        import("@/lib/supabaseSync").then((m) => {
+          m.upsertOpenTabs([finalTab]);
+          duplicateIdsToDelete.forEach((dupId) => {
+            if (dupId !== finalTab.id) {
+              m.deleteRecordFromSupabase("open_tabs", dupId);
+            }
+          });
+        });
       },
       updateOpenTab: (id, updates) => {
         set((state) => {
@@ -722,8 +791,33 @@ export const useStore = create<AppState>()(
         });
       },
       deleteOpenTab: (id) => {
-        set((state) => ({ openTabs: state.openTabs.filter(t => t.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('open_tabs', id));
+        const extraIdsToDelete: string[] = [];
+        set((state) => {
+          const target = state.openTabs.find((t) => t.id === id);
+          const remaining = state.openTabs.filter((t) => {
+            if (t.id === id) return false;
+            if (target) {
+              if (target.orderId && t.orderId === target.orderId) {
+                extraIdsToDelete.push(t.id);
+                return false;
+              }
+              if (
+                target.customerId &&
+                target.customerId !== "walk-in" &&
+                t.customerId === target.customerId
+              ) {
+                extraIdsToDelete.push(t.id);
+                return false;
+              }
+            }
+            return true;
+          });
+          return { openTabs: remaining };
+        });
+        import("@/lib/supabaseSync").then((m) => {
+          m.deleteRecordFromSupabase("open_tabs", id);
+          extraIdsToDelete.forEach((dupId) => m.deleteRecordFromSupabase("open_tabs", dupId));
+        });
       },
 
       addInvoice: (invoice) => {
@@ -923,18 +1017,52 @@ export const useStore = create<AppState>()(
 
       addCaja: (caja) => set((state) => {
         state.addActivityLog({ action: 'opened_caja', details: `Abrió la caja con RD$ ${caja.monto_inicial}`, module: 'CAJA' });
-        import("@/lib/supabaseSync").then(m => m.upsertCajas([caja]));
-        return { cajas: [...state.cajas, caja] };
+        const nowIso = new Date().toISOString();
+        const closedOld: Caja[] = [];
+        const sanitizedExisting = state.cajas.map((c) => {
+          if (c.tenant_id === caja.tenant_id && c.estado === 'ABIERTA') {
+            const closed: Caja = {
+              ...c,
+              estado: 'CERRADA',
+              cerrada_en: c.cerrada_en || nowIso,
+              notas_cierre: c.notas_cierre || 'Cerrado automáticamente al abrir nuevo turno',
+            };
+            closedOld.push(closed);
+            return closed;
+          }
+          return c;
+        });
+        import("@/lib/supabaseSync").then(m => m.upsertCajas([caja, ...closedOld]));
+        return { cajas: [caja, ...sanitizedExisting] };
       }),
       updateCaja: (id, updates) =>
         set((state) => {
           if (updates.estado === 'CERRADA') {
             state.addActivityLog({ action: 'closed_caja', details: `Cerró la caja (Diferencia: RD$ ${updates.diferencia || 0})`, module: 'CAJA' });
           }
-          const updated = state.cajas.map((c) => (c.id === id ? { ...c, ...updates } : c));
-          const cajaToSync = updated.find(c => c.id === id);
-          if (cajaToSync) {
-            import("@/lib/supabaseSync").then(m => m.upsertCajas([cajaToSync]));
+          const targetCaja = state.cajas.find(c => c.id === id);
+          const nowIso = new Date().toISOString();
+          const toSync: Caja[] = [];
+          const updated = state.cajas.map((c) => {
+            if (c.id === id) {
+              const merged = { ...c, ...updates };
+              toSync.push(merged);
+              return merged;
+            }
+            if (updates.estado === 'CERRADA' && targetCaja && c.tenant_id === targetCaja.tenant_id && c.estado === 'ABIERTA') {
+              const zombieClosed: Caja = {
+                ...c,
+                estado: 'CERRADA',
+                cerrada_en: c.cerrada_en || nowIso,
+                notas_cierre: c.notas_cierre || 'Cierre automático de turno anterior',
+              };
+              toSync.push(zombieClosed);
+              return zombieClosed;
+            }
+            return c;
+          });
+          if (toSync.length > 0) {
+            import("@/lib/supabaseSync").then(m => m.upsertCajas(toSync));
           }
           return {
             cajas: updated,
@@ -1114,14 +1242,18 @@ export const useStore = create<AppState>()(
               receivedQuantity: 0
             };
 
+            const supplierObj = state.suppliers.find(s => s.id === supplierId || s.commercialName === supplierId);
+            const supplierItbisRate = (supplierObj && typeof supplierObj.itbis === 'number') ? supplierObj.itbis : 18;
+
             if (draftOrder) {
               const existingItem = draftOrder.items.find(i => i.productId === product.id);
               if (!existingItem) {
                 // Modificar una copia fresca
                 const clonedDraft = JSON.parse(JSON.stringify(draftOrder)) as PurchaseOrder;
                 clonedDraft.items.push(newItem);
-                clonedDraft.subtotal += (newItem.quantity * newItem.unitPrice);
-                clonedDraft.total = clonedDraft.subtotal + clonedDraft.tax;
+                clonedDraft.subtotal = Math.round(clonedDraft.items.reduce((acc, it) => acc + (it.quantity * it.unitPrice), 0) * 100) / 100;
+                clonedDraft.tax = Math.round((clonedDraft.subtotal * (supplierItbisRate / 100)) * 100) / 100;
+                clonedDraft.total = Math.round((clonedDraft.subtotal + clonedDraft.tax) * 100) / 100;
                 clonedDraft.updatedAt = new Date().toISOString();
                 
                 if (!newOrders.some(no => no.id === clonedDraft.id)) {
@@ -1134,17 +1266,19 @@ export const useStore = create<AppState>()(
                 }
               }
             } else {
+              const itemSubtotal = Math.round((newItem.quantity * newItem.unitPrice) * 100) / 100;
+              const itemTax = Math.round((itemSubtotal * (supplierItbisRate / 100)) * 100) / 100;
               const newOrder: PurchaseOrder = {
-                id: `po_${Date.now()}_${crypto.randomUUID()}`,
+                id: crypto.randomUUID(),
                 tenantId,
                 supplierId,
                 number: `OC-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
                 paymentStatus: 'pending',
                 status: 'borrador',
                 items: [newItem],
-                subtotal: newItem.quantity * newItem.unitPrice,
-                tax: 0,
-                total: newItem.quantity * newItem.unitPrice,
+                subtotal: itemSubtotal,
+                tax: itemTax,
+                total: Math.round((itemSubtotal + itemTax) * 100) / 100,
                 createdBy: 'auto_system',
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -1162,6 +1296,7 @@ export const useStore = create<AppState>()(
              });
              return { purchaseOrders: [...baseOrders, ...newOrders] };
           });
+          import("@/lib/supabaseSync").then(m => m.upsertPurchaseOrders([...updatedOrders, ...newOrders]));
         }
       },
 
@@ -1488,6 +1623,16 @@ export const useStore = create<AppState>()(
 
         // Recalcular salud con el kilometraje actual
         get().calculateMaintenanceHealth({ [vehicleId]: currentKm });
+
+        // Sincronizar elementos de mantenimiento, historial y alertas con Supabase
+        const updatedState = get() as AppState;
+        const vehicleItemsToSync = updatedState.maintenanceItems.filter(m => m.vehicleId === vehicleId);
+        const vehicleAlertsToSync = updatedState.maintenanceAlerts.filter(a => a.vehicleId === vehicleId);
+        import("@/lib/supabaseSync").then(m => {
+          if (vehicleItemsToSync.length > 0) m.upsertMaintenanceItems(vehicleItemsToSync);
+          if (newHistoryItems.length > 0) m.upsertMaintenanceHistory(newHistoryItems);
+          if (vehicleAlertsToSync.length > 0) m.upsertMaintenanceAlerts(vehicleAlertsToSync);
+        });
       },
 
       deliverWorkOrder: (orderId) => {
@@ -1502,15 +1647,28 @@ export const useStore = create<AppState>()(
           currentKm = order.kmUnit === 'mi' ? Math.round(order.km * 1.60934) : order.km;
         }
 
+        const updatedOrder: WorkOrder = {
+          ...order,
+          status: 'delivered' as const,
+          updatedAt: new Date().toISOString(),
+        };
+        const updatedVehicle: Vehicle | undefined = vehicle ? { ...vehicle, km: currentKm } : undefined;
+
         // Marcar la orden como entregada y actualizar KM del vehículo
         set((state) => ({
           orders: state.orders.map(o =>
-            o.id === orderId ? { ...o, status: 'delivered' as const, updatedAt: new Date().toISOString() } : o
+            o.id === orderId ? updatedOrder : o
           ),
           vehicles: state.vehicles.map(v =>
-            v.id === order.vehicleId ? { ...v, km: currentKm } : v
+            v.id === order.vehicleId && updatedVehicle ? updatedVehicle : v
           ),
         }));
+
+        // Sincronizar orden y vehículo con Supabase
+        import("@/lib/supabaseSync").then(m => {
+          m.upsertOrders([updatedOrder]);
+          if (updatedVehicle) m.upsertVehicles([updatedVehicle]);
+        });
 
         // Delegar toda la lógica de mantenimiento al Motor Central
         get().processVehicleMaintenance(
@@ -1518,7 +1676,7 @@ export const useStore = create<AppState>()(
           order.tenantId,
           currentKm,
           order.serviceIds ?? [],
-          []
+          (order.parts ?? []).map(p => p.productId)
         );
       },
 
@@ -1589,6 +1747,7 @@ export const useStore = create<AppState>()(
         customers: state.customers,
         vehicles: state.vehicles,
         orders: state.orders,
+        quotes: state.quotes,
         products: state.products,
         services: state.services,
         invoices: state.invoices,
@@ -1596,6 +1755,7 @@ export const useStore = create<AppState>()(
         technicians: state.technicians,
         maintenanceItems: state.maintenanceItems,
         maintenanceHistory: state.maintenanceHistory,
+        maintenanceAlerts: state.maintenanceAlerts,
         whatsappLogs: state.whatsappLogs,
         printSettings: state.printSettings,
         barcodeSettings: state.barcodeSettings,
@@ -1607,6 +1767,8 @@ export const useStore = create<AppState>()(
         currentUserId: state.currentUserId,
         isAuthenticated: state.isAuthenticated,
         openTabs: state.openTabs,
+        movements: state.movements,
+        inventorySessions: state.inventorySessions,
         // Proveedores
         suppliers: state.suppliers,
         supplierProducts: state.supplierProducts,
@@ -1615,6 +1777,7 @@ export const useStore = create<AppState>()(
         accountsPayable: state.accountsPayable,
         quoteRequests: state.quoteRequests,
         inspections: state.inspections,
+        activityLogs: state.activityLogs,
       }),
     }
   )

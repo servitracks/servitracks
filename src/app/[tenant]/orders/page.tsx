@@ -65,6 +65,59 @@ export default function OrdersPage() {
   const allTechnicians = useStore((s) => s.technicians);
   const technicians = tenantId ? allTechnicians.filter((t) => t.tenantId === tenantId) : [];
 
+  const allServices = useStore((s) => s.services);
+  const services = tenantId ? allServices.filter((s) => s.tenantId === tenantId) : [];
+
+  const allProducts = useStore((s) => s.products);
+  const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
+
+  const getOrderTotalWithItbis = (order: WorkOrder) => {
+    let subtotal = 0;
+    let tax = 0;
+
+    (order.serviceIds || []).forEach((sid) => {
+      const itemOverride = order.items?.find((it) => it.serviceId === sid);
+      const svc = services.find((s) => s.id === sid);
+      const price = itemOverride ? Number(itemOverride.unitPrice || 0) : Number(svc?.price || 0);
+      const taxRate = itemOverride && typeof itemOverride.taxPercentage === "number"
+        ? itemOverride.taxPercentage
+        : (typeof svc?.tax === "number" ? svc.tax : 18);
+      subtotal += price;
+      tax += price * (taxRate / 100);
+    });
+
+    (order.customServices || []).forEach((cs) => {
+      const price = Number(cs.price || 0);
+      const taxRate = typeof cs.tax === "number" ? cs.tax : 0;
+      subtotal += price;
+      tax += price * (taxRate / 100);
+    });
+
+    (order.parts || []).forEach((part) => {
+      const prod = products.find((p) => p.id === part.productId);
+      const unitPrice = Number((part as any).price ?? prod?.salePrice ?? 0);
+      const qty = Number(part.quantity || 1);
+      const taxRate = typeof (part as any).tax === "number"
+        ? (part as any).tax
+        : (typeof prod?.tax === "number" ? prod.tax : 18);
+      const lineSub = unitPrice * qty;
+      subtotal += lineSub;
+      tax += lineSub * (taxRate / 100);
+    });
+
+    (order.customParts || []).forEach((cp) => {
+      const unitPrice = Number(cp.price || 0);
+      const qty = Number(cp.quantity || 1);
+      const taxRate = typeof cp.tax === "number" ? cp.tax : 18;
+      const lineSub = unitPrice * qty;
+      subtotal += lineSub;
+      tax += lineSub * (taxRate / 100);
+    });
+
+    const computedTotal = Math.round((subtotal + tax) * 100) / 100;
+    return computedTotal > 0 ? computedTotal : (Number(order.total) || 0);
+  };
+
   const updateOrder = useStore((s) => s.updateOrder);
   const deleteOrder = useStore((s) => s.deleteOrder);
   const deliverWorkOrder = useStore((s) => s.deliverWorkOrder);
@@ -341,6 +394,14 @@ export default function OrdersPage() {
                             {order.serviceIds?.length ?? 0} {Number(order.serviceIds?.length ?? 0) === 1 ? "tarea" : "tareas"}
                           </p>
                         </div>
+                        {getOrderTotalWithItbis(order) > 0 && (
+                          <div className="text-right">
+                            <p className="text-[10px] text-neutral-400 font-medium">Total (c/ITBIS 18%)</p>
+                            <p className="text-sm font-black text-emerald-700">
+                              RD$ {getOrderTotalWithItbis(order).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        )}
                         <div onClick={(e) => e.stopPropagation()}>
                           <DropdownMenu>
                             <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 hover:bg-neutral-200 outline-none transition-colors border border-neutral-200 shadow-sm group">
@@ -408,8 +469,13 @@ export default function OrdersPage() {
                       </div>
                       <p className="text-xs font-bold text-neutral-900 line-clamp-2 mb-2">{order.description}</p>
                       <p className="text-xs text-neutral-500">{getCustomerName(order.customerId)}</p>
-                      <p className="text-xs font-semibold mt-2 text-neutral-500 flex items-center gap-1">
-                        🛠 {order.serviceIds?.length ?? 0} {Number(order.serviceIds?.length ?? 0) === 1 ? "servicio" : "servicios"}
+                      <p className="text-xs font-semibold mt-2 text-neutral-500 flex items-center justify-between gap-1">
+                        <span>🛠 {order.serviceIds?.length ?? 0} {Number(order.serviceIds?.length ?? 0) === 1 ? "servicio" : "servicios"}</span>
+                        {getOrderTotalWithItbis(order) > 0 && (
+                          <span className="text-[11px] font-black text-emerald-700">
+                            RD$ {getOrderTotalWithItbis(order).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        )}
                       </p>
                     </div>
                   ))}

@@ -23,7 +23,7 @@ const COLORS = ["Blanco", "Negro", "Gris", "Rojo", "Azul", "Verde", "Plata", "Be
 export default function CustomerDetailPage() {
   const { id, tenant } = useParams();
   const router = useRouter();
-  const { customers, vehicles, orders, invoices, addVehicle, tenants } = useStore();
+  const { customers, vehicles, orders, invoices, addVehicle, updateCustomer, tenants } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
 
@@ -72,7 +72,52 @@ export default function CustomerDetailPage() {
 
 
   const [addVehicleOpen, setAddVehicleOpen] = useState(false);
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    rnc: "",
+    type: "Persona" as "Persona" | "Empresa",
+    address: "",
+    notes: "",
+  });
   const [vForm, setVForm] = useState({ brand: "", model: "", year: "", plate: "", color: "Blanco", km: "", kmUnit: "km" as "km" | "mi" });
+
+  const handleOpenEditProfile = () => {
+    if (!customer) return;
+    setProfileForm({
+      name: customer.name || "",
+      phone: customer.phone || "",
+      email: customer.email || "",
+      rnc: customer.rnc || "",
+      type: customer.type || (customer.rnc ? "Empresa" : "Persona"),
+      address: customer.address || "",
+      notes: customer.notes || "",
+    });
+    setEditProfileOpen(true);
+  };
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customer) return;
+    if (!profileForm.name.trim() || !profileForm.phone.trim()) {
+      toast.error("Nombre y teléfono son obligatorios");
+      return;
+    }
+    updateCustomer(customer.id, {
+      name: profileForm.name.trim(),
+      phone: profileForm.phone.trim(),
+      email: profileForm.email.trim() || undefined,
+      rnc: profileForm.rnc.trim() || undefined,
+      type: profileForm.type,
+      taxReceiptType: profileForm.type === "Empresa" || profileForm.rnc.trim() ? "B01" : "B02",
+      address: profileForm.address.trim() || undefined,
+      notes: profileForm.notes.trim() || undefined,
+    });
+    toast.success("Perfil del cliente actualizado");
+    setEditProfileOpen(false);
+  };
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,7 +126,7 @@ export default function CustomerDetailPage() {
       return;
     }
     const newVehicle = {
-      id: `v${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId: tenantId,
       customerId: id as string,
       brand: vForm.brand,
@@ -92,23 +137,8 @@ export default function CustomerDetailPage() {
       km: vForm.km ? (vForm.kmUnit === "mi" ? Math.round(Number(vForm.km) * 1.60934) : Number(vForm.km)) : 0,
     };
 
-    // 1. Guardar en el store local (inmediato)
+    // Guardar en el store local (sincroniza automáticamente con Supabase vía addVehicle)
     addVehicle(newVehicle);
-
-    // 2. Persistir en Supabase (en segundo plano)
-    supabaseAdmin.from("vehicles").insert({
-      id: newVehicle.id,
-      tenant_id: tenantId,
-      customer_id: newVehicle.customerId,
-      brand: newVehicle.brand,
-      model: newVehicle.model,
-      year: newVehicle.year,
-      plate: newVehicle.plate,
-      color: newVehicle.color,
-      km: newVehicle.km,
-    }).then(({ error }) => {
-      if (error) console.error("[Vehicles] Error saving to Supabase:", error);
-    });
 
     toast.success(`${vForm.brand} ${vForm.model} agregado`);
     setAddVehicleOpen(false);
@@ -154,16 +184,22 @@ export default function CustomerDetailPage() {
                 {[
                   { icon: Phone, val: customer.phone },
                   { icon: Mail, val: customer.email || "—" },
-                  { icon: MapPin, val: "Santo Domingo, RD" },
-                ].map(({ icon: Icon, val }) => (
-                  <div key={val} className="flex items-center gap-2 text-neutral-600">
+                  { icon: MapPin, val: customer.address || "Santo Domingo, RD" },
+                  ...(customer.rnc ? [{ icon: FileText, val: `RNC/Cédula: ${customer.rnc}` }] : []),
+                ].map(({ icon: Icon, val }, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-neutral-600">
                     <Icon className="h-3.5 w-3.5 text-neutral-400 flex-shrink-0" />
                     <span className="truncate text-xs">{val}</span>
                   </div>
                 ))}
               </div>
 
-              <Button variant="outline" size="sm" className="mt-4 w-full rounded-lg text-xs border-neutral-100 hover:bg-neutral-50">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenEditProfile}
+                className="mt-4 w-full rounded-lg text-xs border-neutral-100 hover:bg-neutral-50"
+              >
                 <Settings className="mr-1.5 h-3 w-3" /> Editar Perfil
               </Button>
             </CardContent>
@@ -446,6 +482,89 @@ export default function CustomerDetailPage() {
             <DialogFooter className="gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setAddVehicleOpen(false)} className="rounded-xl flex-1">Cancelar</Button>
               <Button type="submit" className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800">Agregar</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={editProfileOpen} onOpenChange={setEditProfileOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Editar Perfil del Cliente</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSaveProfile} className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Nombre Completo *</Label>
+              <Input
+                value={profileForm.name}
+                onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                className="h-10 rounded-xl border-neutral-200"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Teléfono *</Label>
+                <Input
+                  value={profileForm.phone}
+                  onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                  className="h-10 rounded-xl border-neutral-200"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Correo</Label>
+                <Input
+                  type="email"
+                  value={profileForm.email}
+                  onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                  className="h-10 rounded-xl border-neutral-200"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>RNC / Cédula</Label>
+                <Input
+                  value={profileForm.rnc}
+                  onChange={(e) => setProfileForm({ ...profileForm, rnc: e.target.value })}
+                  className="h-10 rounded-xl border-neutral-200 font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Tipo de Cliente</Label>
+                <select
+                  value={profileForm.type}
+                  onChange={(e) => setProfileForm({ ...profileForm, type: e.target.value as "Persona" | "Empresa" })}
+                  className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none"
+                >
+                  <option value="Persona">Individual</option>
+                  <option value="Empresa">Empresa</option>
+                </select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Dirección</Label>
+              <Input
+                value={profileForm.address}
+                onChange={(e) => setProfileForm({ ...profileForm, address: e.target.value })}
+                className="h-10 rounded-xl border-neutral-200"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notas</Label>
+              <Input
+                value={profileForm.notes}
+                onChange={(e) => setProfileForm({ ...profileForm, notes: e.target.value })}
+                className="h-10 rounded-xl border-neutral-200"
+              />
+            </div>
+            <DialogFooter className="gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEditProfileOpen(false)} className="rounded-xl flex-1">
+                Cancelar
+              </Button>
+              <Button type="submit" className="rounded-xl flex-1 bg-black text-white hover:bg-neutral-800">
+                Guardar Cambios
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

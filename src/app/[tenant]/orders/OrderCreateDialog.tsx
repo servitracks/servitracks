@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { WorkOrder } from "@/store/types";
-import { useSearchParams, useParams } from "@/lib/next-compat";
+import { useSearchParams, useParams, useRouter } from "@/lib/next-compat";
 
 type KmUnit = "km" | "mi";
 export type CustomerType = "consumidor_final" | "credito_fiscal" | "gubernamental" | "regimen_especial";
@@ -52,6 +52,7 @@ interface OrderCreateDialogProps {
 
 export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDialogProps) {
   const { tenant } = useParams();
+  const router = useRouter();
   const tenants = useStore((s) => s.tenants);
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
@@ -71,6 +72,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
   const addVehicle = useStore((s) => s.addVehicle);
 
   const [form, setForm] = useState<FormData>(emptyForm);
+  const [applyItbis, setApplyItbis] = useState<boolean>(true);
   const [isServicePicker, setIsServicePicker] = useState(false);
   const [serviceSearch, setServiceSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState("Todos");
@@ -88,7 +90,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       toast.error("Por favor completa los campos obligatorios (*)");
       return;
     }
-    const newVId = `v${Date.now()}`;
+    const newVId = crypto.randomUUID();
     const newV: Vehicle = {
       id: newVId,
       customerId: form.customerId,
@@ -160,7 +162,14 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
 
   const availableVehicles = vehicles.filter((v) => v.customerId === form.customerId);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const selectedServicesList = services.filter((s) => form.serviceIds.includes(s.id));
+  const orderSubtotal = Math.round(selectedServicesList.reduce((acc, s) => acc + (Number(s.price) || 0), 0) * 100) / 100;
+  const orderTax = applyItbis
+    ? Math.round((orderSubtotal * 0.18) * 100) / 100
+    : Math.round(selectedServicesList.reduce((acc, s) => acc + ((Number(s.price) || 0) * ((s.tax || 0) / 100)), 0) * 100) / 100;
+  const orderTotal = Math.round((orderSubtotal + orderTax) * 100) / 100;
+
+  const handleCreate = (e: React.FormEvent, redirectToPos = false) => {
     e.preventDefault();
     if (!form.customerId || !form.vehicleId || !form.description) {
       toast.error("Cliente, vehículo y descripción son obligatorios");
@@ -178,8 +187,24 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       regimen_especial: "E44",
     };
 
+    const orderItems = selectedServicesList.map((s) => {
+      const unitPrice = Number(s.price) || 0;
+      const taxRate = applyItbis ? 18 : (s.tax || 0);
+      return {
+        id: `oi-${s.id}`,
+        serviceId: s.id,
+        name: s.name,
+        quantity: 1,
+        unitPrice,
+        taxPercentage: taxRate,
+        discountPercentage: 0,
+        total: Math.round((unitPrice * (1 + taxRate / 100)) * 100) / 100,
+      };
+    });
+
+    const newOrderId = crypto.randomUUID();
     const newOrder: WorkOrder = {
-      id: `o${Date.now()}`,
+      id: newOrderId,
       tenantId: tenantId,
       customerId: form.customerId,
       vehicleId: form.vehicleId,
@@ -193,7 +218,8 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       customerRnc: form.customerRnc.trim() || undefined,
       customerBusinessName: form.customerBusinessName.trim() || undefined,
       serviceIds: form.serviceIds,
-      total: 0,
+      items: orderItems.length > 0 ? orderItems : undefined,
+      total: orderTotal,
       notes: form.notes || undefined,
       checklist: [],
       createdAt: new Date().toISOString(),
@@ -208,6 +234,9 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
     toast.success("Orden de trabajo creada");
     onOpenChange(false);
     setForm(emptyForm);
+    if (redirectToPos) {
+      router.push(`/${tenant}/pos?orderId=${newOrderId}`);
+    }
   };
 
   return (
@@ -475,6 +504,38 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                 <Input placeholder="Observaciones del cliente o técnico" className="h-10 rounded-xl border-neutral-200"
                   value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               </div>
+
+              {/* Resumen Financiero con ITBIS 18% (col-span-2) */}
+              {selectedServicesList.length > 0 && (
+                <div className="col-span-2 p-3.5 rounded-xl border border-neutral-200 bg-neutral-50/70 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-neutral-700">Resumen de Servicios Seleccionados</span>
+                    <label className="flex items-center gap-1.5 text-xs font-semibold text-neutral-700 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={applyItbis}
+                        onChange={(e) => setApplyItbis(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-neutral-300 text-black focus:ring-black"
+                      />
+                      Aplicar ITBIS (18%)
+                    </label>
+                  </div>
+                  <div className="space-y-1 text-xs border-t border-neutral-200/70 pt-2">
+                    <div className="flex justify-between text-neutral-500">
+                      <span>Subtotal:</span>
+                      <span className="font-semibold text-neutral-800">RD$ {orderSubtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-neutral-500">
+                      <span>ITBIS (18%):</span>
+                      <span className="font-semibold text-neutral-800">RD$ {orderTax.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-black text-neutral-900 pt-1 border-t border-neutral-200/70">
+                      <span>Total Estimado:</span>
+                      <span>RD$ {orderTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <DialogFooter className="gap-2 pt-2 border-t border-neutral-100 flex items-center justify-between flex-wrap">
@@ -482,16 +543,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
               <div className="flex items-center gap-2">
                 <Button 
                   type="button" 
-                  onClick={(e) => {
-                    handleCreate(e);
-                    // Redirect to POS with latest created order
-                    setTimeout(() => {
-                      const latestOrder = useStore.getState().orders.find(o => o.customerId === form.customerId && o.vehicleId === form.vehicleId);
-                      if (latestOrder) {
-                        window.location.href = `/${tenant}/pos?orderId=${latestOrder.id}`;
-                      }
-                    }, 100);
-                  }} 
+                  onClick={(e) => handleCreate(e, true)} 
                   className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white h-10 px-4 font-bold"
                 >
                   ⚡ Crear y Facturar (e-CF)
@@ -575,7 +627,14 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
                               <p className={cn("text-sm font-semibold leading-snug", isSelected ? "text-neutral-950" : "text-neutral-900")}>
                                 {svc.name}
                               </p>
-                              {isSelected && <CheckCircle2 className="h-4 w-4 text-neutral-950 flex-shrink-0" />}
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                {svc.price > 0 && (
+                                  <span className="text-xs font-bold text-neutral-700 bg-neutral-100 px-1.5 py-0.5 rounded-md">
+                                    RD$ {svc.price.toLocaleString("es-DO")}
+                                  </span>
+                                )}
+                                {isSelected && <CheckCircle2 className="h-4 w-4 text-neutral-950 flex-shrink-0" />}
+                              </div>
                             </div>
                             {svc.duration && (
                               <p className="text-[10px] text-neutral-400 mt-1 font-medium flex items-center gap-1">

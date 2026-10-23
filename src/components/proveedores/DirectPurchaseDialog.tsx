@@ -94,7 +94,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
   const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const tax = Math.round(subtotal * (supplierItbis / 100));
+  const tax = Math.round((subtotal * (supplierItbis / 100)) * 100) / 100;
   const total = subtotal + tax;
 
   // Proyección de venta
@@ -128,7 +128,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
       if (!finalProductId && finalProductName.trim()) {
         const sequentialId = products.length + 1 + idx;
         const generatedCode = `STK${String(sequentialId).padStart(7, '0')}`;
-        finalProductId = `p_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`;
+        finalProductId = crypto.randomUUID();
         
         addProduct({
           id: finalProductId,
@@ -154,7 +154,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
       };
     });
 
-    const newPoId = `po_${Date.now()}`;
+    const newPoId = crypto.randomUUID();
 
     // 1. Crear Orden de Compra ya Recibida
     const newPO: PurchaseOrder = {
@@ -178,7 +178,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
 
     // 2. Crear Recepción (Goods Receipt) para el historial
     const receipt: GoodsReceipt = {
-      id: `gr_${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId,
       purchaseOrderId: newPoId,
       supplierId,
@@ -222,7 +222,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
     dueDate.setDate(dueDate.getDate() + (supplier?.creditDays || 30));
 
     addAccountPayable({
-      id: `ap_${Date.now()}`,
+      id: crypto.randomUUID(),
       tenantId,
       supplierId,
       purchaseOrderId: newPoId,

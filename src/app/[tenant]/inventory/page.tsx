@@ -2170,10 +2170,14 @@ export default function InventoryPage() {
                               const val = Number(e.target.value) || 0;
                               const newItems = [...selectedPo.items];
                               newItems[idx] = { ...newItems[idx], quantity: val };
-                              const newTotal = newItems.reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
-                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              const newSubtotal = Math.round(newItems.reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0) * 100) / 100;
+                              const poSupplier = suppliers.find((s) => s.id === selectedPo.supplierId || s.commercialName === selectedPo.supplierId);
+                              const itbisRate = poSupplier?.itbis !== undefined ? poSupplier.itbis : 18;
+                              const newTax = Math.round((newSubtotal * (itbisRate / 100)) * 100) / 100;
+                              const newTotal = Math.round((newSubtotal + newTax) * 100) / 100;
+                              const updatedPo = { ...selectedPo, items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal };
                               setSelectedPo(updatedPo);
-                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal });
                             }}
                           />
                         </TableCell>
@@ -2188,10 +2192,14 @@ export default function InventoryPage() {
                             className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
                             onClick={() => {
                               const newItems = selectedPo.items.filter((_: any, i: number) => i !== idx);
-                              const newTotal = newItems.reduce((acc: number, curr: any) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
-                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              const newSubtotal = Math.round(newItems.reduce((acc: number, curr: any) => acc + (curr.quantity * (curr.unitPrice || 0)), 0) * 100) / 100;
+                              const poSupplier = suppliers.find((s) => s.id === selectedPo.supplierId || s.commercialName === selectedPo.supplierId);
+                              const itbisRate = poSupplier?.itbis !== undefined ? poSupplier.itbis : 18;
+                              const newTax = Math.round((newSubtotal * (itbisRate / 100)) * 100) / 100;
+                              const newTotal = Math.round((newSubtotal + newTax) * 100) / 100;
+                              const updatedPo = { ...selectedPo, items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal };
                               setSelectedPo(updatedPo);
-                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal });
                             }}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -2204,8 +2212,12 @@ export default function InventoryPage() {
               </div>
 
               <div className="p-5 sm:px-6 border-t border-neutral-100 bg-neutral-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-                <div>
-                  <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado</p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-4 text-xs text-neutral-500 font-medium">
+                    <span>Subtotal: <strong className="text-neutral-800">RD$ {(selectedPo.subtotal || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                    <span>ITBIS (18%): <strong className="text-neutral-800">RD$ {(selectedPo.tax || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                  </div>
+                  <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado (c/ITBIS)</p>
                   <p className="text-2xl font-black text-neutral-900 leading-none whitespace-nowrap">RD$ {selectedPo.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">

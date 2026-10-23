@@ -222,8 +222,8 @@ export interface WorkOrder {
   customerRnc?: string;
   customerBusinessName?: string;
   serviceIds?: string[]; // Multiple services selected
-  customServices?: { name: string; price: number }[]; // Ad-hoc labor imported from quotes
-  customParts?: { name: string; price: number; quantity: number }[]; // External/custom parts imported from quotes
+  customServices?: { name: string; price: number; tax?: number }[]; // Ad-hoc labor imported from quotes
+  customParts?: { name: string; price: number; quantity: number; tax?: number }[]; // External/custom parts imported from quotes
   parts?: { productId: string; quantity: number }[]; // Parts dispatched from warehouse
   estimatedTime?: string;
   notes?: string;

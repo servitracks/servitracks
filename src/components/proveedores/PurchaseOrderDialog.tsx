@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/store/types";
 import { useStore } from "@/store/useStore";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -48,6 +48,27 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
     })
   );
 
+  useEffect(() => {
+    if (open) {
+      setSupplierId(editOrder?.supplierId || "");
+      setNotes(editOrder?.notes || "");
+      setExpectedDelivery(editOrder?.expectedDelivery || "");
+      setItems(
+        (editOrder?.items || []).map((it) => {
+          const prod = it.productId ? products.find((p) => p.id === it.productId) : null;
+          return {
+            ...it,
+            productName: it.productName || prod?.name || "",
+            rawUnitPrice: it.unitPrice ? String(it.unitPrice) : "",
+            rawSalePrice: it.salePrice ? String(it.salePrice) : "",
+            rawQuantity: it.quantity ? String(it.quantity) : "1",
+          };
+        })
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editOrder?.id]);
+
   const generateNumber = () => {
     const year = new Date().getFullYear();
     const num = purchaseOrders.length + 1;
@@ -93,9 +114,9 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
 
   const selectedSupplier = suppliers.find(s => s.id === supplierId);
   const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
-  const subtotal = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.unitPrice || 0), 0);
-  const tax = Math.round(subtotal * (supplierItbis / 100));
-  const total = subtotal + tax;
+  const subtotal = Math.round(items.reduce((sum, item) => sum + (item.quantity || 0) * (item.unitPrice || 0), 0) * 100) / 100;
+  const tax = Math.round((subtotal * (supplierItbis / 100)) * 100) / 100;
+  const total = Math.round((subtotal + tax) * 100) / 100;
 
   // Proyección de venta
   const totalVentaEstimado = items.reduce((sum, item) => sum + (item.quantity || 0) * (item.salePrice || 0), 0);
@@ -131,7 +152,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
         if (!finalProductId && finalProductName) {
           const sequentialId = products.length + 1 + idx;
           const generatedCode = `STK${String(sequentialId).padStart(7, "0")}`;
-          finalProductId = `p_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`;
+          finalProductId = crypto.randomUUID();
 
           addProduct({
             id: finalProductId,
@@ -175,7 +196,7 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
       toast.success("Orden de compra actualizada");
     } else {
       const newPO: PurchaseOrder = {
-        id: `po_${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId,
         supplierId,
         number: generateNumber(),

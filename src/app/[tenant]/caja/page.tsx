@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { cn, isServiceItem, formatRD, parseAmount, formatAmountInput } from "@/lib/utils";
+import { cn, isServiceItem, calculateInvoiceCommission, formatRD, parseAmount, formatAmountInput } from "@/lib/utils";
 import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 const formatDateTimeRD = (dateStr: string) => {
@@ -257,7 +257,7 @@ function ReporteCuadreThermal({
 
   const shiftMovs = useMemo(() => {
     return movimientos.filter((m) => {
-      if (m.caja_id === caja.id) return true;
+      if (m.caja_id) return m.caja_id === caja.id;
       const t = new Date(m.creado_en).getTime();
       return !isNaN(t) && t >= startTime && t <= endTime;
     });
@@ -1431,10 +1431,29 @@ export default function CajaPage() {
     return Array.from(uniqueMap.values());
   }, [users, tenantId, currentUser]);
 
-  // Active caja shift
+  // Active caja shift (solo el turno más reciente puede estar abierto)
   const activeCaja = useMemo(() => {
-    return cajas.find(c => c.tenant_id === tenantId && c.estado === 'ABIERTA');
+    const tenantCajas = cajas
+      .filter(c => c.tenant_id === tenantId)
+      .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
+    return tenantCajas[0]?.estado === 'ABIERTA' ? tenantCajas[0] : undefined;
   }, [cajas, tenantId]);
+
+  // Auto-cerrar cualquier turno viejo que haya quedado con estado ABIERTA detrás de un turno más reciente
+  useEffect(() => {
+    const tenantCajas = cajas
+      .filter(c => c.tenant_id === tenantId)
+      .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
+    tenantCajas.forEach((c, idx) => {
+      if (idx > 0 && c.estado === 'ABIERTA') {
+        updateCaja(c.id, {
+          estado: 'CERRADA',
+          cerrada_en: c.cerrada_en || tenantCajas[idx - 1]?.abierta_en || new Date().toISOString(),
+          notas_cierre: c.notas_cierre || 'Cierre automático de turno anterior',
+        });
+      }
+    });
+  }, [cajas, tenantId, updateCaja]);
 
   // Current session movements
   const activeMovements = useMemo(() => {
@@ -1442,7 +1461,19 @@ export default function CajaPage() {
     return cajaMovements.filter(m => m.caja_id === activeCaja.id && m.tenant_id === tenantId);
   }, [cajaMovements, activeCaja, tenantId]);
 
-  // Calculated totals for the current open cash shift
+  // Detectar si el turno activo fue abierto en un día anterior al día de hoy
+  const isMultiDayShift = useMemo(() => {
+    if (!activeCaja?.abierta_en) return false;
+    const openDate = new Date(activeCaja.abierta_en);
+    const now = new Date();
+    return (
+      openDate.getFullYear() !== now.getFullYear() ||
+      openDate.getMonth() !== now.getMonth() ||
+      openDate.getDate() !== now.getDate()
+    );
+  }, [activeCaja]);
+
+  // Calculated totals for the current open cash shift (plus breakdown of today's movements)
   const metrics = useMemo(() => {
     if (!activeCaja) {
       return {
@@ -1453,7 +1484,11 @@ export default function CajaPage() {
         transferenciaTotal: 0,
         efectivoEsperado: 0,
         totalGeneral: 0,
-        totalManoObra: 0
+        totalManoObra: 0,
+        hoyEfectivo: 0,
+        hoyTarjeta: 0,
+        hoyTransferencia: 0,
+        hoyTotal: 0,
       };
     }
 
@@ -1463,9 +1498,24 @@ export default function CajaPage() {
     let tarjetaTotal = 0;
     let transferenciaTotal = 0;
     let totalManoObra = 0;
+    let hoyEfectivo = 0;
+    let hoyTarjeta = 0;
+    let hoyTransferencia = 0;
+
+    const now = new Date();
+    const isToday = (dateStr?: string) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return (
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate()
+      );
+    };
 
     activeMovements.forEach(m => {
       const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(m.tipo);
+      const movIsToday = isToday(m.creado_en);
       
       // Accumulate labor if present
       if (m.monto_mano_obra) {
@@ -1475,18 +1525,22 @@ export default function CajaPage() {
       if (m.metodo === 'EFECTIVO') {
         if (isIngreso) {
           ingresosEfectivo += m.monto;
+          if (movIsToday) hoyEfectivo += m.monto;
         } else {
           egresosEfectivo += m.monto;
         }
       } else if (m.metodo === 'TARJETA') {
         tarjetaTotal += m.monto;
+        if (movIsToday && isIngreso) hoyTarjeta += m.monto;
       } else if (m.metodo === 'TRANSFERENCIA') {
         transferenciaTotal += m.monto;
+        if (movIsToday && isIngreso) hoyTransferencia += m.monto;
       }
     });
 
     const efectivoEsperado = montoInicial + ingresosEfectivo - egresosEfectivo;
     const totalGeneral = efectivoEsperado + tarjetaTotal + transferenciaTotal;
+    const hoyTotal = hoyEfectivo + hoyTarjeta + hoyTransferencia;
 
     return {
       montoInicial,
@@ -1496,7 +1550,11 @@ export default function CajaPage() {
       transferenciaTotal,
       efectivoEsperado,
       totalGeneral,
-      totalManoObra
+      totalManoObra,
+      hoyEfectivo,
+      hoyTarjeta,
+      hoyTransferencia,
+      hoyTotal,
     };
   }, [activeCaja, activeMovements]);
 
@@ -1513,27 +1571,10 @@ export default function CajaPage() {
     
     pendingInvoices.forEach(inv => {
       const tech = technicians.find(t => t.id === inv.mechanicId);
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObraDirecta) {
-            globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech?.pagoNomina && tech?.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            globalTotal += safeLabor * (item.quantity || 1);
-          }
-        }
-      });
+      const { totalFila } = calculateInvoiceCommission(inv, tech, services);
+      globalTotal += totalFila;
     });
-    return globalTotal;
+    return Math.round(globalTotal * 100) / 100;
   }, [invoices, tenantId, services, technicians]);
 
   // Helper to calculate pending labor sum for a technician
@@ -1550,45 +1591,10 @@ export default function CajaPage() {
 
     let total = 0;
     pending.forEach(inv => {
-      let invTotal = 0;
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObraDirecta) {
-            invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            invTotal += safeLabor * (item.quantity || 1);
-          }
-        }
-      });
-
-      // Fallback si la factura no tiene laborPrice individual por item (calculamos solo sobre los servicios de la factura)
-      if (invTotal === 0 && tech.pagoNomina) {
-        const servicesSubtotal = (inv.items || [])
-          .filter(item => isServiceItem(item, services))
-          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
-
-        if (servicesSubtotal > 0) {
-          if (tech.tipoPago === "fijo") {
-            invTotal = tech.pagoNomina;
-          } else {
-            invTotal = (servicesSubtotal * tech.pagoNomina) / 100;
-          }
-        }
-      }
-
-      total += invTotal;
+      const { totalFila } = calculateInvoiceCommission(inv, tech, services);
+      total += totalFila;
     });
-    return { total, pendingIds: pending.map(i => i.id) };
+    return { total: Math.round(total * 100) / 100, pendingIds: pending.map(i => i.id) };
   };
 
   // Dialog open states
@@ -1668,58 +1674,23 @@ export default function CajaPage() {
 
     let totalGlobal = 0;
     const rawItems = pendingTechInvoices.map(inv => {
-      let comisionTotal = 0;
-      let manoObraTotal = 0;
-      const nombresAplicables: string[] = [];
-
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObra) {
-            const mTotal = ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-            manoObraTotal += mTotal;
-            if (mTotal > 0) nombresAplicables.push(item.name);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            const cTotal = safeLabor * (item.quantity || 1);
-            comisionTotal += cTotal;
-            if (cTotal > 0) nombresAplicables.push(item.name);
-          }
-        }
-      });
-      
-      // Fallback si no hubo comisión por item directo pero hay subtotal de servicios
-      if (comisionTotal === 0 && manoObraTotal === 0 && tech.pagoNomina) {
-        const servicesSubtotal = (inv.items || [])
-          .filter(item => isServiceItem(item, services))
-          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
-
-        if (servicesSubtotal > 0) {
-          if (tech.tipoPago === "fijo") {
-            comisionTotal = tech.pagoNomina;
-          } else {
-            comisionTotal = (servicesSubtotal * tech.pagoNomina) / 100;
-          }
-          nombresAplicables.push("Comisión por servicios de la factura");
-        }
-      }
-
-      const totalFila = comisionTotal + manoObraTotal;
-
-      return {
-        inv,
+      const {
+        servicesBaseTotal,
         comisionTotal,
         manoObraTotal,
         totalFila,
-        nombresAplicables
+        nombresAplicables,
+        esquemaLabel,
+      } = calculateInvoiceCommission(inv, tech, services);
+
+      return {
+        inv,
+        servicesBaseTotal,
+        comisionTotal,
+        manoObraTotal,
+        totalFila,
+        nombresAplicables,
+        esquemaLabel,
       };
     });
 
@@ -1728,7 +1699,7 @@ export default function CajaPage() {
       totalGlobal += item.totalFila;
     });
 
-    return { total: totalGlobal, items: filteredItems };
+    return { total: Math.round(totalGlobal * 100) / 100, items: filteredItems };
   }, [pendingTechInvoices, technicians, selectedTechToPay, services]);
 
   // Histórico de liquidaciones de caja
@@ -1959,7 +1930,11 @@ export default function CajaPage() {
 
   useEffect(() => {
     if (isCierreOpen) {
-      setContadoEfectivo("");
+      setContadoEfectivo(
+        metrics.efectivoEsperado > 0
+          ? metrics.efectivoEsperado.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : ""
+      );
       setContadoTarjeta(
         metrics.tarjetaTotal > 0
           ? metrics.tarjetaTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -1973,7 +1948,7 @@ export default function CajaPage() {
       setCierrePin("");
       setCierreNotas("");
     }
-  }, [isCierreOpen, metrics.tarjetaTotal, metrics.transferenciaTotal]);
+  }, [isCierreOpen, metrics.efectivoEsperado, metrics.tarjetaTotal, metrics.transferenciaTotal]);
 
   // Filters for History
   const [histFiltroCajero, setHistFiltroCajero] = useState("all");
@@ -2373,6 +2348,37 @@ export default function CajaPage() {
         </div>
       </div>
 
+      {/* ── ALERTA DE TURNO ABIERTO DE DÍAS ANTERIORES ── */}
+      {activeCaja && isMultiDayShift && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="h-9 w-9 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs sm:text-sm font-extrabold text-amber-950 flex items-center gap-2 flex-wrap">
+                <span>Turno abierto desde el {formatDateTimeRD(activeCaja.abierta_en)}</span>
+                <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
+                  Acumulando varios días
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-amber-900/90 leading-relaxed">
+                Los montos grandes reflejan el <strong>acumulado desde que se abrió este turno</strong>.{" "}
+                <strong>Cobrado solo HOY: {formatRD(metrics.hoyTotal)}</strong>{" "}
+                (Efectivo: {formatRD(metrics.hoyEfectivo)} · Tarjeta: {formatRD(metrics.hoyTarjeta)} · Transf.: {formatRD(metrics.hoyTransferencia)}).
+                Cierra este turno para iniciar el cuadre limpio del día de hoy.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setIsCierreOpen(true)}
+            className="h-9 rounded-xl bg-amber-900 hover:bg-amber-950 text-white font-bold text-xs gap-1.5 shrink-0 cursor-pointer shadow-xs"
+          >
+            <Lock className="h-3.5 w-3.5" /> Cerrar Turno Anterior
+          </Button>
+        </div>
+      )}
+
       {/* ── TOP METRICS ROW (Hero Cards matching Apertura Modal style) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Card 1: Efectivo en Caja */}
@@ -2397,7 +2403,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Fondo esperado en caja</span>
+            <span>
+              {isMultiDayShift
+                ? `Fondo (${formatRD(metrics.montoInicial)}) + Turno`
+                : "Fondo esperado en caja"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2424,7 +2434,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Cobrado en efectivo hoy</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyEfectivo)}`
+                : "Cobrado en efectivo en el turno"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2451,7 +2465,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Terminal bancaria / Voucher</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyTarjeta)}`
+                : "Terminal bancaria / Voucher"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2478,7 +2496,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Transferencias digitales</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyTransferencia)}`
+                : "Transferencias digitales"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2614,7 +2636,6 @@ export default function CajaPage() {
           <div className="mt-3 pt-2 border-t border-neutral-100">
             <Button 
               variant="outline" 
-              disabled={!activeCaja || totalGlobalPending <= 0}
               onClick={() => setIsPagoTecnicoOpen(true)}
               className="w-full h-8.5 rounded-xl border-purple-200 bg-purple-50/60 hover:bg-purple-100 text-purple-700 font-bold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all active:scale-95"
             >

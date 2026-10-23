@@ -47,6 +47,39 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
     invoice.status === "pending" ? "bg-amber-100 text-amber-800" :
     "bg-rose-100 text-rose-800";
 
+  let parsedMeta: {
+    condicionCobro?: string;
+    instrumentoPago?: string;
+    referencia?: string;
+    desgloseMixto?: {
+      efectivo?: number;
+      efectivoRecibido?: number;
+      cambioEfectivo?: number;
+      tarjeta?: number;
+      transferencia?: number;
+      tarjetaRef?: string;
+      transferenciaRef?: string;
+    };
+  } | null = null;
+  let cleanNotesText: string | null = invoice.notes || null;
+
+  if (invoice.notes && invoice.notes.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(invoice.notes);
+      if (parsed && typeof parsed === "object" && ("condicionCobro" in parsed || "instrumentoPago" in parsed)) {
+        parsedMeta = parsed;
+        cleanNotesText = null;
+      }
+    } catch {
+      // Conservar texto plano si no es JSON válido
+    }
+  }
+
+  const methodLabel =
+    parsedMeta?.instrumentoPago === "MIXTO"
+      ? "PAGO MIXTO"
+      : translatePaymentMethod(parsedMeta?.instrumentoPago || invoice.paymentMethod);
+
   return (
     <>
       {/* Contenedor de impresión oculto para Ticket Térmico con altura auto-ajustable */}
@@ -126,8 +159,55 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
               )}
               <div className="flex justify-between">
                 <span className="text-neutral-500">Método de pago:</span>
-                <span className="font-bold text-neutral-900 uppercase">{translatePaymentMethod(invoice.paymentMethod)}</span>
+                <span className="font-bold text-neutral-900 uppercase">{methodLabel}</span>
               </div>
+              {parsedMeta?.referencia && (
+                <div className="flex justify-between">
+                  <span className="text-neutral-500">No. Referencia:</span>
+                  <span className="font-bold text-neutral-900 font-mono uppercase">{parsedMeta.referencia}</span>
+                </div>
+              )}
+              {parsedMeta?.instrumentoPago === "MIXTO" && parsedMeta.desgloseMixto && (
+                <div className="bg-white/90 rounded-lg border border-neutral-200/80 p-2 space-y-1 text-[10.5px]">
+                  <div className="font-bold text-neutral-600 uppercase text-[9.5px] tracking-wider">Desglose Pago Mixto:</div>
+                  {Number(parsedMeta.desgloseMixto.efectivo || 0) > 0 && (
+                    <div className="flex justify-between text-neutral-700">
+                      <span>Efectivo:</span>
+                      <span className="font-bold text-emerald-700">
+                        RD$ {Number(parsedMeta.desgloseMixto.efectivo).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                  {Number(parsedMeta.desgloseMixto.tarjeta || 0) > 0 && (
+                    <div className="flex justify-between text-neutral-700">
+                      <span>
+                        Tarjeta{parsedMeta.desgloseMixto.tarjetaRef ? ` (${parsedMeta.desgloseMixto.tarjetaRef})` : ""}:
+                      </span>
+                      <span className="font-bold text-sky-700">
+                        RD$ {Number(parsedMeta.desgloseMixto.tarjeta).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                  {Number(parsedMeta.desgloseMixto.transferencia || 0) > 0 && (
+                    <div className="flex justify-between text-neutral-700">
+                      <span>
+                        Transferencia{parsedMeta.desgloseMixto.transferenciaRef ? ` (${parsedMeta.desgloseMixto.transferenciaRef})` : ""}:
+                      </span>
+                      <span className="font-bold text-indigo-700">
+                        RD$ {Number(parsedMeta.desgloseMixto.transferencia).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                  {Number(parsedMeta.desgloseMixto.cambioEfectivo || 0) > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-bold border-t border-dashed border-neutral-200 pt-1">
+                      <span>Cambio devuelto:</span>
+                      <span>
+                        RD$ {Number(parsedMeta.desgloseMixto.cambioEfectivo).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="border-t border-dashed border-neutral-200 my-2.5" />
 
@@ -182,10 +262,10 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
               </div>
             </div>
 
-            {invoice.notes && (
+            {cleanNotesText && (
               <div className="text-xs text-neutral-600 bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/60">
                 <span className="font-bold text-neutral-700 block text-[10px] uppercase tracking-wider mb-0.5">Notas:</span>
-                <p className="italic text-neutral-600">{invoice.notes}</p>
+                <p className="italic text-neutral-600">{cleanNotesText}</p>
               </div>
             )}
           </div>

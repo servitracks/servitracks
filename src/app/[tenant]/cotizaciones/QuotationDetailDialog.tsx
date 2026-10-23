@@ -102,7 +102,7 @@ export default function QuotationDetailDialog({
   // Convert Quote to Work Order
   const handleConvertToOrder = (shouldRedirectToPos = false) => {
     try {
-      const orderId = `o-cot-${Date.now()}`;
+      const orderId = crypto.randomUUID();
       
       // Separate service IDs and products
       const serviceIds = quote.items
@@ -113,7 +113,7 @@ export default function QuotationDetailDialog({
         .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
         .map((i) => ({ 
           name: i.name, 
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 0) / 100), 
+          price: i.unitPrice, 
           tax: i.taxPercentage ?? 0 
         }));
 
@@ -121,7 +121,7 @@ export default function QuotationDetailDialog({
         .filter((i) => !i.productId && (!i.serviceId || !i.serviceId.startsWith('custom-')))
         .map((i) => ({ 
           name: i.name, 
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100), 
+          price: i.unitPrice, 
           quantity: i.quantity, 
           tax: i.taxPercentage ?? 18 
         }));
@@ -131,7 +131,7 @@ export default function QuotationDetailDialog({
         .map((i) => ({
           productId: i.productId!.trim(),
           name: i.name,
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100),
+          price: i.unitPrice,
           quantity: i.quantity,
           tax: i.taxPercentage ?? 18,
         }));
@@ -455,17 +455,23 @@ export default function QuotationDetailDialog({
                   color: vehicle.color,
                   km: vehicle.km,
                 } : undefined}
-                items={quote.items.map((i) => ({
-                  id: i.id,
-                  name: i.name,
-                  descripcion: i.name,
-                  quantity: i.quantity,
-                  cantidad: i.quantity,
-                  unitPrice: i.unitPrice,
-                  precio_unitario: i.unitPrice,
-                  salePrice: i.unitPrice,
-                  total: i.total,
-                }))}
+                items={quote.items.map((i) => {
+                  const lineNet = (i.quantity || 1) * (i.unitPrice || 0) * (1 - (i.discountPercentage || 0) / 100);
+                  const lineTax = Math.round((lineNet * ((i.taxPercentage ?? 0) / 100)) * 100) / 100;
+                  return {
+                    id: i.id,
+                    name: i.name,
+                    descripcion: i.name,
+                    quantity: i.quantity,
+                    cantidad: i.quantity,
+                    unitPrice: i.unitPrice,
+                    precio_unitario: i.unitPrice,
+                    salePrice: i.unitPrice,
+                    tax: lineTax,
+                    is_exento: (i.taxPercentage ?? 0) === 0,
+                    total: i.total,
+                  };
+                })}
                 subtotal={quote.subtotal}
                 itbis={quote.tax}
                 discount={quote.discount}
@@ -482,17 +488,23 @@ export default function QuotationDetailDialog({
                   pagado: 0,
                   metodo_pago: "Cotización",
                   notas: quote.notes,
-                  items: quote.items.map((i) => ({
-                    id: i.id,
-                    name: i.name,
-                    descripcion: i.name,
-                    quantity: i.quantity,
-                    cantidad: i.quantity,
-                    unitPrice: i.unitPrice,
-                    precio_unitario: i.unitPrice,
-                    salePrice: i.unitPrice,
-                    total: i.total,
-                  })),
+                  items: quote.items.map((i) => {
+                    const lineNet = (i.quantity || 1) * (i.unitPrice || 0) * (1 - (i.discountPercentage || 0) / 100);
+                    const lineTax = Math.round((lineNet * ((i.taxPercentage ?? 0) / 100)) * 100) / 100;
+                    return {
+                      id: i.id,
+                      name: i.name,
+                      descripcion: i.name,
+                      quantity: i.quantity,
+                      cantidad: i.quantity,
+                      unitPrice: i.unitPrice,
+                      precio_unitario: i.unitPrice,
+                      salePrice: i.unitPrice,
+                      tax: lineTax,
+                      is_exento: (i.taxPercentage ?? 0) === 0,
+                      total: i.total,
+                    };
+                  }),
                   vehicle: vehicle ? {
                     brand: vehicle.brand,
                     model: vehicle.model,

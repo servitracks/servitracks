@@ -22,9 +22,10 @@ import BulkCustomerImportModal from "@/components/customers/BulkCustomerImportMo
 
 type CustomerForm = {
   name: string; phone: string; email: string;
+  rnc: string; type: "Persona" | "Empresa";
   address: string; notes: string; birthday: string;
 };
-const emptyCustomerForm: CustomerForm = { name: "", phone: "", email: "", address: "", notes: "", birthday: "" };
+const emptyCustomerForm: CustomerForm = { name: "", phone: "", email: "", rnc: "", type: "Persona", address: "", notes: "", birthday: "" };
 
 type VehicleForm = {
   brand: string; model: string; year: string; plate: string; vin: string;
@@ -53,6 +54,22 @@ function CustomerFormFields({ form, setForm }: CustomerFormFieldsProps) {
         <Label>Correo Electrónico</Label>
         <Input type="email" placeholder="correo@ejemplo.com" className="h-10 rounded-xl border-neutral-200"
           value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>RNC / Cédula</Label>
+        <Input placeholder="Ej: 131123456" className="h-10 rounded-xl border-neutral-200 font-mono"
+          value={form.rnc} onChange={(e) => setForm({ ...form, rnc: e.target.value })} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Tipo de Cliente</Label>
+        <select
+          value={form.type}
+          onChange={(e) => setForm({ ...form, type: e.target.value as "Persona" | "Empresa" })}
+          className="h-10 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none"
+        >
+          <option value="Persona">Individual (Consumidor Final)</option>
+          <option value="Empresa">Empresa (Crédito Fiscal)</option>
+        </select>
       </div>
       <div className="col-span-2 space-y-1.5">
         <Label>Dirección</Label>
@@ -158,6 +175,9 @@ export default function CustomersPage() {
       name: form.name,
       phone: form.phone,
       email: form.email || undefined,
+      rnc: form.rnc.trim() || undefined,
+      type: form.type,
+      taxReceiptType: form.type === "Empresa" || form.rnc.trim() ? "B01" : "B02",
       address: form.address || undefined,
       notes: form.notes || undefined,
       birthday: form.birthday || undefined,
@@ -203,6 +223,9 @@ export default function CustomersPage() {
       name: form.name,
       phone: form.phone,
       email: form.email || undefined,
+      rnc: form.rnc.trim() || undefined,
+      type: form.type,
+      taxReceiptType: form.type === "Empresa" || form.rnc.trim() ? "B01" : "B02",
       address: form.address || undefined,
       notes: form.notes || undefined,
       birthday: form.birthday || undefined,
@@ -217,14 +240,33 @@ export default function CustomersPage() {
 
   const openEdit = (customer: Customer) => {
     setSelectedCustomer(customer);
-    setForm({ name: customer.name, phone: customer.phone, email: customer.email || "", address: customer.address || "", notes: customer.notes || "", birthday: customer.birthday || "" });
+    setForm({
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email || "",
+      rnc: customer.rnc || "",
+      type: customer.type || (customer.rnc ? "Empresa" : "Persona"),
+      address: customer.address || "",
+      notes: customer.notes || "",
+      birthday: customer.birthday || "",
+    });
     setIsEditOpen(true);
   };
 
   const handleEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCustomer) return;
-    updateCustomer(selectedCustomer.id, { name: form.name, phone: form.phone, email: form.email, address: form.address, notes: form.notes, birthday: form.birthday });
+    updateCustomer(selectedCustomer.id, {
+      name: form.name,
+      phone: form.phone,
+      email: form.email || undefined,
+      rnc: form.rnc.trim() || undefined,
+      type: form.type,
+      taxReceiptType: form.type === "Empresa" || form.rnc.trim() ? "B01" : "B02",
+      address: form.address || undefined,
+      notes: form.notes || undefined,
+      birthday: form.birthday || undefined,
+    });
     toast.success("Cliente actualizado");
     setIsEditOpen(false);
   };

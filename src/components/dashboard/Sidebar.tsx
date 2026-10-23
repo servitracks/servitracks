@@ -46,7 +46,7 @@ export const navigation = [
   { name: "Control de Movimientos", href: "/movimientos", icon: ClipboardList, roles: ['owner', 'warehouse'] },
   { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
   { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
-  { name: "Mis Comisiones", href: "/mis-comisiones", icon: Wallet, roles: ['mechanic'] },
+  { name: "Comisiones Técnicos", href: "/mis-comisiones", icon: Wallet, roles: ['owner', 'cashier', 'mechanic', 'superadmin'] },
   { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
   { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner'] },
   { name: "Registro de Actividad", href: "/activity", icon: History, roles: ['owner'] },
