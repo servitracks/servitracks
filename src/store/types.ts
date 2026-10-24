@@ -230,6 +230,9 @@ export interface WorkOrder {
   checklist?: { item: string; completed: boolean }[];
   quoteId?: string;
   items?: any[];
+  subtotal?: number;
+  tax?: number;
+  applyItbis?: boolean;
   total: number;
   createdAt: string;
   updatedAt: string;

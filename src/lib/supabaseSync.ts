@@ -1017,6 +1017,9 @@ function dbToWorkOrder(row: any): WorkOrder {
     customerBusinessName: row.customer_business_name || meta.customerBusinessName || undefined,
     quoteId: row.quote_id || meta.quoteId || undefined,
     items: row.items || meta.items || undefined,
+    subtotal: row.subtotal != null ? Number(row.subtotal) : (meta.subtotal != null ? Number(meta.subtotal) : undefined),
+    tax: row.tax != null ? Number(row.tax) : (meta.tax != null ? Number(meta.tax) : undefined),
+    applyItbis: typeof row.apply_itbis === "boolean" ? row.apply_itbis : (typeof meta.applyItbis === "boolean" ? meta.applyItbis : undefined),
     total: Number(row.total) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1037,6 +1040,9 @@ function workOrderToDb(o: WorkOrder) {
   if (o.customParts && o.customParts.length > 0) meta.customParts = o.customParts;
   if (o.quoteId) meta.quoteId = o.quoteId;
   if (o.items && o.items.length > 0) meta.items = o.items;
+  if (typeof o.applyItbis === "boolean") meta.applyItbis = o.applyItbis;
+  if (typeof o.subtotal === "number") meta.subtotal = o.subtotal;
+  if (typeof o.tax === "number") meta.tax = o.tax;
   if (o.customerId && !isValidUuid(o.customerId)) meta.rawCustomerId = o.customerId;
   if (o.vehicleId && !isValidUuid(o.vehicleId)) meta.rawVehicleId = o.vehicleId;
 

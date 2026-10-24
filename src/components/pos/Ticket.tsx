@@ -515,8 +515,12 @@ export function Ticket({
                 const totalItem = qty * price;
                 let itbisItem = 0;
                 if (!it.is_exento && ordenObj.itbis > 0) {
-                  if (typeof it.tax === 'number') {
-                    itbisItem = it.tax;
+                  if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
+                    itbisItem = totalItem * it.tax;
+                  } else if (typeof it.tax === 'number' && it.tax > 1) {
+                    itbisItem = totalItem * (it.tax / 100);
+                  } else if (typeof it.tax === 'number' && it.tax === 0) {
+                    itbisItem = 0;
                   } else {
                     itbisItem = totalItem * 0.18;
                   }
@@ -863,8 +867,12 @@ export function Ticket({
             // ITBIS del ítem: si es exento o mano de obra, es estrictamente 0
             let itbisVal = 0;
             if (!it.is_exento && ordenObj.itbis > 0) {
-              if (typeof it.tax === 'number') {
-                itbisVal = it.tax;
+              if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
+                itbisVal = baseTotal * it.tax;
+              } else if (typeof it.tax === 'number' && it.tax > 1) {
+                itbisVal = baseTotal * (it.tax / 100);
+              } else if (typeof it.tax === 'number' && it.tax === 0) {
+                itbisVal = 0;
               } else {
                 itbisVal = baseTotal * 0.18;
               }

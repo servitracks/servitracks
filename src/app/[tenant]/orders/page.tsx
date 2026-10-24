@@ -73,48 +73,50 @@ export default function OrdersPage() {
 
   const getOrderTotalWithItbis = (order: WorkOrder) => {
     let subtotal = 0;
-    let tax = 0;
 
     (order.serviceIds || []).forEach((sid) => {
       const itemOverride = order.items?.find((it) => it.serviceId === sid);
       const svc = services.find((s) => s.id === sid);
       const price = itemOverride ? Number(itemOverride.unitPrice || 0) : Number(svc?.price || 0);
-      const taxRate = itemOverride && typeof itemOverride.taxPercentage === "number"
-        ? itemOverride.taxPercentage
-        : (typeof svc?.tax === "number" ? svc.tax : 18);
       subtotal += price;
-      tax += price * (taxRate / 100);
     });
 
     (order.customServices || []).forEach((cs) => {
-      const price = Number(cs.price || 0);
-      const taxRate = typeof cs.tax === "number" ? cs.tax : 0;
-      subtotal += price;
-      tax += price * (taxRate / 100);
+      subtotal += Number(cs.price || 0);
     });
 
     (order.parts || []).forEach((part) => {
       const prod = products.find((p) => p.id === part.productId);
       const unitPrice = Number((part as any).price ?? prod?.salePrice ?? 0);
       const qty = Number(part.quantity || 1);
-      const taxRate = typeof (part as any).tax === "number"
-        ? (part as any).tax
-        : (typeof prod?.tax === "number" ? prod.tax : 18);
-      const lineSub = unitPrice * qty;
-      subtotal += lineSub;
-      tax += lineSub * (taxRate / 100);
+      subtotal += unitPrice * qty;
     });
 
     (order.customParts || []).forEach((cp) => {
       const unitPrice = Number(cp.price || 0);
       const qty = Number(cp.quantity || 1);
-      const taxRate = typeof cp.tax === "number" ? cp.tax : 18;
-      const lineSub = unitPrice * qty;
-      subtotal += lineSub;
-      tax += lineSub * (taxRate / 100);
+      subtotal += unitPrice * qty;
     });
 
-    const computedTotal = Math.round((subtotal + tax) * 100) / 100;
+    const roundedSubtotal = Math.round(subtotal * 100) / 100;
+
+    // El ITBIS del 18% se aplica sobre la orden completa, no ítem por ítem
+    let tax = 0;
+    if (order.applyItbis === false) {
+      tax = 0;
+    } else if (order.applyItbis === true) {
+      tax = Math.round(roundedSubtotal * 0.18 * 100) / 100;
+    } else if (typeof order.tax === "number" && order.tax > 0) {
+      tax = order.tax;
+    } else if (typeof order.total === "number" && order.total > roundedSubtotal) {
+      tax = Math.round((order.total - roundedSubtotal) * 100) / 100;
+    } else if (typeof order.total === "number" && order.total > 0 && Math.abs(order.total - roundedSubtotal) < 0.01) {
+      tax = 0;
+    } else {
+      tax = Math.round(roundedSubtotal * 0.18 * 100) / 100;
+    }
+
+    const computedTotal = Math.round((roundedSubtotal + tax) * 100) / 100;
     return computedTotal > 0 ? computedTotal : (Number(order.total) || 0);
   };
 

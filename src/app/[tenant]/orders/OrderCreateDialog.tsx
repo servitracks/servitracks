@@ -166,7 +166,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
   const orderSubtotal = Math.round(selectedServicesList.reduce((acc, s) => acc + (Number(s.price) || 0), 0) * 100) / 100;
   const orderTax = applyItbis
     ? Math.round((orderSubtotal * 0.18) * 100) / 100
-    : Math.round(selectedServicesList.reduce((acc, s) => acc + ((Number(s.price) || 0) * ((s.tax || 0) / 100)), 0) * 100) / 100;
+    : 0;
   const orderTotal = Math.round((orderSubtotal + orderTax) * 100) / 100;
 
   const handleCreate = (e: React.FormEvent, redirectToPos = false) => {
@@ -187,18 +187,19 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       regimen_especial: "E44",
     };
 
+    // Los ítems individuales mantienen su precio base neto (sin ITBIS inflado por ítem)
+    // El ITBIS del 18% se calcula y aplica a la orden completa
     const orderItems = selectedServicesList.map((s) => {
       const unitPrice = Number(s.price) || 0;
-      const taxRate = applyItbis ? 18 : (s.tax || 0);
       return {
         id: `oi-${s.id}`,
         serviceId: s.id,
         name: s.name,
         quantity: 1,
         unitPrice,
-        taxPercentage: taxRate,
+        taxPercentage: 0,
         discountPercentage: 0,
-        total: Math.round((unitPrice * (1 + taxRate / 100)) * 100) / 100,
+        total: unitPrice,
       };
     });
 
@@ -219,6 +220,9 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       customerBusinessName: form.customerBusinessName.trim() || undefined,
       serviceIds: form.serviceIds,
       items: orderItems.length > 0 ? orderItems : undefined,
+      subtotal: orderSubtotal,
+      tax: orderTax,
+      applyItbis: applyItbis,
       total: orderTotal,
       notes: form.notes || undefined,
       checklist: [],

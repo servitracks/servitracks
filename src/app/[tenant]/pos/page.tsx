@@ -207,6 +207,7 @@ export default function POSPage() {
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [allowExtraInventory, setAllowExtraInventory] = useState(false);
+  const [isItbisEnabled, setIsItbisEnabled] = useState<boolean>(true);
   const mountTimeRef = useRef<number>(Date.now());
   const isPausingRef = useRef(false);
 
@@ -333,7 +334,11 @@ export default function POSPage() {
   const subtotal       = Math.max(0, Math.round((rawSubtotal - discountAmount) * 100) / 100);
   const discountRatio  = rawSubtotal > 0 ? subtotal / rawSubtotal : 0;
   const rawItbis       = cart.reduce((acc, i) => acc + (i.salePrice * i.quantity * (getItemTaxRate(i) / 100)), 0);
-  const itbis          = Math.max(0, Math.round((rawItbis * discountRatio) * 100) / 100);
+  const itbis          = isItbisEnabled
+    ? (currentOrder && currentOrder.applyItbis
+        ? Math.max(0, Math.round((subtotal * 0.18) * 100) / 100)
+        : Math.max(0, Math.round((rawItbis * discountRatio) * 100) / 100))
+    : 0;
   const total          = Math.round((subtotal + itbis) * 100) / 100;
   const cashNum        = parseFloat(cashReceived.replace(/,/g, "")) || 0;
   const change         = Math.max(0, cashNum - total);
@@ -483,6 +488,7 @@ export default function POSPage() {
 
     setActiveOrderId(order.id);
     setAllowExtraInventory(false);
+    setIsItbisEnabled(order.applyItbis !== false);
     setPosMechanicId(order.mechanicId || "");
     setPosCustomerId(order.customerId || "");
     setDiscount(0);
@@ -536,7 +542,9 @@ export default function POSPage() {
           it.name?.toLowerCase().includes("diagnostico") ||
           it.name?.toLowerCase().includes("diagnóstico")
         );
-        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : (typeof it.tax === "number" ? it.tax : (isService ? 0 : 18));
+        const taxRate = order.applyItbis === false
+          ? 0
+          : (typeof it.taxPercentage === "number" ? it.taxPercentage : (typeof it.tax === "number" ? it.tax : (isService ? 0 : 18)));
         const basePrice = Number(it.unitPrice ?? it.price ?? it.salePrice ?? 0);
 
         const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
@@ -561,7 +569,7 @@ export default function POSPage() {
             ...serviceToProduct(existingService),
             name: it.name || existingService.name,
             salePrice: basePrice || existingService.price,
-            tax: typeof it.taxPercentage === "number" ? it.taxPercentage : ((typeof existingService.tax === "number" && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0),
+            tax: order.applyItbis === false ? 0 : (typeof it.taxPercentage === "number" ? it.taxPercentage : ((typeof existingService.tax === "number" && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0)),
             quantity: it.quantity || 1,
           };
         }
@@ -1846,8 +1854,16 @@ export default function POSPage() {
                   <span>- RD$ {discountAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               )}
-              <div className="flex justify-between text-xs sm:text-sm text-neutral-500">
-                <span className="font-medium">ITBIS (18%)</span>
+              <div className="flex justify-between text-xs sm:text-sm text-neutral-500 items-center">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isItbisEnabled}
+                    onChange={(e) => setIsItbisEnabled(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-neutral-300 text-black focus:ring-black"
+                  />
+                  <span className="font-medium text-neutral-700">ITBIS (18%)</span>
+                </label>
                 <span className="font-semibold text-neutral-800">RD$ {itbis.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="pt-2.5 border-t border-neutral-100 flex items-baseline justify-between">
