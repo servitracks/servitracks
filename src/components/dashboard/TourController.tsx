@@ -52,7 +52,7 @@ export function TourController() {
           showProgress: true,
           doneBtnText: "Ir a Cotizaciones 📝",
           steps: [
-            { element: "main", popover: { title: "🛠️ Órdenes de Trabajo", description: "Desde aquí creas nuevas órdenes de servicio, registras los vehículos que ingresan, les asignas técnicos y ves el estado de cada vehículo.", showButtons: ['next'] } }
+            { element: "main", popover: { title: "🛠️ Órdenes de Servicio", description: "Desde aquí creas nuevas órdenes de servicio, registras los vehículos que ingresan, les asignas técnicos y ves el estado de cada vehículo.", showButtons: ['next'] } }
           ],
           onDestroyStarted: () => {
             driverObj.destroy();

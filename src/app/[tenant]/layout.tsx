@@ -46,6 +46,7 @@ export default function DashboardLayout() {
     : null;
   const isPending = currentTenant?.status === "pending";
   const isPosPage = location.pathname.endsWith("/pos") || location.pathname.includes("/pos");
+  const isOrdenesPage = location.pathname.endsWith("/ordenes") || location.pathname.includes("/ordenes");
 
   // Redirigir a login si no está autenticado o si el tenant no existe (una vez hidratado el store)
   useEffect(() => {
@@ -182,6 +183,7 @@ export default function DashboardLayout() {
     const pathPermissions: Record<string, string[]> = {
       "": ['owner', 'receptionist', 'superadmin'],
       "/orders": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
+      "/ordenes": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
       "/cotizaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/pos": ['owner', 'cashier', 'superadmin'],
       "/caja": ['owner', 'cashier', 'superadmin'],
@@ -1390,9 +1392,20 @@ export default function DashboardLayout() {
         <HydrationGuard>
           <main className={cn(
             "flex-1",
-            isPosPage ? "p-0 overflow-hidden flex flex-col" : "overflow-y-auto p-4 sm:p-8"
+            isPosPage
+              ? "p-0 overflow-hidden flex flex-col"
+              : isOrdenesPage
+              ? "overflow-y-auto px-3 sm:px-5 pt-3 pb-6"
+              : "overflow-y-auto p-4 sm:p-8"
           )}>
-            <div className={cn("mx-auto", isPosPage ? "w-full h-full flex flex-col flex-1" : "max-w-[1600px]")}>
+            <div className={cn(
+              "mx-auto",
+              isPosPage
+                ? "w-full h-full flex flex-col flex-1"
+                : isOrdenesPage
+                ? "w-full max-w-none"
+                : "max-w-[1600px]"
+            )}>
               <Outlet />
             </div>
           </main>

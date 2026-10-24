@@ -591,7 +591,7 @@ export default function CustomerDetailPage() {
                     Flota Vehicular Vinculada
                   </h3>
                   <p className="text-xs text-neutral-500">
-                    Vehículos registrados para diagnóstico, historial y asignación de órdenes de trabajo.
+                    Vehículos registrados para diagnóstico, historial y asignación de órdenes de servicio.
                   </p>
                 </div>
                 <Button

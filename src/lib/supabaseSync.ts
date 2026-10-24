@@ -1151,10 +1151,19 @@ function quoteToDb(q: Quote) {
 }
 
 function dbToInvoice(row: any): Invoice {
+  let parsedMeta: Record<string, any> | null = null;
+  if (typeof row.notes === "string" && row.notes.trim().startsWith("{")) {
+    try {
+      parsedMeta = JSON.parse(row.notes);
+    } catch {
+      parsedMeta = null;
+    }
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    customerId: row.customer_id || undefined,
+    customerId: row.customer_id || parsedMeta?.rawCustomerId || undefined,
     customerName: row.customer_name || undefined,
     customerRnc: row.customer_rnc || undefined,
     vehicleId: row.vehicle_id || undefined,
@@ -1167,6 +1176,9 @@ function dbToInvoice(row: any): Invoice {
     tax: row.tax,
     discount: row.discount || undefined,
     total: row.total,
+    paidAmount: typeof parsedMeta?.paidAmount === "number" ? parsedMeta.paidAmount : undefined,
+    pendingAmount: typeof parsedMeta?.pendingAmount === "number" ? parsedMeta.pendingAmount : undefined,
+    condicionCobro: parsedMeta?.condicionCobro || undefined,
     paymentMethod: row.payment_method,
     status: row.status,
     ncf: row.ncf || undefined,

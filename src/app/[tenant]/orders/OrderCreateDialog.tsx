@@ -199,7 +199,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       return;
     }
     if (!form.mechanicId || form.mechanicId === "none") {
-      toast.error("Debe asignar un técnico a la orden de trabajo");
+      toast.error("Debe asignar un técnico a la orden de servicio");
       return;
     }
 
@@ -258,7 +258,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       const kmInKm = form.kmUnit === "mi" ? Math.round(kmValue * 1.60934) : kmValue;
       updateVehicle(form.vehicleId, { km: kmInKm });
     }
-    toast.success("Orden de trabajo creada");
+    toast.success("Orden de servicio creada");
     onOpenChange(false);
     setForm(emptyForm);
     if (redirectToPos) {
@@ -271,7 +271,7 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-xl rounded-2xl p-6 bg-white overflow-y-auto max-h-[90vh]">
           <DialogHeader className="mb-2">
-            <DialogTitle className="text-xl font-bold text-neutral-900">Nueva Orden de Trabajo</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-neutral-900">Nueva Orden de Servicio</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-5">
             <div className="grid grid-cols-2 gap-x-4 gap-y-3.5">

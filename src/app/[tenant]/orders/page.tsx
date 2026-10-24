@@ -402,7 +402,7 @@ export default function OrdersPage() {
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="font-heading text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900">
-              Órdenes de Trabajo
+              Órdenes de Servicio
             </h1>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-700 border border-neutral-200">
               {orders.length} activas
@@ -658,7 +658,7 @@ export default function OrdersPage() {
                 <Wrench className="h-8 w-8" />
               </div>
               <h3 className="text-base font-bold text-neutral-900 font-heading">
-                No se encontraron órdenes de trabajo
+                No se encontraron órdenes de servicio
               </h3>
               <p className="text-xs text-neutral-500 max-w-sm mt-1">
                 {search
@@ -853,7 +853,7 @@ export default function OrdersPage() {
                         <DropdownMenuItem
                           className="rounded-xl py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2 text-xs font-medium"
                           onClick={() => {
-                            if (confirm("¿Estás seguro de eliminar esta orden de trabajo?")) {
+                            if (confirm("¿Estás seguro de eliminar esta orden de servicio?")) {
                               deleteOrder(order.id);
                               toast.success("Orden eliminada");
                             }

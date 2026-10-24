@@ -15,6 +15,7 @@ import CustomerDetailPage from "./app/[tenant]/customers/[id]/page";
 import InventoryPage from "./app/[tenant]/inventory/page";
 import MaintenancePage from "./app/[tenant]/maintenance/page";
 import OrdersPage from "./app/[tenant]/orders/page";
+import OrdenesControlPage from "./app/[tenant]/ordenes/page";
 import POSPage from "./app/[tenant]/pos/page";
 import RemindersPage from "./app/[tenant]/reminders/page";
 import ReportsPage from "./app/[tenant]/reports/page";
@@ -70,6 +71,7 @@ export default function App() {
         <Route path="/:tenant" element={<DashboardLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="ordenes" element={<OrdenesControlPage />} />
           <Route path="pos" element={<POSPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="customers" element={<CustomersPage />} />

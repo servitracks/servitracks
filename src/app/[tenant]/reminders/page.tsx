@@ -1,13 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useStore, WhatsAppLog, Tenant } from "@/store/useStore";
 import { useParams, useSearchParams, useRouter } from "@/lib/next-compat";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendText } from "@/lib/wasender";
 import {
-  MessageSquare, Settings, Bell, CheckCircle2, AlertCircle,
-  Smartphone, Plus, Send, Phone, Clock, Users, Zap, X, Trash2,
+  MessageSquare,
+  Settings,
+  Bell,
+  CheckCircle2,
+  AlertCircle,
+  Smartphone,
+  Plus,
+  Send,
+  Phone,
+  Clock,
+  Users,
+  Zap,
+  X,
+  Trash2,
+  Car,
+  Gauge,
+  Calendar,
+  ShieldCheck,
+  Check,
+  Sparkles,
+  Filter,
+  ExternalLink,
+  RefreshCw,
+  Copy,
+  ChevronRight,
+  Info,
+  Search,
+  ArrowRight,
+  UserCheck,
+  Wrench,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,34 +53,65 @@ const AUTOMATIONS = [
   {
     id: "oil_change",
     title: "Próximo Cambio de Aceite",
-    desc: "Enviado 3 días antes de la fecha estimada según kilometraje.",
+    desc: "Enviado 3 días antes de la fecha estimada según kilometraje registrado.",
     trigger: "Automático",
+    category: "Mantenimiento",
     active: true,
-    template: "Hola {nombre}, tu {vehiculo} tiene un cambio de aceite programado para el {fecha}. ¡Visítanos en Taller García!",
+    template: "Estimado/a {nombre}, tu vehículo {vehiculo} tiene un mantenimiento programado para la fecha {fecha}. Te invitamos a pasar por nuestro taller.",
   },
   {
     id: "maintenance_6m",
-    title: "Recordatorio 6 Meses",
-    desc: "Clientes que no han visitado en 6 meses reciben un recordatorio.",
+    title: "Revisión Preventiva Semestral",
+    desc: "Clientes sin visitas registradas durante los últimos 6 meses.",
     trigger: "Condicional",
+    category: "Seguimiento",
     active: true,
-    template: "Hola {nombre}, hace mucho que no te vemos. Tu {vehiculo} puede necesitar una revisión. ¡Agenda tu cita hoy!",
+    template: "Hola {nombre}, hace tiempo que no registras servicios para tu {vehiculo}. Una inspección preventiva mantiene tu vehículo en óptimas condiciones.",
   },
   {
     id: "order_ready",
-    title: "Vehículo Listo",
-    desc: "Enviado al marcar una orden como Finalizada.",
+    title: "Vehículo Listo para Entrega",
+    desc: "Notificación inmediata al cambiar el estado de la orden a Finalizada.",
     trigger: "Evento",
+    category: "Taller",
     active: true,
-    template: "¡Hola {nombre}! Tu {vehiculo} está listo para ser retirado. Taller García — {telefono}.",
+    template: "Estimado/a {nombre}, tu {vehiculo} ya se encuentra listo para entrega tras completar los trabajos en taller.",
   },
   {
     id: "birthday",
     title: "Felicitación de Cumpleaños",
-    desc: "Enviado el día del cumpleaños del cliente con descuento especial.",
+    desc: "Enviado de forma programada el día del cumpleaños del cliente registrado.",
     trigger: "Fecha",
+    category: "Fidelización",
     active: false,
-    template: "¡Feliz cumpleaños {nombre}! Como regalo, tienes un 10% de descuento en tu próxima visita. 🎉",
+    template: "Estimado/a {nombre}, de parte de todo el equipo te felicitamos en tu día y te ofrecemos un 10% de descuento en tu próximo servicio.",
+  },
+];
+
+const QUICK_TEMPLATES = [
+  {
+    id: "inspection_general",
+    title: "Inspección General Recomendada",
+    type: "reminder",
+    template: "Estimado/a {nombre}, te recordamos que tu vehículo {vehiculo} tiene pendiente una inspección preventiva de fluidos y frenos. Puedes agendar tu visita respondiendo a este mensaje.",
+  },
+  {
+    id: "quote_followup",
+    title: "Seguimiento de Cotización",
+    type: "notification",
+    template: "Hola {nombre}, te escribimos de Servitracks para dar seguimiento a la cotización entregada para tu {vehiculo}. ¿Tienes alguna consulta sobre el presupuesto o los repuestos recomendados?",
+  },
+  {
+    id: "parts_received",
+    title: "Repuestos Disponibles en Taller",
+    type: "notification",
+    template: "Estimado/a {nombre}, te informamos que ya recibimos en almacén las piezas requeridas para tu {vehiculo}. Ya puedes coordinar la fecha para ingresar a taller.",
+  },
+  {
+    id: "ready_pickup",
+    title: "Aviso de Retiro y Facturación",
+    type: "notification",
+    template: "Hola {nombre}, los servicios de tu {vehiculo} han concluido con éxito y la inspección final fue aprobada. Puedes pasar a retirar tu vehículo en horario de taller.",
   },
 ];
 
@@ -59,20 +119,59 @@ export default function RemindersPage() {
   const { tenant } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { whatsappLogs, customers, vehicles, addWhatsAppLog, tenants, updateTenant, updateWhatsAppLog, deleteWhatsAppLog } = useStore();
+  const {
+    whatsappLogs,
+    customers,
+    vehicles,
+    addWhatsAppLog,
+    tenants,
+    updateTenant,
+    updateWhatsAppLog,
+    deleteWhatsAppLog,
+  } = useStore();
+
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
-  const taller = currentTenant ?? ({ id: tenantId, name: "", address: "", phone: "", email: "", rnc: "", logo: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: {} } as Tenant);
+  const taller = currentTenant ?? ({
+    id: tenantId,
+    name: "",
+    address: "",
+    phone: "",
+    email: "",
+    rnc: "",
+    logo: "",
+    wasenderApiKey: undefined,
+    wasenderPhone: undefined,
+    config: {},
+  } as Tenant);
 
-  // Filtrar por tenantId para garantizar el aislamiento de datos multi-tenant
-  const tenantLogs = whatsappLogs.filter((l) => !tenantId || l.tenantId === tenantId);
-  const tenantCustomers = customers.filter((c) => !tenantId || c.tenantId === tenantId);
-  const tenantVehicles = vehicles.filter((v) => !tenantId || v.tenantId === tenantId);
+  // Filtrar por tenantId para garantizar aislamiento multi-tenant
+  const tenantLogs = useMemo(
+    () => whatsappLogs.filter((l) => !tenantId || l.tenantId === tenantId),
+    [whatsappLogs, tenantId]
+  );
+  const tenantCustomers = useMemo(
+    () => customers.filter((c) => !tenantId || c.tenantId === tenantId),
+    [customers, tenantId]
+  );
+  const tenantVehicles = useMemo(
+    () => vehicles.filter((v) => !tenantId || v.tenantId === tenantId),
+    [vehicles, tenantId]
+  );
+
+  const [activeTab, setActiveTab] = useState<"queue" | "automation" | "logs" | "templates">("queue");
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyFilterStatus, setHistoryFilterStatus] = useState<string>("all");
+
   const [isSendOpen, setIsSendOpen] = useState(false);
   const [isApiOpen, setIsApiOpen] = useState(false);
   const [apiKey, setApiKey] = useState(taller?.wasenderApiKey ?? "");
   const [apiPhone, setApiPhone] = useState(taller?.wasenderPhone ?? "");
-  const [sendForm, setSendForm] = useState({ customerId: "", message: "", type: "reminder" as WhatsAppLog["type"] });
+  const [sendForm, setSendForm] = useState({
+    customerId: "",
+    message: "",
+    type: "reminder" as WhatsAppLog["type"],
+  });
 
   useEffect(() => {
     const action = searchParams.get("action");
@@ -80,7 +179,7 @@ export default function RemindersPage() {
     if (action === "new_message") {
       setIsSendOpen(true);
       if (customerId) {
-        setSendForm(f => ({ ...f, customerId }));
+        setSendForm((f) => ({ ...f, customerId }));
       }
     }
   }, [searchParams]);
@@ -90,18 +189,62 @@ export default function RemindersPage() {
     setSendForm({ customerId: "", message: "", type: "reminder" });
     router.replace(`/${tenant}/reminders`);
   };
+
   const [isSending, setIsSending] = useState(false);
-  const [editAuto, setEditAuto] = useState<(typeof AUTOMATIONS[number] & { template: string; active: boolean; kmThreshold: string; timeMonths: string; kmUnit: "km" | "mi" }) | null>(null);
-  const [customAutos, setCustomAutos] = useState<Array<typeof AUTOMATIONS[number] & { template: string; active: boolean; kmThreshold: string; timeMonths: string; kmUnit: "km" | "mi" }>>([]);
+  const [editAuto, setEditAuto] = useState<
+    | (typeof AUTOMATIONS[number] & {
+        template: string;
+        active: boolean;
+        kmThreshold: string;
+        timeMonths: string;
+        kmUnit: "km" | "mi";
+      })
+    | null
+  >(null);
+
+  const [customAutos, setCustomAutos] = useState<
+    Array<
+      typeof AUTOMATIONS[number] & {
+        template: string;
+        active: boolean;
+        kmThreshold: string;
+        timeMonths: string;
+        kmUnit: "km" | "mi";
+      }
+    >
+  >([]);
+
   const allAutos = [...AUTOMATIONS, ...customAutos];
-  const [autoStates, setAutoStates] = useState<Record<string, { template: string; active: boolean; kmThreshold: string; timeMonths: string; kmUnit: "km" | "mi" }>>(
-    Object.fromEntries(AUTOMATIONS.map(a => [a.id, { template: a.template, active: a.active, kmThreshold: "", timeMonths: "", kmUnit: "km" as const }]))
+  const [autoStates, setAutoStates] = useState<
+    Record<
+      string,
+      {
+        template: string;
+        active: boolean;
+        kmThreshold: string;
+        timeMonths: string;
+        kmUnit: "km" | "mi";
+      }
+    >
+  >(
+    Object.fromEntries(
+      AUTOMATIONS.map((a) => [
+        a.id,
+        {
+          template: a.template,
+          active: a.active,
+          kmThreshold: "",
+          timeMonths: "",
+          kmUnit: "km" as const,
+        },
+      ])
+    )
   );
 
   useEffect(() => {
     if (taller?.config?.whatsappAutomations) {
       if (taller.config.whatsappAutomations.autoStates) {
-        setAutoStates(prev => ({ ...prev, ...taller.config!.whatsappAutomations!.autoStates }));
+        setAutoStates((prev) => ({ ...prev, ...taller.config!.whatsappAutomations!.autoStates }));
       }
       if (taller.config.whatsappAutomations.customAutos) {
         setCustomAutos(taller.config.whatsappAutomations.customAutos);
@@ -109,14 +252,26 @@ export default function RemindersPage() {
     }
   }, [taller?.config?.whatsappAutomations]);
 
-  const openNewAuto = () => setEditAuto({ id: `custom_${Date.now()}`, title: "", desc: "", trigger: "Automático", active: true, template: "", kmThreshold: "", timeMonths: "", kmUnit: "km" });
+  const openNewAuto = () =>
+    setEditAuto({
+      id: `custom_${Date.now()}`,
+      title: "",
+      desc: "",
+      trigger: "Automático",
+      category: "Personalizado",
+      active: true,
+      template: "",
+      kmThreshold: "",
+      timeMonths: "",
+      kmUnit: "km",
+    });
 
   const handleSaveAutomation = (updatedAuto: typeof editAuto) => {
     if (!updatedAuto) return;
     const isCustom = updatedAuto.id.startsWith("custom_");
     let nextCustom = [...customAutos];
     if (isCustom) {
-      const idx = nextCustom.findIndex(c => c.id === updatedAuto.id);
+      const idx = nextCustom.findIndex((c) => c.id === updatedAuto.id);
       if (idx !== -1) {
         nextCustom[idx] = updatedAuto;
       } else {
@@ -131,8 +286,8 @@ export default function RemindersPage() {
         active: updatedAuto.active,
         kmThreshold: updatedAuto.kmThreshold,
         timeMonths: updatedAuto.timeMonths,
-        kmUnit: updatedAuto.kmUnit
-      }
+        kmUnit: updatedAuto.kmUnit,
+      },
     };
     setAutoStates(nextStates);
 
@@ -141,15 +296,16 @@ export default function RemindersPage() {
         ...(taller.config || {}),
         whatsappAutomations: {
           autoStates: nextStates,
-          customAutos: nextCustom
-        }
+          customAutos: nextCustom,
+        },
       };
       updateTenant(taller.id, { config: newConfig });
     }
 
-    toast.success("Automatización guardada y sincronizada");
+    toast.success("Automatización guardada y sincronizada correctamente");
     setEditAuto(null);
   };
+
   const isApiConnected = !!(taller?.wasenderApiKey);
 
   const getCustomerPhone = (id: string) => tenantCustomers.find((c) => c.id === id)?.phone || "";
@@ -160,18 +316,20 @@ export default function RemindersPage() {
 
   const sentCount = tenantLogs.filter((l) => l.status === "sent").length;
   const failedCount = tenantLogs.filter((l) => l.status === "failed").length;
+  const pendingCount = tenantLogs.filter((l) => l.status === "pending").length;
+  const activeAutosCount = allAutos.filter((a) => (autoStates[a.id]?.active ?? a.active)).length;
 
   // Send via WaSender proxy Edge Function
   const sendWhatsApp = async (phone: string, message: string): Promise<{ ok: boolean; error?: string }> => {
     const key = taller?.wasenderApiKey;
-    if (!key) return { ok: false, error: "API Key no configurada. Ve a Configurar Dispositivo." };
+    if (!key) return { ok: false, error: "API Key no configurada. Ve a Configurar Conexión API." };
     return waSendText(key, phone, message);
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sendForm.customerId || !sendForm.message) {
-      toast.error("Selecciona un cliente y escribe el mensaje");
+      toast.error("Selecciona un cliente y redacta el mensaje");
       return;
     }
     const customer = tenantCustomers.find((c) => c.id === sendForm.customerId);
@@ -193,9 +351,9 @@ export default function RemindersPage() {
       addWhatsAppLog(log);
       handleCloseSend();
       if (result.ok) {
-        toast.success(`✅ Mensaje enviado a ${customer.name} (${customer.phone})`);
+        toast.success(`Mensaje enviado con éxito a ${customer.name} (${customer.phone})`);
       } else {
-        toast.error(result.error ?? "No se pudo enviar el mensaje");
+        toast.error(result.error ?? "No se pudo despachar el mensaje");
       }
     } catch (err: any) {
       toast.error(`Error inesperado: ${err?.message ?? "desconocido"}`);
@@ -205,268 +363,626 @@ export default function RemindersPage() {
   };
 
   const handleDispatchQueueItem = async (log: WhatsAppLog) => {
-    const isApiConnected = !!(taller?.wasenderApiKey);
-    if (isApiConnected) {
-      toast.loading("Enviando mensaje vía WaSender API...", { id: log.id });
+    const isConnected = !!(taller?.wasenderApiKey);
+    if (isConnected) {
+      toast.loading("Despachando mensaje vía API WaSender...", { id: log.id });
       const res = await sendWhatsApp(log.phone, log.message);
       if (res.ok) {
         updateWhatsAppLog(log.id, { status: "sent", sentAt: new Date().toISOString() });
-        toast.success(`✅ Recordatorio enviado a ${log.customerName}`, { id: log.id });
+        toast.success(`Recordatorio despachado a ${log.customerName}`, { id: log.id });
       } else {
-        toast.error(`❌ Error: ${res.error ?? "No se pudo enviar"}`, { id: log.id });
+        toast.error(`Error al despachar: ${res.error ?? "No se pudo conectar"}`, { id: log.id });
       }
     } else {
-      // Fallback: open WhatsApp link
       const text = log.message;
-      const cleanPhone = log.phone.replace(/[^0-9]/g, '');
-      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
-
-      // Update state to sent
+      const cleanPhone = log.phone.replace(/[^0-9]/g, "");
+      window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, "_blank");
       updateWhatsAppLog(log.id, { status: "sent", sentAt: new Date().toISOString() });
-      toast.success(`✅ Redirigido a WhatsApp para ${log.customerName}`);
+      toast.success(`Abriendo WhatsApp Web para ${log.customerName}`);
     }
   };
 
+  const filteredLogs = useMemo(() => {
+    return [...tenantLogs].reverse().filter((log) => {
+      const matchSearch =
+        historySearch.trim() === "" ||
+        log.customerName.toLowerCase().includes(historySearch.toLowerCase()) ||
+        log.phone.includes(historySearch) ||
+        log.message.toLowerCase().includes(historySearch.toLowerCase());
+      const matchStatus =
+        historyFilterStatus === "all" || log.status === historyFilterStatus;
+      return matchSearch && matchStatus;
+    });
+  }, [tenantLogs, historySearch, historyFilterStatus]);
+
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900">WhatsApp Automation</h1>
-          <p className="text-neutral-500">Recordatorios automáticos y notificaciones con WaSender API.</p>
+    <div className="space-y-6">
+      {/* 1. Header Ejecutivo */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-neutral-200/80 shadow-2xs">
+        <div className="flex items-center gap-3.5">
+          <div className="h-12 w-12 rounded-2xl bg-neutral-900 text-white flex items-center justify-center shadow-sm shrink-0">
+            <Bell className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-neutral-900">
+                Centro de Automatización & WhatsApp
+              </h1>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 font-semibold text-xs gap-1.5",
+                  isApiConnected
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-neutral-100 text-neutral-600 border-neutral-200"
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-2 w-2 rounded-full",
+                    isApiConnected ? "bg-emerald-500 animate-pulse" : "bg-neutral-400"
+                  )}
+                />
+                <span>{isApiConnected ? "API WaSender Activa" : "Modo Manual / Desconectado"}</span>
+              </Badge>
+            </div>
+            <p className="text-xs text-neutral-500 mt-1">
+              Campañas de fidelización, alertas automáticas por kilometraje y notificaciones operativas de taller.
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Badge variant="outline" className={cn("rounded-full px-3 py-1.5 font-semibold gap-1.5", isApiConnected ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-neutral-100 text-neutral-500")}>
-            <span className={cn("h-2 w-2 rounded-full", isApiConnected ? "bg-emerald-500 animate-pulse" : "bg-neutral-400")} />
-            {isApiConnected ? "API Conectada" : "API Desconectada"}
-          </Badge>
-          <Button variant="outline" className="rounded-lg gap-2" onClick={() => setIsApiOpen(true)}>
-            <Settings className="h-4 w-4" /> Configurar API
+
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-800 font-semibold text-xs h-9 px-3.5 gap-1.5 shadow-2xs"
+            onClick={() => setIsApiOpen(true)}
+          >
+            <Settings className="h-3.5 w-3.5 text-neutral-500" />
+            <span>Configurar Conexión API</span>
           </Button>
-          <Button className="rounded-lg bg-black text-white hover:bg-neutral-800 gap-2" onClick={() => setIsSendOpen(true)}>
-            <Send className="h-4 w-4" /> Enviar Mensaje
+
+          <Button
+            size="sm"
+            className="rounded-xl bg-neutral-900 text-white hover:bg-black font-semibold text-xs h-9 px-4 gap-1.5 shadow-xs transition-all cursor-pointer"
+            onClick={() => setIsSendOpen(true)}
+          >
+            <Send className="h-3.5 w-3.5" />
+            <span>Redactar Mensaje Directo</span>
           </Button>
         </div>
       </div>
 
-      {/* Stats — estilo SaaS ultra-compacto y 100% legible */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* 2. Ribbon de 4 KPI Cards Ejecutivas */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         {[
-          { label: "Enviados este mes", value: sentCount, icon: CheckCircle2, iconBg: "bg-emerald-50 text-emerald-600 border-emerald-200/60" },
-          { label: "Fallidos", value: failedCount, icon: AlertCircle, iconBg: "bg-rose-50 text-rose-600 border-rose-200/60" },
-          { label: "Automatizaciones activas", value: AUTOMATIONS.filter((a) => a.active).length, icon: Zap, iconBg: "bg-slate-100 text-slate-700 border-slate-200/60" },
+          {
+            label: "Enviados del Mes",
+            value: sentCount,
+            subtext: "Mensajes despachados con éxito",
+            icon: CheckCircle2,
+            iconBg: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
+          },
+          {
+            label: "En Cola de Despacho",
+            value: pendingCount,
+            subtext: pendingCount > 0 ? "Pendientes de confirmación" : "Cola al día sin retrasos",
+            icon: Clock,
+            iconBg: pendingCount > 0 ? "bg-amber-50 text-amber-700 border-amber-200/80" : "bg-neutral-100 text-neutral-700 border-neutral-200/80",
+          },
+          {
+            label: "Reglas Vigilantes",
+            value: `${activeAutosCount} / ${allAutos.length}`,
+            subtext: "Monitoreo activo de flota",
+            icon: Zap,
+            iconBg: "bg-blue-50 text-blue-700 border-blue-200/80",
+          },
+          {
+            label: "Disponibles del Plan",
+            value: `${Math.max(0, 5000 - sentCount)}`,
+            subtext: `${sentCount} de 5,000 consumidos`,
+            icon: Smartphone,
+            iconBg: "bg-purple-50 text-purple-700 border-purple-200/80",
+            progress: Math.min((sentCount / 5000) * 100, 100),
+          },
         ].map((kpi) => (
-          <div 
-            key={kpi.label} 
-            className="flex items-center gap-3 rounded-xl border border-neutral-200/80 p-3 bg-white shadow-2xs group transition-all"
+          <div
+            key={kpi.label}
+            className="flex flex-col justify-between rounded-2xl border border-neutral-200/80 p-4 bg-white shadow-2xs transition-all hover:border-neutral-300"
           >
-            <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg border flex-shrink-0 transition-transform group-hover:scale-105", kpi.iconBg)}>
-              <kpi.icon className="h-4.5 w-4.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 leading-tight">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
                 {kpi.label}
-              </p>
-              <p className="text-xl font-black tracking-tight text-neutral-900 leading-tight mt-0.5">
+              </span>
+              <div
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl border shrink-0",
+                  kpi.iconBg
+                )}
+              >
+                <kpi.icon className="h-4.5 w-4.5" />
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <div className="text-2xl font-bold tracking-tight text-neutral-900 font-mono tabular-nums">
                 {kpi.value}
+              </div>
+              <p className="text-[11px] text-neutral-400 font-medium mt-0.5">
+                {kpi.subtext}
               </p>
+
+              {kpi.progress !== undefined && (
+                <div className="w-full bg-neutral-100 rounded-full h-1.5 mt-2.5 overflow-hidden border border-neutral-200/60">
+                  <div
+                    className="h-full bg-neutral-900 rounded-full transition-all duration-500"
+                    style={{ width: `${kpi.progress}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        {/* Tabs: Automations / Logs */}
-        <div className="lg:col-span-2">
-          <Tabs defaultValue="queue" className="space-y-5">
-            <TabsList className="bg-neutral-100 p-1 rounded-xl">
-              <TabsTrigger value="queue" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm flex items-center gap-1.5">
-                Cola de Envíos
-                {tenantLogs.filter(l => l.status === "pending").length > 0 && (
-                  <span className="h-5 min-w-[20px] rounded-full bg-rose-500 text-[10px] font-black text-white px-1.5 flex items-center justify-center">
-                    {tenantLogs.filter(l => l.status === "pending").length}
+      {/* 3. Layout Principal: 8 Columnas Centro y 4 Columnas Widget Lateral */}
+      <div className="grid gap-6 lg:grid-cols-12">
+        {/* Columna Izquierda / Centro (8 columnas) */}
+        <div className="lg:col-span-8 space-y-4">
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as any)}
+            className="space-y-4"
+          >
+            <TabsList className="bg-white p-1 rounded-2xl border border-neutral-200/80 h-auto shadow-2xs flex flex-wrap sm:flex-nowrap gap-1">
+              <TabsTrigger
+                value="queue"
+                className="flex-1 rounded-xl px-3.5 py-2 text-xs font-semibold data-[state=active]:bg-neutral-900 data-[state=active]:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span>Cola de Despacho</span>
+                {pendingCount > 0 && (
+                  <span className="h-5 min-w-[20px] rounded-full bg-amber-500 text-[10px] font-bold text-white px-1.5 flex items-center justify-center font-mono">
+                    {pendingCount}
                   </span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="automation" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">Automatizaciones</TabsTrigger>
-              <TabsTrigger value="logs" className="rounded-lg px-6 data-[state=active]:bg-white data-[state=active]:shadow-sm">Historial</TabsTrigger>
+
+              <TabsTrigger
+                value="automation"
+                className="flex-1 rounded-xl px-3.5 py-2 text-xs font-semibold data-[state=active]:bg-neutral-900 data-[state=active]:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                <span>Reglas & Automatizaciones</span>
+              </TabsTrigger>
+
+              <TabsTrigger
+                value="templates"
+                className="flex-1 rounded-xl px-3.5 py-2 text-xs font-semibold data-[state=active]:bg-neutral-900 data-[state=active]:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>Plantillas Rápidas</span>
+              </TabsTrigger>
+
+              <TabsTrigger
+                value="logs"
+                className="flex-1 rounded-xl px-3.5 py-2 text-xs font-semibold data-[state=active]:bg-neutral-900 data-[state=active]:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                <span>Historial de Envíos</span>
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="queue" className="space-y-4">
-              {tenantLogs.filter(l => l.status === "pending").length === 0 ? (
-                <div className="flex flex-col items-center py-20 text-center px-5 bg-white border border-neutral-100 rounded-2xl shadow-sm">
-                  <div className="h-14 w-14 rounded-2xl bg-neutral-50 flex items-center justify-center mb-4 border border-neutral-100">
-                    <Clock className="h-6 w-6 text-neutral-400" />
+            {/* TAB 1: COLA DE DESPACHO */}
+            <TabsContent value="queue" className="space-y-3 mt-0">
+              {pendingCount === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 bg-white border border-neutral-200/80 rounded-2xl shadow-2xs text-center">
+                  <div className="h-14 w-14 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-200/60 flex items-center justify-center mb-3">
+                    <CheckCircle2 className="h-7 w-7" />
                   </div>
-                  <h3 className="text-base font-bold text-neutral-900">Cola de Envíos Vacía</h3>
-                  <p className="text-sm text-neutral-500 max-w-sm mt-1">
-                    No tienes mensajes pendientes. Ve a la sección de Mantenimiento Preventivo para programar recordatorios de desgaste.
+                  <h3 className="text-base font-bold text-neutral-900">
+                    Cola de envíos al día
+                  </h3>
+                  <p className="text-xs text-neutral-500 max-w-md mt-1 leading-relaxed">
+                    No tienes mensajes pendientes en espera. Los recordatorios se encolan automáticamente cuando los vehículos de tus clientes alcanzan los umbrales de kilometraje o cuando una orden de taller cambia de estado.
                   </p>
+                  <div className="flex items-center gap-2 mt-5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl border-neutral-200 text-xs font-semibold h-9 px-4 gap-1.5 shadow-2xs"
+                      onClick={() => router.push(`/${tenant}/maintenance`)}
+                    >
+                      <Wrench className="h-3.5 w-3.5 text-neutral-500" />
+                      <span>Ver Mantenimiento Preventivo</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="rounded-xl bg-neutral-900 text-white hover:bg-black text-xs font-semibold h-9 px-4 gap-1.5 shadow-xs"
+                      onClick={() => setIsSendOpen(true)}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Redactar Recordatorio</span>
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {tenantLogs.filter(l => l.status === "pending").map((log) => {
-                    const vehicle = tenantVehicles.find((v) => v.customerId === log.customerId);
-                    return (
-                      <Card key={log.id} className="border-neutral-100 shadow-sm hover:border-neutral-200 transition-all bg-white overflow-hidden">
-                        <CardContent className="p-5">
-                          <div className="flex flex-col gap-4">
-                            {/* Card Header info */}
-                            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="space-y-3">
+                  {tenantLogs
+                    .filter((l) => l.status === "pending")
+                    .map((log) => {
+                      const vehicle = tenantVehicles.find((v) => v.customerId === log.customerId);
+                      return (
+                        <Card
+                          key={log.id}
+                          className="border border-neutral-200/80 shadow-2xs bg-white rounded-2xl overflow-hidden hover:border-neutral-300 transition-all"
+                        >
+                          <CardContent className="p-4 space-y-3">
+                            <div className="flex items-start justify-between gap-3 flex-wrap">
                               <div className="flex items-center gap-3">
-                                <div className="h-10 w-10 rounded-xl bg-neutral-100 flex items-center justify-center font-bold text-neutral-700 flex-shrink-0">
-                                  {log.customerName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                                <div className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                                  {log.customerName.slice(0, 2).toUpperCase()}
                                 </div>
                                 <div>
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <h4 className="font-bold text-neutral-900 text-sm leading-none">{log.customerName}</h4>
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-2 py-0.5 uppercase tracking-wide">
-                                      Pendiente
+                                    <h4 className="font-bold text-neutral-900 text-sm">
+                                      {log.customerName}
+                                    </h4>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                      En Cola
                                     </span>
                                   </div>
-                                  <p className="text-xs text-neutral-500 mt-1 flex items-center gap-1.5">
-                                    <Phone className="h-3 w-3" /> {log.phone}
+                                  <div className="flex items-center gap-2 text-xs text-neutral-500 mt-0.5 flex-wrap">
+                                    <span className="flex items-center gap-1 font-mono text-[11px] text-neutral-600">
+                                      <Phone className="h-3 w-3 text-neutral-400" />
+                                      {log.phone}
+                                    </span>
                                     {vehicle && (
                                       <>
                                         <span className="text-neutral-300">•</span>
-                                        🚗 {vehicle.brand} {vehicle.model} ({vehicle.plate})
+                                        <span className="flex items-center gap-1 text-neutral-700 font-semibold text-[11px]">
+                                          <Car className="h-3 w-3 text-neutral-400" />
+                                          {vehicle.brand} {vehicle.model} ({vehicle.plate})
+                                        </span>
                                       </>
                                     )}
-                                  </p>
+                                  </div>
                                 </div>
                               </div>
-                              <span className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">
-                                Programado: {new Date(log.sentAt).toLocaleDateString("es-DO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                              <span className="text-[10px] text-neutral-400 font-mono font-medium">
+                                Programado: {new Date(log.sentAt).toLocaleDateString("es-DO", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
                               </span>
                             </div>
 
-                            {/* Editable Text Area */}
-                            <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">Mensaje a Enviar</label>
+                            {/* Text Area */}
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
+                                Texto del Mensaje Personalizado
+                              </label>
                               <textarea
-                                className="w-full min-h-[90px] rounded-xl border border-neutral-200 bg-neutral-50 p-3.5 text-xs text-neutral-800 font-mono resize-none focus:outline-none focus:border-neutral-400 focus:bg-white transition-all leading-relaxed"
+                                className="w-full min-h-[72px] rounded-xl border border-neutral-200 bg-neutral-50/70 p-3 text-xs text-neutral-800 font-mono resize-none focus:outline-none focus:ring-1 focus:ring-black focus:bg-white transition-all leading-relaxed shadow-2xs"
                                 value={log.message}
                                 onChange={(e) => updateWhatsAppLog(log.id, { message: e.target.value })}
-                                placeholder="Escribe el mensaje personalizado..."
+                                placeholder="Escribe el mensaje..."
                               />
                             </div>
 
-                            {/* Action Buttons */}
-                            <div className="flex items-center justify-between gap-3 pt-1 border-t border-neutral-50">
+                            {/* Buttons */}
+                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-100">
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="rounded-xl text-neutral-500 hover:text-rose-600 hover:bg-rose-50 font-bold gap-1.5 h-9 px-4 text-xs"
+                                className="rounded-xl text-neutral-500 hover:text-rose-600 hover:bg-rose-50 font-semibold gap-1.5 h-8 px-3 text-xs cursor-pointer"
                                 onClick={() => {
                                   deleteWhatsAppLog(log.id);
-                                  toast.success("Recordatorio descartado de la cola");
+                                  toast.success("Mensaje descartado de la cola");
                                 }}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
-                                Descartar
+                                <span>Descartar</span>
                               </Button>
 
-                              <Button
-                                className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 font-bold gap-1.5 h-9 px-5 text-xs border-none shadow-sm shadow-emerald-100"
-                                onClick={() => handleDispatchQueueItem(log)}
-                              >
-                                <Send className="h-3.5 w-3.5" />
-                                Enviar WhatsApp
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 font-semibold text-xs h-8 px-3 gap-1.5 shadow-2xs cursor-pointer"
+                                  onClick={() => {
+                                    const text = log.message;
+                                    const cleanPhone = log.phone.replace(/[^0-9]/g, "");
+                                    window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`, "_blank");
+                                    updateWhatsAppLog(log.id, { status: "sent", sentAt: new Date().toISOString() });
+                                    toast.success(`Abriendo WhatsApp Web para ${log.customerName}`);
+                                  }}
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5 text-neutral-500" />
+                                  <span>WhatsApp Web</span>
+                                </Button>
+
+                                <Button
+                                  size="sm"
+                                  className="rounded-xl bg-neutral-900 text-white hover:bg-black font-bold gap-1.5 h-8 px-4 text-xs shadow-2xs cursor-pointer"
+                                  onClick={() => handleDispatchQueueItem(log)}
+                                >
+                                  <Send className="h-3.5 w-3.5" />
+                                  <span>Despachar por API</span>
+                                </Button>
+                              </div>
                             </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                 </div>
               )}
             </TabsContent>
 
-            <TabsContent value="automation" className="space-y-3">
-              {AUTOMATIONS.map((auto) => {
-                const state = autoStates[auto.id];
+            {/* TAB 2: REGLAS Y AUTOMATIZACIONES */}
+            <TabsContent value="automation" className="space-y-3 mt-0">
+              <div className="flex items-center justify-between pb-1">
+                <p className="text-xs text-neutral-500">
+                  Reglas que monitorean los vehículos del taller y preparan mensajes de aviso en tiempo real.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl border-neutral-200 text-xs font-semibold h-8 px-3 gap-1.5 shadow-2xs"
+                  onClick={openNewAuto}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Nueva Regla</span>
+                </Button>
+              </div>
+
+              {allAutos.map((auto) => {
+                const state = autoStates[auto.id] || {
+                  template: auto.template,
+                  active: auto.active,
+                  kmThreshold: "",
+                  timeMonths: "",
+                  kmUnit: "km",
+                };
                 return (
-                  <Card key={auto.id} className={cn("border-neutral-100 shadow-sm hover:border-neutral-200 transition-all", !state.active && "opacity-60")}>
-                    <CardContent className="p-5">
+                  <Card
+                    key={auto.id}
+                    className={cn(
+                      "border border-neutral-200/80 shadow-2xs bg-white rounded-2xl transition-all",
+                      !state.active && "opacity-60 bg-neutral-50/50"
+                    )}
+                  >
+                    <CardContent className="p-4 space-y-3">
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-4">
-                          <div className={cn("h-11 w-11 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5",
-                            state.active ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-400")}>
+                        <div className="flex items-start gap-3.5">
+                          <div
+                            className={cn(
+                              "h-10 w-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5 shadow-2xs",
+                              state.active ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-400"
+                            )}
+                          >
                             <MessageSquare className="h-5 w-5" />
                           </div>
                           <div>
                             <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <h3 className="font-bold text-neutral-900 text-sm">{auto.title}</h3>
-                              <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">{auto.trigger}</Badge>
-                              {!state.active && <Badge className="rounded-full bg-neutral-100 text-neutral-400 border-none text-xs">Inactivo</Badge>}
+                              <Badge
+                                variant="outline"
+                                className="rounded-full bg-neutral-100 text-neutral-700 border-neutral-200 text-[10px] font-semibold"
+                              >
+                                {auto.trigger}
+                              </Badge>
+                              {!state.active && (
+                                <Badge className="rounded-full bg-neutral-100 text-neutral-400 border-neutral-200 text-[10px]">
+                                  Pausada
+                                </Badge>
+                              )}
                             </div>
-                            <p className="text-xs text-neutral-500 mb-2">{auto.desc}</p>
+                            <p className="text-xs text-neutral-500">{auto.desc}</p>
                             {(state.kmThreshold || state.timeMonths) && (
-                              <div className="flex gap-2 mb-2 flex-wrap">
+                              <div className="flex gap-2 mt-2 flex-wrap">
                                 {state.kmThreshold && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-2 py-0.5">
-                                    🛣 Cada {Number(state.kmThreshold).toLocaleString("es-DO")} {state.kmUnit}
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/80 rounded-full px-2 py-0.5">
+                                    <Gauge className="h-3 w-3 text-blue-600" />
+                                    <span>Cada {Number(state.kmThreshold).toLocaleString("es-DO")} {state.kmUnit}</span>
                                   </span>
                                 )}
                                 {state.timeMonths && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-2 py-0.5">
-                                    🗓 Cada {state.timeMonths} {Number(state.timeMonths) === 1 ? "mes" : "meses"}
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200/80 rounded-full px-2 py-0.5">
+                                    <Calendar className="h-3 w-3 text-amber-600" />
+                                    <span>Cada {state.timeMonths} {Number(state.timeMonths) === 1 ? "mes" : "meses"}</span>
                                   </span>
                                 )}
                               </div>
                             )}
-                            <div className="bg-neutral-50 rounded-lg p-3 text-xs text-neutral-600 font-mono border border-neutral-100">
-                              {state.template}
-                            </div>
                           </div>
                         </div>
-                        <Button variant="ghost" size="icon" className="rounded-full h-8 w-8 flex-shrink-0"
-                          onClick={() => setEditAuto({ ...auto, template: state.template, active: state.active, kmThreshold: state.kmThreshold, timeMonths: state.timeMonths, kmUnit: state.kmUnit })}>
-                          <Settings className="h-4 w-4 text-neutral-400" />
-                        </Button>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-xl h-8 w-8 p-0 text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 shrink-0 cursor-pointer"
+                            onClick={() =>
+                              setEditAuto({
+                                ...auto,
+                                template: state.template,
+                                active: state.active,
+                                kmThreshold: state.kmThreshold,
+                                timeMonths: state.timeMonths,
+                                kmUnit: state.kmUnit,
+                              })
+                            }
+                          >
+                            <Settings className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="bg-neutral-50/80 rounded-xl p-3 text-xs text-neutral-700 font-mono border border-neutral-200/70 leading-relaxed">
+                        {state.template}
                       </div>
                     </CardContent>
                   </Card>
                 );
               })}
-              <button
-                onClick={openNewAuto}
-                className="w-full h-14 border-2 border-dashed border-neutral-200 rounded-xl text-neutral-500 hover:text-black hover:border-black transition-all flex items-center justify-center gap-2 text-sm font-medium">
-                <Plus className="h-4 w-4" /> Nueva Automatización
-              </button>
             </TabsContent>
 
-            <TabsContent value="logs">
-              <Card className="border-neutral-100 shadow-sm overflow-hidden">
+            {/* TAB 3: PLANTILLAS RÁPIDAS */}
+            <TabsContent value="templates" className="space-y-3 mt-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {QUICK_TEMPLATES.map((tmpl) => (
+                  <Card
+                    key={tmpl.id}
+                    className="border border-neutral-200/80 shadow-2xs rounded-2xl bg-white hover:border-neutral-300 transition-all flex flex-col justify-between"
+                  >
+                    <CardHeader className="p-4 pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-xs font-bold text-neutral-900">
+                          {tmpl.title}
+                        </CardTitle>
+                        <Badge variant="outline" className="text-[10px] rounded-full border-neutral-200 text-neutral-600">
+                          {tmpl.type === "reminder" ? "Recordatorio" : "Notificación"}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 space-y-3">
+                      <p className="text-xs text-neutral-600 font-mono bg-neutral-50/80 p-2.5 rounded-xl border border-neutral-100 leading-relaxed">
+                        {tmpl.template}
+                      </p>
+                      <div className="flex justify-end gap-2 pt-1 border-t border-neutral-50">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-xl text-xs font-semibold border-neutral-200 gap-1.5"
+                          onClick={() => {
+                            navigator.clipboard.writeText(tmpl.template);
+                            toast.success("Plantilla copiada al portapapeles");
+                          }}
+                        >
+                          <Copy className="h-3 w-3 text-neutral-400" />
+                          <span>Copiar</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-8 rounded-xl bg-neutral-900 text-white hover:bg-black text-xs font-semibold gap-1.5"
+                          onClick={() => {
+                            setSendForm((prev) => ({
+                              ...prev,
+                              message: tmpl.template,
+                              type: tmpl.type as any,
+                            }));
+                            setIsSendOpen(true);
+                          }}
+                        >
+                          <Send className="h-3 w-3" />
+                          <span>Usar para Enviar</span>
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </TabsContent>
+
+            {/* TAB 4: HISTORIAL DE ENVÍOS */}
+            <TabsContent value="logs" className="space-y-3 mt-0">
+              <div className="flex items-center gap-3 bg-white p-3 rounded-2xl border border-neutral-200/80 shadow-2xs flex-wrap sm:flex-nowrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <Input
+                    className="pl-9 h-9 rounded-xl border-neutral-200 bg-white text-xs shadow-2xs"
+                    placeholder="Buscar por cliente, teléfono o texto..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                  />
+                </div>
+                <Select value={historyFilterStatus} onValueChange={(v) => setHistoryFilterStatus(v || "all")}>
+                  <SelectTrigger className="w-36 h-9 rounded-xl border-neutral-200 text-xs shadow-2xs bg-white">
+                    <SelectValue placeholder="Estado" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl shadow-lg border-neutral-200">
+                    <SelectItem value="all" className="text-xs">Todos los estados</SelectItem>
+                    <SelectItem value="sent" className="text-xs">Enviados</SelectItem>
+                    <SelectItem value="failed" className="text-xs">Fallidos</SelectItem>
+                    <SelectItem value="pending" className="text-xs">En Cola</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Card className="border border-neutral-200/80 shadow-2xs rounded-2xl overflow-hidden bg-white">
                 <CardContent className="p-0">
-                  {tenantLogs.length === 0 ? (
-                    <div className="flex flex-col items-center py-14 text-center px-5">
-                      <MessageSquare className="h-10 w-10 text-neutral-200 mb-3" />
-                      <p className="text-sm font-medium text-neutral-500">Sin mensajes enviados aún.</p>
+                  {filteredLogs.length === 0 ? (
+                    <div className="flex flex-col items-center py-16 text-center px-5">
+                      <MessageSquare className="h-10 w-10 text-neutral-300 mb-2" />
+                      <p className="text-sm font-semibold text-neutral-700">Sin mensajes en el historial</p>
+                      <p className="text-xs text-neutral-400 mt-0.5">
+                        Los despachos completados o fallidos quedarán archivados aquí.
+                      </p>
                     </div>
                   ) : (
                     <div className="divide-y divide-neutral-100">
-                      {[...tenantLogs].reverse().map((log) => (
-                        <div key={log.id} className="flex items-start justify-between p-5 hover:bg-neutral-50/50 transition-colors">
+                      {filteredLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="flex items-start justify-between p-4 hover:bg-neutral-50/60 transition-colors gap-3"
+                        >
                           <div className="flex items-start gap-3">
-                            <div className={cn("h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0",
-                              log.status === "sent" ? "bg-emerald-50 text-emerald-600" : log.status === "failed" ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600")}>
-                              {log.status === "sent" ? <CheckCircle2 className="h-4 w-4" /> : log.status === "failed" ? <AlertCircle className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
+                            <div
+                              className={cn(
+                                "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border",
+                                log.status === "sent"
+                                  ? "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                  : log.status === "failed"
+                                  ? "bg-rose-50 text-rose-600 border-rose-200"
+                                  : "bg-amber-50 text-amber-600 border-amber-200"
+                              )}
+                            >
+                              {log.status === "sent" ? (
+                                <CheckCircle2 className="h-4 w-4" />
+                              ) : log.status === "failed" ? (
+                                <AlertCircle className="h-4 w-4" />
+                              ) : (
+                                <Clock className="h-4 w-4" />
+                              )}
                             </div>
                             <div>
-                              <p className="text-sm font-bold text-neutral-900">{log.customerName}</p>
-                              <p className="text-xs text-neutral-500 flex items-center gap-1"><Phone className="h-3 w-3" />{log.phone}</p>
-                              <p className="text-xs text-neutral-600 mt-1 max-w-xs line-clamp-2">{log.message}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs font-bold text-neutral-900">{log.customerName}</p>
+                                <span className="text-[10px] text-neutral-400 font-mono">
+                                  {log.phone}
+                                </span>
+                              </div>
+                              <p className="text-xs text-neutral-600 mt-1 max-w-md line-clamp-2 leading-relaxed">
+                                {log.message}
+                              </p>
                             </div>
                           </div>
-                          <div className="text-right flex-shrink-0">
-                            <Badge className={cn("border-none text-[10px]",
-                              log.status === "sent" ? "bg-emerald-100 text-emerald-700" : log.status === "failed" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700")}>
-                              {log.status === "sent" ? "Enviado" : log.status === "failed" ? "Fallido" : "Pendiente"}
+
+                          <div className="text-right shrink-0">
+                            <Badge
+                              className={cn(
+                                "border-none text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                                log.status === "sent"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : log.status === "failed"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-amber-100 text-amber-800"
+                              )}
+                            >
+                              {log.status === "sent" ? "Enviado" : log.status === "failed" ? "Fallido" : "En Cola"}
                             </Badge>
-                            <p className="text-[10px] text-neutral-400 mt-1">
-                              {new Date(log.sentAt).toLocaleDateString("es-DO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                            <p className="text-[10px] text-neutral-400 font-mono mt-1">
+                              {new Date(log.sentAt).toLocaleDateString("es-DO", {
+                                day: "2-digit",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
                             </p>
                           </div>
                         </div>
@@ -479,278 +995,429 @@ export default function RemindersPage() {
           </Tabs>
         </div>
 
-        {/* API Status card */}
-        <div className="space-y-5">
-          <Card className="border-neutral-100 shadow-sm bg-neutral-950 text-white overflow-hidden">
-            <CardHeader>
-              <CardTitle className="text-base text-white">Estado del Servicio</CardTitle>
-              <CardDescription className="text-neutral-400">WaSender API</CardDescription>
+        {/* Columna Lateral Derecha: Widget de Estado & Retención (4 columnas) */}
+        <div className="lg:col-span-4 space-y-4">
+          {/* Card 1: Estado del Servicio WaSender */}
+          <Card className="border border-neutral-200/80 shadow-2xs rounded-2xl bg-white overflow-hidden">
+            <CardHeader className="p-4 pb-2 border-b border-neutral-100">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xs font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                  <Smartphone className="h-4 w-4 text-neutral-500" />
+                  <span>Conexión de WhatsApp</span>
+                </CardTitle>
+                <span
+                  className={cn(
+                    "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                    isApiConnected
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-neutral-100 text-neutral-500 border-neutral-200"
+                  )}
+                >
+                  {isApiConnected ? "Activo" : "Sin Conexión"}
+                </span>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="flex flex-col items-center py-4">
-                <div className="relative h-24 w-24 rounded-3xl bg-white/10 flex items-center justify-center">
-                  <Smartphone className="h-12 w-12 text-white" />
-                  <div className={cn("absolute -bottom-2 -right-2 h-8 w-8 rounded-full border-4 border-neutral-950 flex items-center justify-center",
-                    isApiConnected ? "bg-emerald-500" : "bg-neutral-500")}>
-                    {isApiConnected ? <CheckCircle2 className="h-4 w-4 text-white" /> : <X className="h-4 w-4 text-white" />}
-                  </div>
-                </div>
-                <p className="mt-5 text-sm font-semibold">WaSender · {isApiConnected ? "Conectado" : "Desconectado"}</p>
-                <p className="text-xs text-neutral-500">{taller?.wasenderPhone || "Número no configurado"}</p>
+
+            <CardContent className="p-4 space-y-4">
+              <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-200/60 space-y-1">
+                <p className="text-[11px] font-semibold text-neutral-500">Línea del Taller:</p>
+                <p className="text-xs font-mono font-bold text-neutral-900">
+                  {taller?.wasenderPhone || "Sin número registrado"}
+                </p>
               </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-400">Mensajes este mes</span>
-                  <span className="font-bold">{sentCount} / 5,000</span>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-semibold text-neutral-700">
+                  <span>Cuota Mensual</span>
+                  <span className="font-mono">{sentCount} / 5,000</span>
                 </div>
-                <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full bg-white rounded-full" style={{ width: `${Math.min((sentCount / 5000) * 100, 100)}%` }} />
+                <div className="h-2 w-full rounded-full bg-neutral-100 overflow-hidden border border-neutral-200/70">
+                  <div
+                    className="h-full bg-neutral-900 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min((sentCount / 5000) * 100, 100)}%` }}
+                  />
                 </div>
-                <p className="text-[10px] text-neutral-500">Plan Pro · 5,000 mensajes mensuales</p>
+                <p className="text-[10px] text-neutral-400">
+                  Renovación automática con tu suscripción activa.
+                </p>
               </div>
-              <Button className="w-full bg-white text-black hover:bg-neutral-100 rounded-xl h-11 font-bold gap-2" onClick={() => setIsApiOpen(true)}>
-                <Settings className="h-4 w-4" /> Configurar Dispositivo
+
+              <Button
+                variant="outline"
+                className="w-full rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 font-semibold text-xs h-9 gap-1.5 shadow-2xs"
+                onClick={() => setIsApiOpen(true)}
+              >
+                <Settings className="h-3.5 w-3.5 text-neutral-500" />
+                <span>Configurar Credenciales API</span>
               </Button>
             </CardContent>
           </Card>
 
-          {/* Clients without recent visit */}
-          <Card className="border-neutral-100 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-neutral-400">Clientes Inactivos</CardTitle>
+          {/* Card 2: Clientes Inactivos (Oportunidades de Retención) */}
+          <Card className="border border-neutral-200/80 shadow-2xs rounded-2xl bg-white overflow-hidden">
+            <CardHeader className="p-4 pb-2 border-b border-neutral-100">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xs font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
+                  <UserCheck className="h-4 w-4 text-neutral-500" />
+                  <span>Oportunidades de Retención</span>
+                </CardTitle>
+                <span className="text-[10px] font-bold text-neutral-400 font-mono">
+                  +180 días
+                </span>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {tenantCustomers.slice(0, 3).map((c) => (
-                <div key={c.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-bold text-neutral-600">
-                      {c.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+
+            <CardContent className="p-4 space-y-2.5">
+              {tenantCustomers.slice(0, 3).length === 0 ? (
+                <p className="text-xs text-neutral-400 py-3 text-center">No hay clientes inactivos</p>
+              ) : (
+                tenantCustomers.slice(0, 3).map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-50/70 border border-neutral-200/60"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-lg bg-neutral-200/80 text-neutral-700 flex items-center justify-center text-xs font-bold shrink-0">
+                        {c.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-neutral-900 truncate">{c.name}</p>
+                        <p className="text-[10px] text-neutral-400 font-mono truncate">{c.phone}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-neutral-900">{c.name}</p>
-                      <p className="text-xs text-neutral-400">+180 días sin visita</p>
-                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 rounded-lg text-xs font-semibold gap-1 text-neutral-800 hover:text-black hover:bg-white shrink-0 shadow-2xs"
+                      onClick={() => {
+                        setSendForm({
+                          customerId: c.id,
+                          message: `Estimado/a ${c.name.split(" ")[0]}, hace tiempo que no registras visitas en nuestro taller. Te invitamos a una inspección de rutina para asegurar el óptimo rendimiento de tu vehículo. Saludos.`,
+                          type: "reminder",
+                        });
+                        setIsSendOpen(true);
+                      }}
+                    >
+                      <Send className="h-3 w-3" />
+                      <span>Redactar</span>
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs gap-1 hover:bg-emerald-50 hover:text-emerald-700"
-                    onClick={() => { setSendForm({ customerId: c.id, message: `Hola ${c.name.split(" ")[0]}, hace tiempo que no nos visitas. ¿Necesita una revisión tu vehículo? 🚗`, type: "reminder" }); setIsSendOpen(true); }}>
-                    <Send className="h-3 w-3" /> Enviar
-                  </Button>
-                </div>
-              ))}
+                ))
+              )}
             </CardContent>
+          </Card>
+
+          {/* Card 3: Buenas Prácticas WhatsApp */}
+          <Card className="border border-neutral-200/80 shadow-2xs rounded-2xl bg-neutral-50/60 p-4 space-y-2">
+            <p className="text-xs font-bold text-neutral-900 flex items-center gap-1.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <span>Buenas Prácticas de Comunicación</span>
+            </p>
+            <ul className="text-[11px] text-neutral-600 space-y-1 leading-relaxed list-disc list-inside">
+              <li>Envía mensajes preferentemente entre 8:30 AM y 6:30 PM.</li>
+              <li>Incluye siempre la placa o modelo del vehículo en el mensaje.</li>
+              <li>Verifica que el número incluya el código de área (+1 para RD).</li>
+            </ul>
           </Card>
         </div>
       </div>
 
-      {/* Send Message Dialog */}
-      <Dialog open={isSendOpen} onOpenChange={(open) => {
-        if (!open) handleCloseSend();
-        else setIsSendOpen(true);
-      }}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
-          <DialogHeader><DialogTitle className="text-xl font-bold">Enviar Mensaje WhatsApp</DialogTitle></DialogHeader>
+      {/* MODAL: Enviar Mensaje Directo */}
+      <Dialog
+        open={isSendOpen}
+        onOpenChange={(open) => {
+          if (!open) handleCloseSend();
+          else setIsSendOpen(true);
+        }}
+      >
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white border border-neutral-200/90 shadow-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-neutral-900">
+              Redactar Mensaje WhatsApp
+            </DialogTitle>
+            <p className="text-xs text-neutral-500 font-normal">
+              Envío personalizado directo al teléfono registrado del cliente.
+            </p>
+          </DialogHeader>
           <form onSubmit={handleSend} className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>Cliente</Label>
-              <Select value={sendForm.customerId} onValueChange={(v) => setSendForm({ ...sendForm, customerId: v || "" })}>
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200">
-                  <span className="truncate text-sm">
-                    {sendForm.customerId
-                      ? tenantCustomers.find((c) => c.id === sendForm.customerId)?.name + " — " + tenantCustomers.find((c) => c.id === sendForm.customerId)?.phone
-                      : <span className="text-neutral-400">Seleccionar cliente</span>}
-                  </span>
+              <Label className="text-xs font-semibold text-neutral-700">Cliente Destinatario *</Label>
+              <Select
+                value={sendForm.customerId}
+                onValueChange={(v) => setSendForm({ ...sendForm, customerId: v || "" })}
+              >
+                <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white font-medium text-xs shadow-2xs">
+                  <SelectValue placeholder="Seleccionar cliente..." />
                 </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {tenantCustomers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name} — {c.phone}</SelectItem>)}
+                <SelectContent className="rounded-xl shadow-lg border-neutral-200 max-h-56">
+                  {tenantCustomers.map((c) => (
+                    <SelectItem key={c.id} value={c.id} className="text-xs py-2">
+                      {c.name} — <span className="font-mono text-neutral-500">{c.phone}</span>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
-              <Label>Tipo</Label>
-              <Select value={sendForm.type} onValueChange={(v) => setSendForm({ ...sendForm, type: (v || "reminder") as WhatsAppLog["type"] })}>
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200">
-                  <span className="text-sm">{(({
-                    reminder: "Recordatorio",
-                    notification: "Notificación",
-                    invoice: "Factura",
-                    marketing: "Marketing",
-                  } as Record<string, string>)[sendForm.type] ?? sendForm.type)}</span>
+              <Label className="text-xs font-semibold text-neutral-700">Categoría del Mensaje</Label>
+              <Select
+                value={sendForm.type}
+                onValueChange={(v) =>
+                  setSendForm({ ...sendForm, type: (v || "reminder") as WhatsAppLog["type"] })
+                }
+              >
+                <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white font-medium text-xs shadow-2xs">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="reminder">Recordatorio</SelectItem>
-                  <SelectItem value="notification">Notificación</SelectItem>
-                  <SelectItem value="invoice">Factura</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
+                <SelectContent className="rounded-xl shadow-lg border-neutral-200">
+                  <SelectItem value="reminder" className="text-xs py-2">Recordatorio Preventivo</SelectItem>
+                  <SelectItem value="notification" className="text-xs py-2">Notificación Operativa</SelectItem>
+                  <SelectItem value="invoice" className="text-xs py-2">Factura / Cobro</SelectItem>
+                  <SelectItem value="marketing" className="text-xs py-2">Promoción / Fidelización</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
-              <Label>Mensaje</Label>
-              <textarea className="w-full min-h-[100px] rounded-xl border border-neutral-200 p-3 text-sm resize-none focus:outline-none focus:border-neutral-400 transition-colors"
-                placeholder="Escribe el mensaje a enviar..."
-                value={sendForm.message} onChange={(e) => setSendForm({ ...sendForm, message: e.target.value })} />
+              <Label className="text-xs font-semibold text-neutral-700">Texto del Mensaje *</Label>
+              <textarea
+                className="w-full min-h-[96px] rounded-xl border border-neutral-200 bg-white p-3 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-black placeholder:text-neutral-400 shadow-2xs leading-relaxed"
+                placeholder="Escribe el mensaje formal para el cliente..."
+                value={sendForm.message}
+                onChange={(e) => setSendForm({ ...sendForm, message: e.target.value })}
+              />
             </div>
+
             {sendForm.customerId && (
-              <div className="flex items-center gap-2 rounded-xl bg-neutral-50 p-3 border border-neutral-100">
-                <Phone className="h-4 w-4 text-neutral-400" />
-                <span className="text-sm text-neutral-600">Se enviará a: <strong>{getCustomerPhone(sendForm.customerId)}</strong></span>
+              <div className="flex items-center gap-2 rounded-xl bg-neutral-50 p-2.5 border border-neutral-200/70 text-xs text-neutral-600">
+                <Phone className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
+                <span>
+                  Número destino: <strong className="font-mono text-neutral-900">{getCustomerPhone(sendForm.customerId)}</strong>
+                </span>
               </div>
             )}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={handleCloseSend} className="rounded-xl">Cancelar</Button>
-              <Button type="submit" disabled={isSending} className="rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 gap-2">
-                {isSending ? "Enviando..." : <><Send className="h-4 w-4" /> Enviar por WhatsApp</>}
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCloseSend}
+                className="rounded-xl font-semibold border-neutral-200 text-xs px-4 h-9 shadow-2xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={isSending}
+                className="rounded-xl bg-neutral-900 hover:bg-black text-white font-bold text-xs px-5 h-9 shadow-sm transition-all gap-1.5"
+              >
+                <Send className="h-3.5 w-3.5" />
+                <span>{isSending ? "Despachando..." : "Despachar Mensaje"}</span>
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* API Config Dialog */}
+      {/* MODAL: Configurar API WaSender */}
       <Dialog open={isApiOpen} onOpenChange={setIsApiOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl">
+        <DialogContent className="sm:max-w-md rounded-2xl bg-white border border-neutral-200/90 shadow-2xl p-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Configurar WaSender API</DialogTitle>
-            <p className="text-sm text-neutral-500">Consigue tu API key en <a href="https://wasenderapi.com" target="_blank" className="text-black font-medium underline">wasenderapi.com</a></p>
+            <DialogTitle className="text-lg font-bold text-neutral-900">
+              Configurar Conexión WaSender API
+            </DialogTitle>
+            <p className="text-xs text-neutral-500 font-normal">
+              Vincula tu cuenta de proveedor para automatizar despachos sin intervención manual.
+            </p>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>API Key</Label>
-              <Input type="password" placeholder="Bearer token de WaSender..." className="h-10 rounded-xl border-neutral-200"
-                value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <Label className="text-xs font-semibold text-neutral-700">API Key / Token Bearer</Label>
+              <Input
+                type="password"
+                placeholder="Bearer token provisto por la pasarela..."
+                className="h-10 rounded-xl border-neutral-200 bg-white text-xs font-mono shadow-2xs"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Número de WhatsApp del Taller</Label>
-              <Input type="tel" placeholder="+1809XXXXXXX" className="h-10 rounded-xl border-neutral-200"
-                value={apiPhone} onChange={(e) => setApiPhone(e.target.value)} />
+              <Label className="text-xs font-semibold text-neutral-700">Número de WhatsApp del Taller</Label>
+              <Input
+                type="tel"
+                placeholder="+18090000000"
+                className="h-10 rounded-xl border-neutral-200 bg-white text-xs font-mono shadow-2xs"
+                value={apiPhone}
+                onChange={(e) => setApiPhone(e.target.value)}
+              />
             </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-100 p-4 text-xs text-amber-700 space-y-1">
-              <p className="font-bold">📱 Cómo conectar:</p>
-              <ol className="list-decimal list-inside space-y-0.5">
-                <li>Crea cuenta en wasenderapi.com</li>
-                <li>Escanea el QR con tu WhatsApp</li>
-                <li>Copia tu Bearer Token y pégalo arriba</li>
+            <div className="rounded-xl bg-blue-50/70 border border-blue-100 p-3.5 text-xs text-blue-900 space-y-1.5">
+              <p className="font-bold flex items-center gap-1.5 text-blue-950">
+                <ShieldCheck className="h-4 w-4 text-blue-600" />
+                Pasos para conectar:
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-blue-800 text-[11px] leading-relaxed">
+                <li>Accede a tu panel en wasenderapi.com</li>
+                <li>Escanea el código QR desde WhatsApp en el teléfono del taller</li>
+                <li>Genera tu Bearer Token y pégalo en el campo superior</li>
               </ol>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsApiOpen(false)} className="rounded-xl">Cancelar</Button>
-            <Button className="rounded-xl bg-black text-white hover:bg-neutral-800" onClick={async () => {
-              if (!apiKey.trim()) { toast.error("Ingresa tu API Key"); return; }
-              // 1. Update local store for immediate reactivity
-              updateTenant(taller.id, { wasenderApiKey: apiKey.trim(), wasenderPhone: apiPhone.trim() });
-              // 2. Persist to Supabase so it survives across devices
-              const { error } = await supabaseAdmin
-                .from("tenants")
-                .update({ wasender_api_key: apiKey.trim(), wasender_phone: apiPhone.trim() })
-                .eq("id", taller.id);
-              if (error) {
-                console.error("Error saving WaSender to Supabase:", error);
-                toast.warning("Guardado localmente. Error al sincronizar con servidor.");
-              } else {
-                toast.success("Configuración de WaSender guardada correctamente");
-              }
-              setIsApiOpen(false);
-            }}>
-              Guardar Configuración
+          <DialogFooter className="pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setIsApiOpen(false)}
+              className="rounded-xl font-semibold border-neutral-200 text-xs px-4 h-9 shadow-2xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="rounded-xl bg-neutral-900 text-white hover:bg-black font-bold text-xs px-5 h-9 shadow-sm"
+              onClick={async () => {
+                if (!apiKey.trim()) {
+                  toast.error("Ingresa una API Key válida");
+                  return;
+                }
+                updateTenant(taller.id, { wasenderApiKey: apiKey.trim(), wasenderPhone: apiPhone.trim() });
+                const { error } = await supabaseAdmin
+                  .from("tenants")
+                  .update({ wasender_api_key: apiKey.trim(), wasender_phone: apiPhone.trim() })
+                  .eq("id", taller.id);
+                if (error) {
+                  console.error("Error saving WaSender to Supabase:", error);
+                  toast.warning("Guardado localmente. Error al sincronizar con servidor.");
+                } else {
+                  toast.success("Credenciales de WaSender guardadas con éxito");
+                }
+                setIsApiOpen(false);
+              }}
+            >
+              Guardar Credenciales
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Edit Automation Dialog — Split View (light) */}
-      <Dialog open={!!editAuto} onOpenChange={(o) => !o && setEditAuto(null)}>
-        <DialogContent className="!max-w-2xl rounded-2xl p-0 overflow-hidden">
-          {editAuto && (
-            <div className="flex min-h-0">
 
-              {/* LEFT — light panel: triggers */}
-              <div className="w-64 flex-shrink-0 bg-neutral-50 border-r border-neutral-100 flex flex-col p-5 gap-4">
-                {/* Header */}
+      {/* MODAL: Editar Regla de Automatización */}
+      <Dialog open={!!editAuto} onOpenChange={(o) => !o && setEditAuto(null)}>
+        <DialogContent className="sm:max-w-2xl w-[95vw] rounded-3xl p-0 overflow-hidden bg-white border border-neutral-200/90 shadow-2xl">
+          {editAuto && (
+            <div className="flex flex-col sm:flex-row min-h-0">
+              {/* Panel Izquierdo: Parámetros */}
+              <div className="w-full sm:w-64 bg-neutral-50/80 border-b sm:border-b-0 sm:border-r border-neutral-200/80 flex flex-col p-5 gap-4">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-neutral-400 mb-0.5">Automatización</p>
-                  <h2 className="text-sm font-black text-neutral-900 leading-snug">{editAuto.title || "Nueva Automatización"}</h2>
-                  <span className="inline-block mt-1 text-[10px] font-semibold bg-neutral-200 text-neutral-600 rounded-full px-2 py-0.5">{editAuto.trigger}</span>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 mb-0.5">
+                    Regla de Disparo
+                  </p>
+                  <h2 className="text-sm font-bold text-neutral-900 leading-snug">
+                    {editAuto.title || "Nueva Automatización"}
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="mt-1.5 text-[10px] font-semibold bg-neutral-200/60 text-neutral-700 border-neutral-200"
+                  >
+                    {editAuto.trigger}
+                  </Badge>
                 </div>
 
-                <div className="h-px bg-neutral-200" />
+                <div className="h-px bg-neutral-200/70" />
 
-                {/* KM threshold */}
+                {/* Kilometraje */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-neutral-700">
+                    <p className="text-xs font-semibold text-neutral-700">
                       Por {editAuto.kmUnit === "mi" ? "Millaje" : "Kilometraje"}
                     </p>
-                    <div className="flex items-center gap-0.5 bg-neutral-100 rounded-lg p-0.5">
-                      {(["km", "mi"] as const).map(u => (
-                        <button key={u} type="button"
+                    <div className="flex items-center gap-0.5 bg-neutral-200/60 rounded-lg p-0.5">
+                      {(["km", "mi"] as const).map((u) => (
+                        <button
+                          key={u}
+                          type="button"
                           onClick={() => setEditAuto({ ...editAuto, kmUnit: u })}
-                          className={cn("px-2.5 py-0.5 rounded-md text-[11px] font-bold transition-all",
-                            editAuto.kmUnit === u ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700")}>
+                          className={cn(
+                            "px-2 py-0.5 rounded-md text-[10px] font-bold transition-all",
+                            editAuto.kmUnit === u
+                              ? "bg-white text-neutral-900 shadow-2xs"
+                              : "text-neutral-500 hover:text-neutral-700"
+                          )}
+                        >
                           {u}
                         </button>
                       ))}
                     </div>
                   </div>
-                  <input
+                  <Input
                     type="number"
-                    placeholder={`Ej: ${editAuto.kmUnit === "mi" ? "3,000 mi" : "5,000 km"}`}
-                    className="w-full h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs focus:outline-none focus:border-neutral-400 transition-colors"
+                    placeholder={`Ej: ${editAuto.kmUnit === "mi" ? "3000" : "5000"}`}
+                    className="h-9 rounded-xl border-neutral-200 bg-white text-xs font-mono shadow-2xs"
                     value={editAuto.kmThreshold}
-                    onChange={e => setEditAuto({ ...editAuto, kmThreshold: e.target.value })}
+                    onChange={(e) => setEditAuto({ ...editAuto, kmThreshold: e.target.value })}
                   />
                   <p className="text-[10px] text-neutral-400">
-                    {editAuto.kmThreshold ? `Cada ${Number(editAuto.kmThreshold).toLocaleString("es-DO")} ${editAuto.kmUnit} desde el último servicio.` : "Opcional — deja vacío para omitir."}
+                    {editAuto.kmThreshold
+                      ? `Cada ${Number(editAuto.kmThreshold).toLocaleString("es-DO")} ${editAuto.kmUnit}.`
+                      : "Opcional (dejar vacío si no aplica)."}
                   </p>
                 </div>
 
-                {/* Time threshold */}
+                {/* Meses */}
                 <div className="space-y-1.5">
-                  <p className="text-xs font-bold text-neutral-700">Por Tiempo (meses)</p>
+                  <p className="text-xs font-semibold text-neutral-700">Por Tiempo Transcurrido</p>
                   <div className="flex gap-2 items-center">
-                    <input
-                      type="number" min="1" max="24"
-                      placeholder="Ej: 3"
-                      className="w-16 h-8 rounded-lg bg-white border border-neutral-200 px-2.5 text-xs focus:outline-none focus:border-neutral-400 transition-colors"
+                    <Input
+                      type="number"
+                      min="1"
+                      max="24"
+                      placeholder="6"
+                      className="w-16 h-8 rounded-lg bg-white border-neutral-200 text-xs font-mono shadow-2xs text-center"
                       value={editAuto.timeMonths}
-                      onChange={e => setEditAuto({ ...editAuto, timeMonths: e.target.value })}
+                      onChange={(e) => setEditAuto({ ...editAuto, timeMonths: e.target.value })}
                     />
-                    <span className="text-xs text-neutral-500">meses sin servicio</span>
+                    <span className="text-xs text-neutral-600 font-medium">meses sin visita</span>
                   </div>
-                  <p className="text-[10px] text-neutral-400">
-                    {editAuto.timeMonths ? `Recordatorio cada ${editAuto.timeMonths} mes(es).` : "Opcional — deja vacío para omitir."}
-                  </p>
                 </div>
 
-                {/* Active toggle */}
-                <div className="mt-auto pt-3 border-t border-neutral-200 flex items-center justify-between">
+                {/* Toggle Activo */}
+                <div className="mt-auto pt-3 border-t border-neutral-200/70 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-bold text-neutral-900">Activa</p>
-                    <p className="text-[10px] text-neutral-400">Envío automático</p>
+                    <p className="text-xs font-semibold text-neutral-900">Estado de Regla</p>
+                    <p className="text-[10px] text-neutral-400">
+                      {editAuto.active ? "Activa y vigilante" : "Pausada"}
+                    </p>
                   </div>
-                  <button type="button"
+                  <button
+                    type="button"
                     onClick={() => setEditAuto({ ...editAuto, active: !editAuto.active })}
                     className={cn(
-                      "relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200",
-                      editAuto.active ? "bg-emerald-500" : "bg-neutral-300"
-                    )}>
-                    <span className={cn(
-                      "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200",
-                      editAuto.active ? "translate-x-5" : "translate-x-0"
-                    )} />
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200",
+                      editAuto.active ? "bg-neutral-900" : "bg-neutral-300"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-xs transition-transform duration-200",
+                        editAuto.active ? "translate-x-4" : "translate-x-0"
+                      )}
+                    />
                   </button>
                 </div>
               </div>
 
-              {/* RIGHT — white panel: template */}
+              {/* Panel Derecho: Plantilla */}
               <div className="flex-1 flex flex-col p-5 gap-3">
                 <div>
-                  <h3 className="text-base font-bold text-neutral-900">Plantilla del Mensaje</h3>
-                  <p className="text-[10px] text-neutral-400 mt-0.5">Haz clic en una variable para insertarla:</p>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {["{nombre}", "{vehiculo}", "{fecha}", "{km}", "{telefono}"].map(v => (
-                      <span key={v}
-                        className="text-[10px] font-mono bg-neutral-100 text-neutral-700 rounded-md px-1.5 py-0.5 cursor-pointer hover:bg-neutral-200 transition-colors border border-neutral-200"
-                        onClick={() => setEditAuto({ ...editAuto, template: editAuto.template + v })}>
+                  <h3 className="text-sm font-bold text-neutral-900">Plantilla del Mensaje</h3>
+                  <p className="text-[10px] text-neutral-400 mt-0.5">
+                    Haz clic en una variable para insertarla en el mensaje:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {["{nombre}", "{vehiculo}", "{fecha}", "{km}", "{telefono}"].map((v) => (
+                      <span
+                        key={v}
+                        className="text-[10px] font-mono bg-neutral-100 text-neutral-700 rounded-md px-2 py-0.5 cursor-pointer hover:bg-neutral-200 border border-neutral-200/80 transition-colors"
+                        onClick={() => setEditAuto({ ...editAuto, template: editAuto.template + v })}
+                      >
                         {v}
                       </span>
                     ))}
@@ -758,35 +1425,56 @@ export default function RemindersPage() {
                 </div>
 
                 <textarea
-                  className="flex-1 min-h-[130px] w-full rounded-xl border border-neutral-200 p-3 text-sm font-mono resize-none focus:outline-none focus:border-neutral-400 transition-colors bg-white"
-                  placeholder="Hola {nombre}, tu {vehiculo} tiene un servicio programado..."
+                  className="flex-1 min-h-[120px] w-full rounded-xl border border-neutral-200 bg-white p-3 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-black transition-all leading-relaxed shadow-2xs"
+                  placeholder="Estimado/a {nombre}, tu {vehiculo} tiene un servicio programado..."
                   value={editAuto.template}
-                  onChange={e => setEditAuto({ ...editAuto, template: e.target.value })}
+                  onChange={(e) => setEditAuto({ ...editAuto, template: e.target.value })}
                 />
 
                 {/* Preview */}
                 {editAuto.template && (
-                  <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3">
-                    <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Vista previa</p>
-                    <p className="text-xs text-emerald-900 leading-relaxed">
+                  <div className="rounded-xl bg-neutral-50/90 border border-neutral-200/70 p-3 space-y-1">
+                    <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">
+                      Vista previa de sustitución
+                    </p>
+                    <p className="text-xs text-neutral-800 leading-relaxed font-sans">
                       {editAuto.template
-                        .replace("{nombre}", "Carlos")
-                        .replace("{vehiculo}", "Toyota Hilux")
-                        .replace("{fecha}", new Date(Date.now() + 7 * 864e5).toLocaleDateString("es-DO", { day: "2-digit", month: "long" }))
-                        .replace("{km}", editAuto.kmThreshold ? Number(editAuto.kmThreshold).toLocaleString("es-DO") + " " + editAuto.kmUnit : "5,000 km")
+                        .replace("{nombre}", "Carlos García")
+                        .replace("{vehiculo}", "Toyota Hilux 2022")
+                        .replace(
+                          "{fecha}",
+                          new Date(Date.now() + 7 * 864e5).toLocaleDateString("es-DO", {
+                            day: "2-digit",
+                            month: "long",
+                          })
+                        )
+                        .replace(
+                          "{km}",
+                          editAuto.kmThreshold
+                            ? Number(editAuto.kmThreshold).toLocaleString("es-DO") + " " + editAuto.kmUnit
+                            : "5,000 km"
+                        )
                         .replace("{telefono}", "+1 809-555-0101")}
                     </p>
                   </div>
                 )}
 
-                <div className="flex justify-end gap-2 pt-1">
-                  <Button variant="outline" className="rounded-xl h-9 px-5 text-sm" onClick={() => setEditAuto(null)}>Cancelar</Button>
-                  <Button className="rounded-xl h-9 px-6 text-sm bg-neutral-900 text-white hover:bg-neutral-800" onClick={() => {
-                    handleSaveAutomation(editAuto);
-                  }}>Guardar</Button>
+                <div className="flex justify-end gap-2 pt-2 border-t border-neutral-100">
+                  <Button
+                    variant="outline"
+                    className="rounded-xl font-semibold border-neutral-200 text-xs px-4 h-9 shadow-2xs"
+                    onClick={() => setEditAuto(null)}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    className="rounded-xl bg-neutral-900 hover:bg-black text-white font-bold text-xs px-5 h-9 shadow-sm"
+                    onClick={() => handleSaveAutomation(editAuto)}
+                  >
+                    Guardar Cambios
+                  </Button>
                 </div>
               </div>
-
             </div>
           )}
         </DialogContent>

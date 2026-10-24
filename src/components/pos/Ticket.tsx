@@ -515,14 +515,15 @@ export function Ticket({
                 const totalItem = qty * price;
                 let itbisItem = 0;
                 if (!it.is_exento && ordenObj.itbis > 0) {
-                  if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
-                    itbisItem = totalItem * it.tax;
-                  } else if (typeof it.tax === 'number' && it.tax > 1) {
-                    itbisItem = totalItem * (it.tax / 100);
-                  } else if (typeof it.tax === 'number' && it.tax === 0) {
-                    itbisItem = 0;
-                  } else {
-                    itbisItem = totalItem * 0.18;
+                  const taxRate = (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1)
+                    ? it.tax
+                    : (typeof it.tax === 'number' && it.tax > 1 ? it.tax / 100 : (typeof it.tax === 'number' && it.tax === 0 ? 0 : 0.18));
+                  if (taxRate > 0) {
+                    if (tenantObj.config?.pricesIncludeItbis) {
+                      itbisItem = totalItem - (totalItem / (1 + taxRate));
+                    } else {
+                      itbisItem = totalItem * taxRate;
+                    }
                   }
                 }
                 return (
@@ -587,7 +588,7 @@ export function Ticket({
             </div>
             {ordenObj.itbis > 0 && (
               <div className="flex justify-between text-neutral-600">
-                <span>ITBIS (18%):</span>
+                <span>{tenantObj.config?.pricesIncludeItbis ? "ITBIS (18% extraído):" : "ITBIS (18%):"}</span>
                 <span className="font-semibold text-neutral-900">{formatRD(ordenObj.itbis)}</span>
               </div>
             )}
@@ -867,14 +868,15 @@ export function Ticket({
             // ITBIS del ítem: si es exento o mano de obra, es estrictamente 0
             let itbisVal = 0;
             if (!it.is_exento && ordenObj.itbis > 0) {
-              if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
-                itbisVal = baseTotal * it.tax;
-              } else if (typeof it.tax === 'number' && it.tax > 1) {
-                itbisVal = baseTotal * (it.tax / 100);
-              } else if (typeof it.tax === 'number' && it.tax === 0) {
-                itbisVal = 0;
-              } else {
-                itbisVal = baseTotal * 0.18;
+              const taxRate = (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1)
+                ? it.tax
+                : (typeof it.tax === 'number' && it.tax > 1 ? it.tax / 100 : (typeof it.tax === 'number' && it.tax === 0 ? 0 : 0.18));
+              if (taxRate > 0) {
+                if (tenantObj.config?.pricesIncludeItbis) {
+                  itbisVal = baseTotal - (baseTotal / (1 + taxRate));
+                } else {
+                  itbisVal = baseTotal * taxRate;
+                }
               }
             }
 
@@ -929,7 +931,7 @@ export function Ticket({
           <div className="flex justify-between items-center gap-2">
             <div className="flex items-center gap-1.5 font-semibold shrink-0">
               <Landmark className="h-3.5 w-3.5 shrink-0 text-black" />
-              <span>ITBIS 18%</span>
+              <span>{tenantObj.config?.pricesIncludeItbis ? "ITBIS 18% (Extraído)" : "ITBIS 18%"}</span>
             </div>
             <span className="font-semibold tabular-nums tracking-tight whitespace-nowrap">
               {formatRD(ordenObj.itbis)}

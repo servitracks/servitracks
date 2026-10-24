@@ -18,6 +18,7 @@ export interface Tenant {
     formato_ticket?: '57mm' | '80mm';
     formato_ticket_default?: '57mm' | '80mm';
     autoDeductInventory?: boolean;
+    pricesIncludeItbis?: boolean;
     ecfConfig?: {
       provider?: 'ef2';
       token?: string;
@@ -286,6 +287,9 @@ export interface Invoice {
   tax: number;
   discount?: number;
   total: number;
+  paidAmount?: number;
+  pendingAmount?: number;
+  condicionCobro?: string;
   paymentMethod: 'cash' | 'card' | 'transfer' | 'credit';
   status: 'paid' | 'pending' | 'cancelled';
   ncf?: string;

@@ -60,6 +60,7 @@ export interface EF2ProcesarFacturaResponse {
   id_factura?: number | string;
   fecha_emision?: string;
   fecha_firma?: string;
+  fecha_vencimiento?: string;
   codigo_seguridad?: string;
   monto_total?: number | string;
   dgii_info?: EF2DGIIInfo;
@@ -67,16 +68,28 @@ export interface EF2ProcesarFacturaResponse {
   contingencyMode?: boolean;
 }
 
-/** Resuelve la URL base adecuada según si corre en navegador (con proxy Vite) o directo */
+/** Resuelve la URL base adecuada según si corre en navegador (con proxy Vite/Coolify) o directo */
 export function getEf2ApiBaseUrl(): string {
+  const customProxy = (import.meta as any).env?.VITE_EF2_PROXY_URL;
+  if (customProxy) {
+    return String(customProxy).replace(/\/$/, "");
+  }
   if (typeof window !== "undefined") {
-    // Si estamos en el navegador en entorno de desarrollo/producción con proxy
     return "/api/ef2";
   }
   return EF2_BASE_URL;
 }
 
-/** Realiza peticiones a la API de EF2 con manejo de errores y fallbacks */
+/** Verifica si una respuesta HTTP es un fallback HTML de SPA (común en Coolify/Nginx sin regla /api/ef2) */
+function isSpaHtmlFallback(response: Response, bodyText: string): boolean {
+  if (response.status === 404 || response.status === 405) return true;
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("text/html")) return true;
+  const trimmed = bodyText.trim().toLowerCase();
+  return trimmed.startsWith("<!doctype html") || trimmed.startsWith("<html");
+}
+
+/** Realiza peticiones a la API de EF2 con soporte para Vite Proxy, Coolify y Supabase Edge Function (ef2-proxy) */
 export async function callEf2Api<T = any>(
   path: string,
   token: string,
@@ -87,39 +100,92 @@ export async function callEf2Api<T = any>(
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const baseUrl = getEf2ApiBaseUrl();
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${cleanToken}`,
-  };
+  const supabaseUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || "").replace(/\/$/, "");
+  const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || "";
 
-  const options: RequestInit = {
-    method,
-    headers,
-  };
+  const serializedBody =
+    method !== "GET" && body !== undefined ? JSON.stringify(body) : undefined;
 
-  if (method !== "GET" && body !== undefined) {
-    options.body = JSON.stringify(body);
+  // Armar lista priorizada de endpoints:
+  // 1. Proxy local/Coolify (/api/ef2 o VITE_EF2_PROXY_URL)
+  // 2. Supabase Edge Function (${VITE_SUPABASE_URL}/functions/v1/ef2-proxy) — ideal para Coolify + Supabase
+  // 3. Directo a master.ef2.do/api2
+  const candidateEndpoints: Array<{
+    url: string;
+    headers: Record<string, string>;
+  }> = [
+    {
+      url: `${baseUrl}${normalizedPath}`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cleanToken}`,
+        "x-ef2-token": cleanToken,
+      },
+    },
+  ];
+
+  if (supabaseUrl) {
+    const edgeHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-ef2-token": cleanToken,
+      "x-ef2-path": normalizedPath,
+      Authorization: `Bearer ${supabaseAnonKey || cleanToken}`,
+    };
+    if (supabaseAnonKey) {
+      edgeHeaders["apikey"] = supabaseAnonKey;
+    }
+    candidateEndpoints.push({
+      url: `${supabaseUrl}/functions/v1/ef2-proxy${normalizedPath}`,
+      headers: edgeHeaders,
+    });
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}${normalizedPath}`, options);
-  } catch (err: any) {
-    // Si falla el proxy relativo en browser, intentar directo contra EF2 master
-    if (baseUrl !== EF2_BASE_URL) {
-      try {
-        response = await fetch(`${EF2_BASE_URL}${normalizedPath}`, options);
-      } catch (directErr: any) {
-        throw new Error(
-          `No se pudo conectar con el servidor de EF2: ${directErr.message || err.message}`
-        );
+  if (baseUrl !== EF2_BASE_URL) {
+    candidateEndpoints.push({
+      url: `${EF2_BASE_URL}${normalizedPath}`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cleanToken}`,
+      },
+    });
+  }
+
+  let response: Response | null = null;
+  let text = "";
+  let lastNetworkError: any = null;
+
+  for (let i = 0; i < candidateEndpoints.length; i++) {
+    const candidate = candidateEndpoints[i];
+    try {
+      const res = await fetch(candidate.url, {
+        method,
+        headers: candidate.headers,
+        body: serializedBody,
+      });
+      const resText = await res.text();
+
+      // Si estamos en Coolify estático y /api/ef2 devolvió index.html o 404/405, pasar al siguiente candidato (Supabase Edge Function)
+      if (i < candidateEndpoints.length - 1 && isSpaHtmlFallback(res, resText)) {
+        continue;
       }
-    } else {
-      throw new Error(`Error de conexión con EF2: ${err.message}`);
+
+      response = res;
+      text = resText;
+      break;
+    } catch (err: any) {
+      lastNetworkError = err;
+      continue;
     }
   }
 
-  const text = await response.text();
+  if (!response) {
+    throw new Error(
+      `No se pudo conectar con el servidor de EF2: ${
+        lastNetworkError?.message || "Error de red / CORS"
+      }`
+    );
+  }
+
   let data: any;
 
   try {
@@ -136,8 +202,16 @@ export async function callEf2Api<T = any>(
   }
 
   if (!response.ok || data.success === false) {
-    const errorMsg =
+    const dgiiRejectMsg =
+      data.dgii_info?.mensaje_rechazo ||
+      data.dgii?.mensaje_rechazo ||
+      data.dgii_info?.mensaje;
+    const baseMsg =
       data.message || data.error || data.detail || `Error en EF2 (HTTP ${response.status})`;
+    const errorMsg =
+      dgiiRejectMsg && !String(baseMsg).includes(String(dgiiRejectMsg))
+        ? `${baseMsg}: ${dgiiRejectMsg}`
+        : baseMsg;
     const error = new Error(errorMsg) as Error & { status?: number; data?: any };
     error.status = response.status;
     error.data = data;
@@ -278,6 +352,33 @@ export function formatMoneyDgii(amount: number): string {
   return Math.max(0, Number(amount || 0)).toFixed(2);
 }
 
+/**
+ * Convierte una fecha de firma de EF2 / DGII (ej. "24-10-2026 20:47:45" o "24-10-2026")
+ * a un ISO string válido para PostgreSQL / Supabase, sin lanzar RangeError.
+ */
+export function parseEf2SignatureDate(dateStr?: string): string {
+  if (!dateStr || typeof dateStr !== "string") {
+    return new Date().toISOString();
+  }
+  const trimmed = dateStr.trim();
+  const dmyMatch = trimmed.match(
+    /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/
+  );
+  if (dmyMatch) {
+    const [, dd, mm, yyyy, hh = "00", min = "00", ss = "00"] = dmyMatch;
+    const isoCandidate = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}T${hh.padStart(2, "0")}:${min.padStart(2, "0")}:${ss.padStart(2, "0")}-04:00`;
+    const parsedDmy = new Date(isoCandidate);
+    if (!isNaN(parsedDmy.getTime())) {
+      return parsedDmy.toISOString();
+    }
+  }
+  const parsed = new Date(trimmed);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
 /** Parsea metadata del timbre QR (código de seguridad, fecha de firma) */
 export function parseQrMetadata(qrLink?: string): { fecha_firma?: string; codigo_seguridad?: string } {
   if (!qrLink) return {};
@@ -341,12 +442,21 @@ export function normalizeEf2Response(rawRes: any): EF2ProcesarFacturaResponse {
     ncf,
     estado,
     qr_link: qrLink,
-    pdf_cloud_url: raw.pdf_cloud_url || raw.pdf_url || raw.pdf || docs.pdf || docs.pdf_url,
-    xml_cloud_url: raw.xml_cloud_url || raw.xml_url || raw.xml || docs.xml || docs.xml_url,
+    pdf_cloud_url:
+      raw.pdf_cloud_url || raw.pdf_url || raw.pdf || docs.pdf || docs.pdf_url || dgii.pdf_url,
+    xml_cloud_url:
+      raw.xml_cloud_url ||
+      raw.xml_url ||
+      raw.xml_path ||
+      raw.xml ||
+      docs.xml ||
+      docs.xml_url ||
+      dgii.xml_url,
     consulta_url: raw.UrlENCF || raw.url_encf || raw.consulta_url,
     id_factura: raw.id_factura || raw.idFactura || raw.id,
     fecha_emision: raw.FechaEmision || raw.fecha_emision,
     fecha_firma: raw.fecha_firma || raw.fecha_firma_digital || dgii.fecha_firma || qrMeta.fecha_firma,
+    fecha_vencimiento: raw.fecha_vencimiento || raw.FechaVencimientoSecuencia,
     codigo_seguridad: raw.codigo_seguridad || dgii.codigo_seguridad || qrMeta.codigo_seguridad,
     monto_total: raw.MontoTotal || raw.monto_total,
     dgii_info: {
@@ -389,13 +499,24 @@ export function buildEf2InvoicePayload(params: {
     email?: string;
   };
   expirationDate?: string;
+  reference?: {
+    ncf: string;
+    date?: string;
+    code?: string;
+    reason?: string;
+  };
 }) {
   const typeCode = (params.invoiceType || "32").replace(/\D/g, "") || "32";
   const isCreditFiscal = typeCode === "31";
   const isFinalConsumer = typeCode === "32";
+  const isDebitNote = typeCode === "33";
+  const isCreditNote = typeCode === "34";
+  const isSpecialRegime = typeCode === "44";
+  const isGovernmental = typeCode === "45";
 
   // Emisor
-  const cleanIssuerRnc = String(params.issuer.rnc || EF2_DEFAULT_TEST_RNC).replace(/\D/g, "") || EF2_DEFAULT_TEST_RNC;
+  const cleanIssuerRnc =
+    String(params.issuer.rnc || EF2_DEFAULT_TEST_RNC).replace(/\D/g, "") || EF2_DEFAULT_TEST_RNC;
   const issuerName = params.issuer.businessName || EF2_DEFAULT_TEST_EMPRESA;
 
   // Fecha de emisión
@@ -406,15 +527,26 @@ export function buildEf2InvoicePayload(params: {
     TipoeCF: typeCode,
     TipoPago: params.payMethod === "credit" ? "2" : "1",
     TipoIngresos: "01",
-    IndicadorMontoGravado: "0",
   };
 
-  if (isFinalConsumer) {
+  if (!["33", "43", "44", "47"].includes(typeCode)) {
+    idDoc.IndicadorMontoGravado = "0";
+  }
+
+  if (isFinalConsumer || params.payMethod === "credit") {
     const limitDate = new Date();
     limitDate.setDate(limitDate.getDate() + 30);
     idDoc.FechaLimitePago = formatDgiiDate(limitDate);
-  } else if (params.expirationDate) {
+  }
+  if (!isFinalConsumer && !isCreditNote && params.expirationDate) {
     idDoc.FechaVencimientoSecuencia = formatDgiiDate(params.expirationDate);
+  }
+  if (isCreditNote) {
+    const refDate = params.reference?.date ? new Date(params.reference.date) : new Date();
+    const elapsedDays = !isNaN(refDate.getTime())
+      ? Math.floor((Date.now() - refDate.getTime()) / 86_400_000)
+      : 0;
+    idDoc.IndicadorNotaCredito = elapsedDays > 30 ? "1" : "0";
   }
 
   // Encabezado
@@ -433,9 +565,18 @@ export function buildEf2InvoicePayload(params: {
     },
   };
 
-  // Comprador (obligatorio para Crédito Fiscal E31, Gubernamental E45, o ventas >= 250k)
+  // Comprador (obligatorio para Crédito Fiscal E31, Regímenes Especiales E44, Gubernamental E45, RNC presente o ventas >= 250k)
   const cleanBuyerRnc = params.buyer?.rnc ? String(params.buyer.rnc).replace(/\D/g, "") : "";
-  if (isCreditFiscal || cleanBuyerRnc || Number(params.total || 0) >= 250000) {
+  const refPrefix = String(params.reference?.ncf || "").substring(0, 3).toUpperCase();
+  const isConsumerNote = (isCreditNote || isDebitNote) && (refPrefix === "E32" || refPrefix === "B02");
+  if (
+    isCreditFiscal ||
+    isSpecialRegime ||
+    isGovernmental ||
+    ((isCreditNote || isDebitNote) && !isConsumerNote) ||
+    cleanBuyerRnc ||
+    Number(params.total || 0) >= 250000
+  ) {
     encabezado.Comprador = {
       RNCComprador: cleanBuyerRnc || "131703836",
       RazonSocialComprador: params.buyer?.name || "CLIENTE REGISTRADO",
@@ -446,49 +587,88 @@ export function buildEf2InvoicePayload(params: {
     };
   }
 
-  // Desglose de totales
-  const totalGross = Number(params.total || 0);
-  const itbisVal = Number(params.itbis || 0);
-  const subtotalVal = Number(params.subtotal || (totalGross - itbisVal));
-
-  const totales: Record<string, string> = {
-    MontoTotal: formatMoneyDgii(totalGross),
-  };
-
-  if (itbisVal > 0) {
-    totales.MontoGravadoTotal = formatMoneyDgii(subtotalVal);
-    totales.MontoGravadoI1 = formatMoneyDgii(subtotalVal);
-    totales.ITBIS1 = "18";
-    totales.TotalITBIS = formatMoneyDgii(itbisVal);
-    totales.TotalITBIS1 = formatMoneyDgii(itbisVal);
-  } else {
-    totales.MontoExento = formatMoneyDgii(totalGross);
+  if ((isCreditNote || isDebitNote) && params.reference?.ncf) {
+    encabezado.InformacionReferencia = {
+      NCFModificado: params.reference.ncf,
+      FechaNCFModificado: formatDgiiDate(params.reference.date || new Date()),
+      CodigoModificacion: String(params.reference.code || "1").replace(/^0/, ""),
+      RazonModificacion: (params.reference.reason || "Ajuste o anulación de comprobante").slice(0, 90),
+    };
   }
 
-  encabezado.Totales = totales;
+  // Detalles de Items y cálculo exacto de bases (Gravado 18% vs Exento) para cumplir validación DGII 1960
+  const totalGrossParam = Number(params.total || 0);
+  const itbisParam = Number(params.itbis || 0);
+  const subtotalParam = Number(params.subtotal || totalGrossParam - itbisParam);
 
-  // Detalles de Items
-  const items = params.items && params.items.length > 0 ? params.items : [
-    { name: "Servicios generales de taller", quantity: 1, salePrice: subtotalVal, tax: itbisVal > 0 ? 0.18 : 0 }
-  ];
+  const rawItems =
+    params.items && params.items.length > 0
+      ? params.items
+      : [
+          {
+            name: "Servicios generales de taller",
+            quantity: 1,
+            salePrice: subtotalParam,
+            tax: !isSpecialRegime && itbisParam > 0 ? 0.18 : 0,
+            is_exento: isSpecialRegime || itbisParam <= 0,
+          },
+        ];
 
-  const itemsList = items.map((it, idx) => {
+  let gravadoSum = 0;
+  let exentoSum = 0;
+
+  const itemsList = rawItems.map((it, idx) => {
     const qty = Math.max(0.01, Number(it.quantity || 1));
-    const price = Math.max(0, Number(it.salePrice || 0));
-    const totalLine = qty * price;
-    const isExempt = it.is_exento || (it.tax === 0 && itbisVal === 0);
+    const unitPrice = Math.max(0, Number(Number(it.salePrice || 0).toFixed(2)));
+    const totalLine = Number((qty * unitPrice).toFixed(2));
+    const hasTaxValue = typeof it.tax === "number" ? it.tax > 0 : itbisParam > 0;
+    const isExempt =
+      isSpecialRegime ||
+      it.is_exento === true ||
+      !hasTaxValue ||
+      itbisParam <= 0;
+
+    if (isExempt) {
+      exentoSum = Number((exentoSum + totalLine).toFixed(2));
+    } else {
+      gravadoSum = Number((gravadoSum + totalLine).toFixed(2));
+    }
 
     return {
       NumeroLinea: String(idx + 1),
       IndicadorFacturacion: isExempt ? "4" : "1",
       NombreItem: (it.name || "Servicio / Repuesto").slice(0, 80),
-      IndicadorBienoServicio: it.category === "Servicios" || it.name.toLowerCase().includes("mano de obra") ? "2" : "1",
+      IndicadorBienoServicio:
+        it.category === "Servicios" || (it.name || "").toLowerCase().includes("mano de obra")
+          ? "2"
+          : "1",
       CantidadItem: String(qty),
       UnidadMedida: "43",
-      PrecioUnitarioItem: formatMoneyDgii(price),
+      PrecioUnitarioItem: formatMoneyDgii(unitPrice),
       MontoItem: formatMoneyDgii(totalLine),
     };
   });
+
+  const calculatedItbis = gravadoSum > 0 ? Number((gravadoSum * 0.18).toFixed(2)) : 0;
+  const calculatedTotal = Number((gravadoSum + exentoSum + calculatedItbis).toFixed(2));
+
+  const totales: Record<string, string> = {};
+
+  if (gravadoSum > 0) {
+    totales.MontoGravadoTotal = formatMoneyDgii(gravadoSum);
+    totales.MontoGravadoI1 = formatMoneyDgii(gravadoSum);
+  }
+  if (exentoSum > 0 || gravadoSum === 0) {
+    totales.MontoExento = formatMoneyDgii(exentoSum);
+  }
+  if (gravadoSum > 0) {
+    totales.ITBIS1 = "18";
+    totales.TotalITBIS = formatMoneyDgii(calculatedItbis);
+    totales.TotalITBIS1 = formatMoneyDgii(calculatedItbis);
+  }
+  totales.MontoTotal = formatMoneyDgii(calculatedTotal);
+
+  encabezado.Totales = totales;
 
   return {
     ECF: {

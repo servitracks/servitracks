@@ -286,7 +286,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
                       {searchResults.orders.length > 0 && (
                         <div>
-                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Órdenes de Trabajo</div>
+                          <div className="px-2 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Órdenes de Servicio</div>
                           {searchResults.orders.map(o => (
                             <button key={o.id} onClick={() => { setIsSearchFocused(false); navigate(`/${tenantSlug}/orders`); }} className="w-full text-left flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-xl transition-colors">
                               <div className="h-8 w-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0"><FileText className="h-4 w-4" /></div>

@@ -34,9 +34,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export const navigation = [
-  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'receptionist'] },
-  { name: "Órdenes de Trabajo", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist'] },
-  { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist'] },
+  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'receptionist', 'superadmin'] },
+  { name: "Órdenes de Servicio", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
+  { name: "Órdenes", href: "/ordenes", icon: ClipboardList, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
+  { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist', 'superadmin'] },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
   { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'cashier'] },
   { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'cashier', 'receptionist'] },
@@ -110,8 +111,13 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
 
     return true;
   }).sort((a, b) => {
-    const orderA = currentTenant?.config?.sidebarOrder?.[a.href] ?? 999;
-    const orderB = currentTenant?.config?.sidebarOrder?.[b.href] ?? 999;
+    const savedOrdersIdx = currentTenant?.config?.sidebarOrder?.["/orders"];
+    const orderA =
+      currentTenant?.config?.sidebarOrder?.[a.href] ??
+      (a.href === "/ordenes" && savedOrdersIdx !== undefined ? savedOrdersIdx + 0.1 : 999);
+    const orderB =
+      currentTenant?.config?.sidebarOrder?.[b.href] ??
+      (b.href === "/ordenes" && savedOrdersIdx !== undefined ? savedOrdersIdx + 0.1 : 999);
     
     if (orderA !== orderB) return orderA - orderB;
     // Fallback to original order

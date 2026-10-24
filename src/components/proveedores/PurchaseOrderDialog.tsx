@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2, Package, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, Trash2, Package, TrendingUp, TrendingDown, ClipboardList, Building2, Calendar, Info } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 interface Props {
   open: boolean;
@@ -231,288 +232,414 @@ export default function PurchaseOrderDialog({ open, onOpenChange, tenantId, edit
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl rounded-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold">
-            {isEdit ? `Editar ${editOrder?.number}` : "Nueva Orden de Compra"}
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-5 py-2">
-          {/* Supplier + Delivery */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label>Proveedor *</Label>
-              <Select 
-                value={supplierId || ""} 
-                onValueChange={(v) => setSupplierId(v || "")}
-                items={suppliers.map(s => ({ value: s.id, label: s.commercialName }))}
-              >
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200"><SelectValue placeholder="Seleccionar proveedor" /></SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.commercialName}</SelectItem>)}
-                </SelectContent>
-              </Select>
+      <DialogContent className="sm:max-w-4xl w-[95vw] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-white border border-neutral-200/90 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 pr-16 border-b border-neutral-100 bg-white sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center shadow-sm shrink-0">
+              <ClipboardList className="h-5 w-5" />
             </div>
-            <div className="space-y-1.5">
-              <Label>Fecha Entrega Esperada</Label>
-              <Input type="date" className="h-10 rounded-xl border-neutral-200"
-                value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} />
+            <div>
+              <div className="flex items-center gap-2">
+                <DialogTitle className="text-lg font-bold text-neutral-900 tracking-tight">
+                  {isEdit ? "Editar Orden de Compra" : "Nueva Orden de Compra"}
+                </DialogTitle>
+                {isEdit && editOrder?.number && (
+                  <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200">
+                    {editOrder.number}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-neutral-500 font-normal mt-0.5">
+                Planificación de reposición de inventario y acuerdos de precio
+              </p>
             </div>
           </div>
+        </div>
 
-          {/* Info Banner — solo visible para owner */}
-          {isOwner && (
-            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-xl flex gap-2 border border-blue-100">
-              <span className="font-bold flex-shrink-0">💡</span>
-              <span>Los precios de costo y venta que establezcas aquí se actualizarán automáticamente en tu inventario al guardar.</span>
+        {/* Scrollable Form Body */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+          <div className="overflow-y-auto px-6 py-5 space-y-5 flex-1">
+            {/* Supplier + Delivery */}
+            <div className="p-4 rounded-xl bg-neutral-50/70 border border-neutral-200/70 grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-neutral-400" />
+                  Proveedor <span className="text-rose-500">*</span>
+                </Label>
+                <Select 
+                  value={supplierId || ""} 
+                  onValueChange={(v) => setSupplierId(v || "")}
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white font-medium text-xs shadow-2xs hover:border-neutral-300">
+                    <span className={cn("truncate", !selectedSupplier && "text-neutral-400 font-normal")}>
+                      {selectedSupplier ? (selectedSupplier.commercialName || selectedSupplier.legalName || "Proveedor") : "Seleccionar proveedor..."}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl shadow-lg border-neutral-200">
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs py-2">
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span className="font-semibold text-neutral-900">{s.commercialName}</span>
+                          {s.rnc && <span className="text-[10px] text-neutral-400 font-mono">RNC: {s.rnc}</span>}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-neutral-400" />
+                  Fecha de Entrega Esperada
+                </Label>
+                <Input 
+                  type="date" 
+                  className="h-10 rounded-xl border-neutral-200 bg-white text-xs shadow-2xs"
+                  value={expectedDelivery} 
+                  onChange={(e) => setExpectedDelivery(e.target.value)} 
+                />
+              </div>
             </div>
-          )}
 
-          {/* Items */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-black uppercase text-neutral-400 tracking-wider">Productos / Repuestos</p>
-              <Button type="button" variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={addItem}>
-                <Plus className="h-3 w-3" /> Agregar Producto
-              </Button>
-            </div>
+            {/* Info Banner — solo visible para owner */}
+            {isOwner && (
+              <div className="px-3.5 py-2.5 rounded-xl bg-blue-50/70 border border-blue-100 flex items-start gap-2.5 text-xs text-blue-900">
+                <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-bold text-blue-950">Actualización en Inventario:</span>{" "}
+                  <span className="text-blue-800">
+                    Los precios de costo y venta que definas en esta orden actualizarán automáticamente los valores vigentes en tu catálogo de productos al confirmar.
+                  </span>
+                </div>
+              </div>
+            )}
 
-            {items.length === 0 ? (
-              <div className="text-center py-8 text-neutral-400 border border-dashed border-neutral-200 rounded-xl">
-                <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Agrega productos a la orden</p>
-                <Button type="button" variant="outline" size="sm" className="mt-3 rounded-lg text-xs" onClick={addItem}>
-                  <Plus className="h-3 w-3 mr-1" /> Agregar Producto
+            {/* Items */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-700">
+                    Productos / Repuestos
+                  </span>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200/80">
+                    {items.length} {items.length === 1 ? "producto" : "productos"}
+                  </span>
+                </div>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm" 
+                  className="h-8 text-xs font-semibold gap-1.5 rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 shadow-2xs" 
+                  onClick={addItem}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Agregar Producto</span>
                 </Button>
               </div>
-            ) : (
-              <div className="space-y-2">
-                {/* Column headers — layout adapts based on role */}
-                <div className={`grid gap-2 px-3 pb-1 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Producto</span>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Cant.</span>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
-                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase">Venta Unit.</span>}
-                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Margen</span>}
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-right">Subtotal</span>
-                  <span></span>
+
+              {items.length === 0 ? (
+                <div className="text-center py-10 px-4 text-neutral-400 border border-dashed border-neutral-200 rounded-2xl bg-neutral-50/50">
+                  <div className="h-12 w-12 rounded-2xl bg-neutral-100 flex items-center justify-center mx-auto mb-3 text-neutral-400">
+                    <Package className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-700">Sin productos agregados a la orden</p>
+                  <p className="text-xs text-neutral-400 mt-0.5 max-w-sm mx-auto">
+                    Agrega los ítems que requieres reponer para calcular subtotales y márgenes estimados.
+                  </p>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-4 rounded-xl text-xs font-semibold border-neutral-200 bg-white hover:bg-neutral-50 shadow-2xs gap-1.5" 
+                    onClick={addItem}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Agregar Producto
+                  </Button>
                 </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* Column headers */}
+                  <div className={`grid gap-2 px-3 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider ${isOwner ? 'grid-cols-[1.6fr_70px_100px_100px_65px_95px_32px]' : 'grid-cols-[2fr_80px_120px_110px_32px]'}`}>
+                    <span>Descripción del Producto</span>
+                    <span className="text-center">Cant.</span>
+                    <span>{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
+                    {isOwner && <span>P. Venta</span>}
+                    {isOwner && <span className="text-center">Margen</span>}
+                    <span className="text-right">Subtotal</span>
+                    <span></span>
+                  </div>
 
-                {items.map((item, i) => {
-                  const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
-                  return (
-                    <div key={item.id} className={`grid gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100 ${isOwner ? 'grid-cols-[1fr_70px_100px_100px_55px_90px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
-                      {/* Producto: Input editable con autocompletado y búsqueda */}
-                      <div className="relative">
-                        <input
-                          list={`po-products-list-${item.id}`}
-                          className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-2.5 bg-white focus:outline-none focus:ring-1 focus:ring-black placeholder:text-neutral-400"
-                          placeholder="Buscar o escribir producto..."
-                          value={item.productName || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const match = products.find(
-                              (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
-                            );
-                            if (match) {
+                  {items.map((item, i) => {
+                    const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
+                    return (
+                      <div 
+                        key={item.id} 
+                        className={`grid gap-2 items-center p-2.5 rounded-xl bg-neutral-50/60 border border-neutral-200/70 hover:border-neutral-300 transition-colors ${isOwner ? 'grid-cols-[1.6fr_70px_100px_100px_65px_95px_32px]' : 'grid-cols-[2fr_80px_120px_110px_32px]'}`}
+                      >
+                        {/* Producto Search / Free text */}
+                        <div>
+                          <input
+                            list={`po-products-list-${item.id}`}
+                            className="h-9 w-full rounded-lg border border-neutral-200 text-xs px-2.5 bg-white font-medium focus:outline-none focus:ring-1 focus:ring-black shadow-2xs"
+                            placeholder="Buscar o escribir producto..."
+                            value={item.productName || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const match = products.find(
+                                (p) => p.name.toLowerCase() === val.toLowerCase() || p.sku?.toLowerCase() === val.toLowerCase()
+                              );
+                              if (match) {
+                                updateItem(i, {
+                                  productId: match.id,
+                                  productName: match.name,
+                                  unitPrice: match.costPrice,
+                                  salePrice: match.salePrice,
+                                  rawUnitPrice: String(match.costPrice),
+                                  rawSalePrice: String(match.salePrice),
+                                });
+                              } else {
+                                updateItem(i, { productId: "", productName: val });
+                              }
+                            }}
+                          />
+                          <datalist id={`po-products-list-${item.id}`}>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.name}>
+                                {p.sku ? `${p.sku} • ` : ""}Stock: {p.stock} • Costo: RD$ {p.costPrice} • Venta: RD$ {p.salePrice}
+                              </option>
+                            ))}
+                          </datalist>
+                        </div>
+
+                        {/* Cantidad */}
+                        <div>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            className="h-9 rounded-lg border-neutral-200 text-xs bg-white text-center font-mono font-bold shadow-2xs"
+                            placeholder="1"
+                            value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9]/g, "");
+                              const num = parseInt(val, 10);
                               updateItem(i, {
-                                productId: match.id,
-                                productName: match.name,
-                                unitPrice: match.costPrice,
-                                salePrice: match.salePrice,
-                                rawUnitPrice: String(match.costPrice),
-                                rawSalePrice: String(match.salePrice),
+                                rawQuantity: val,
+                                quantity: isNaN(num) || num < 0 ? 0 : num,
                               });
-                            } else {
-                              updateItem(i, { productId: "", productName: val });
-                            }
-                          }}
-                        />
-                        <datalist id={`po-products-list-${item.id}`}>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.name}>
-                              {p.sku ? `${p.sku} • ` : ""}Stock: {p.stock} • Costo: RD$ {p.costPrice} • Venta: RD$ {p.salePrice}
-                            </option>
-                          ))}
-                        </datalist>
-                      </div>
+                            }}
+                            onBlur={() => {
+                              if (!item.quantity || item.quantity < 1) {
+                                updateItem(i, { quantity: 1, rawQuantity: "1" });
+                              }
+                            }}
+                          />
+                        </div>
 
-                      {/* Cantidad: editable y seguro */}
-                      <div>
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          className="h-8 rounded-lg border-neutral-200 text-xs text-center bg-white"
-                          placeholder="1"
-                          value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9]/g, "");
-                            const num = parseInt(val, 10);
-                            updateItem(i, {
-                              rawQuantity: val,
-                              quantity: isNaN(num) || num < 0 ? 0 : num,
-                            });
-                          }}
-                          onBlur={() => {
-                            if (!item.quantity || item.quantity < 1) {
-                              updateItem(i, { quantity: 1, rawQuantity: "1" });
-                            }
-                          }}
-                        />
-                      </div>
-
-                      {/* Costo Unit.: editable con decimales fluidos */}
-                      <div>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                          placeholder="RD$"
-                          value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = val.split(".");
-                            const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
-                            const num = parseFloat(cleanVal);
-                            updateItem(i, {
-                              rawUnitPrice: cleanVal,
-                              unitPrice: isNaN(num) ? 0 : num,
-                            });
-                          }}
-                        />
-                        {item.unitPrice > 0 && (
-                          <p className="text-[9px] text-neutral-500 font-bold text-center mt-0.5">
-                            c/ITBIS: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Venta Unit. — solo owner */}
-                      {isOwner && (
+                        {/* Costo Unitario */}
                         <div>
                           <Input
                             type="text"
                             inputMode="decimal"
-                            className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
-                            placeholder="RD$"
-                            value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                            className="h-9 rounded-lg border-neutral-200 text-xs bg-white font-mono shadow-2xs"
+                            placeholder="RD$ 0.00"
+                            value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
                             onChange={(e) => {
                               const val = e.target.value.replace(/[^0-9.]/g, "");
                               const parts = val.split(".");
                               const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
                               const num = parseFloat(cleanVal);
                               updateItem(i, {
-                                rawSalePrice: cleanVal,
-                                salePrice: isNaN(num) ? 0 : num,
+                                rawUnitPrice: cleanVal,
+                                unitPrice: isNaN(num) ? 0 : num,
                               });
                             }}
                           />
-                          {item.salePrice > 0 && (
-                            <p className="text-[9px] text-emerald-600 font-bold text-center mt-0.5">
-                              c/ITBIS: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
+                          {item.unitPrice > 0 && supplierItbis > 0 && (
+                            <p className="text-[9px] text-neutral-400 font-semibold text-center mt-0.5">
+                              c/ITB: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
                             </p>
                           )}
                         </div>
-                      )}
 
-                      {/* Margen — solo owner */}
-                      {isOwner && (
-                        <div className="flex justify-center">
-                          {badge ? (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border ${badge.color}`}>
-                              {badge.label}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-neutral-300">—</span>
-                          )}
+                        {/* Precio de Venta (Owner) */}
+                        {isOwner && (
+                          <div>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              className="h-9 rounded-lg border-emerald-200 text-xs bg-emerald-50/40 text-emerald-950 font-mono font-medium shadow-2xs"
+                              placeholder="RD$ 0.00"
+                              value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/[^0-9.]/g, "");
+                                const parts = val.split(".");
+                                const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                                const num = parseFloat(cleanVal);
+                                updateItem(i, {
+                                  rawSalePrice: cleanVal,
+                                  salePrice: isNaN(num) ? 0 : num,
+                                });
+                              }}
+                            />
+                            {item.salePrice > 0 && supplierItbis > 0 && (
+                              <p className="text-[9px] text-emerald-600 font-semibold text-center mt-0.5">
+                                c/ITB: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Margen (Owner) */}
+                        {isOwner && (
+                          <div className="flex justify-center">
+                            {badge ? (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border tracking-tight ${badge.color}`}>
+                                {badge.label}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-neutral-300">—</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Subtotal */}
+                        <div className="text-right">
+                          <p className="text-xs font-bold font-mono text-neutral-900">
+                            RD$ {((item.quantity || 0) * (item.unitPrice || 0)).toLocaleString("es-DO")}
+                          </p>
                         </div>
-                      )}
 
-                      {/* Subtotal */}
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-neutral-800">
-                          RD$ {((item.quantity || 0) * (item.unitPrice || 0)).toLocaleString("es-DO")}
-                        </p>
+                        {/* Delete Button */}
+                        <div className="flex justify-end">
+                          <Button 
+                            type="button" 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-8 w-8 p-0 rounded-lg text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                            onClick={() => removeItem(i)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-
-                      {/* Delete */}
-                      <div className="flex justify-end">
-                        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-                          onClick={() => removeItem(i)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Totals */}
-          {items.length > 0 && (
-            <div className={`grid gap-3 ${isOwner ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {/* Resumen de Compra */}
-              <div className="bg-neutral-50 rounded-xl p-4 border border-neutral-100 space-y-2">
-                <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2">Resumen de Compra</p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-500">Subtotal</span>
-                  <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
-                  <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
-                </div>
-                <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">
-                  <span>Total a Pagar</span>
-                  <span>RD$ {total.toLocaleString("es-DO")}</span>
-                </div>
-              </div>
-
-              {/* Proyección de Ganancia — solo owner */}
-              {isOwner && (
-                <div className={`rounded-xl p-4 border space-y-2 ${margenPromedio >= 15 ? 'bg-emerald-50/60 border-emerald-100' : 'bg-amber-50/60 border-amber-100'}`}>
-                  <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2 flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" /> Proyección de Venta
-                  </p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Valor Venta Total</span>
-                    <span className="font-bold">RD$ {totalVentaEstimado.toLocaleString("es-DO")}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Ganancia Bruta</span>
-                    <span className={`font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                      RD$ {gananciaBruta.toLocaleString("es-DO")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-base font-black border-t border-neutral-200/50 pt-2 mt-2">
-                    <span>Margen</span>
-                    <span className={`flex items-center gap-1 ${margenPromedio >= 30 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'}`}>
-                      {margenPromedio >= 15 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                      {margenPromedio}%
-                    </span>
-                  </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
-          )}
 
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label>Notas</Label>
-            <textarea className="w-full min-h-[50px] rounded-xl border border-neutral-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-neutral-900"
-              placeholder="Observaciones..."
-              value={notes} onChange={(e) => setNotes(e.target.value)} />
+            {/* Totals Section */}
+            {items.length > 0 && (
+              <div className={`grid gap-3.5 pt-2 ${isOwner ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+                {/* Resumen de Compra */}
+                <div className="bg-neutral-50/80 rounded-xl p-4 border border-neutral-200/80 space-y-2.5">
+                  <p className="text-[10px] font-bold uppercase text-neutral-400 tracking-wider">
+                    Resumen Financiero de la Orden
+                  </p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between items-center text-neutral-600">
+                      <span>Subtotal Neto</span>
+                      <span className="font-mono font-semibold text-neutral-900">
+                        RD$ {subtotal.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-neutral-600">
+                      <span>ITBIS ({supplierItbis}%)</span>
+                      <span className="font-mono font-semibold text-neutral-900">
+                        RD$ {tax.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm font-bold text-neutral-900 border-t border-neutral-200/80 pt-2">
+                      <span>Total Estimado a Pagar</span>
+                      <span className="font-mono font-black text-neutral-950 text-base">
+                        RD$ {total.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Proyección de Ganancia — solo owner */}
+                {isOwner && (
+                  <div className={`rounded-xl p-4 border space-y-2.5 ${
+                    margenPromedio >= 20 
+                      ? 'bg-emerald-50/50 border-emerald-200/70' 
+                      : 'bg-amber-50/50 border-amber-200/70'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase text-neutral-500 tracking-wider flex items-center gap-1.5">
+                        <TrendingUp className="h-3 w-3 text-emerald-600" />
+                        <span>Proyección Comercial</span>
+                      </p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        margenPromedio >= 25 
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                          : 'bg-amber-100 text-amber-800 border-amber-300'
+                      }`}>
+                        {margenPromedio}% Margen Prom.
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span>Valor Venta Proyectada</span>
+                        <span className="font-mono font-semibold text-neutral-900">
+                          RD$ {totalVentaEstimado.toLocaleString("es-DO")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span>Ganancia Bruta Estimada</span>
+                        <span className={`font-mono font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          RD$ {gananciaBruta.toLocaleString("es-DO")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm font-bold border-t border-neutral-200/80 pt-2">
+                        <span className="text-neutral-700">Retorno sobre Costo</span>
+                        <span className={`flex items-center gap-1 font-mono font-black text-sm ${
+                          margenPromedio >= 25 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'
+                        }`}>
+                          {margenPromedio >= 15 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                          {margenPromedio}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Notes */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-neutral-700">Observaciones / Términos de la Orden</Label>
+              <textarea 
+                className="w-full min-h-[64px] rounded-xl border border-neutral-200 bg-white p-3 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-black placeholder:text-neutral-400 shadow-2xs"
+                placeholder="Notas especiales para el suplidor o requerimientos de entrega..."
+                value={notes} 
+                onChange={(e) => setNotes(e.target.value)} 
+              />
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Cancelar</Button>
-            <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800">
-              {isEdit ? "Guardar Cambios" : "Crear Orden"}
+          {/* Footer Ejecutivo con Botones Agrupados */}
+          <div className="flex-shrink-0 border-t border-neutral-100 bg-neutral-50/60 px-6 py-4 flex items-center justify-end gap-3 rounded-b-3xl">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => onOpenChange(false)} 
+              className="rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 h-10 px-5 font-bold text-xs sm:text-sm cursor-pointer shadow-2xs transition-all"
+            >
+              Cancelar
             </Button>
-          </DialogFooter>
+            <Button 
+              type="submit" 
+              className="rounded-xl bg-black hover:bg-neutral-900 text-white h-10 px-6 font-bold text-xs sm:text-sm cursor-pointer shadow-sm active:scale-[0.98] transition-all"
+            >
+              {isEdit ? "Guardar Cambios" : "Crear Orden de Compra"}
+            </Button>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
   );
 }
+

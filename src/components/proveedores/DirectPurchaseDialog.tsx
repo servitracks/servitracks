@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import * as XLSX from "xlsx";
-import { Plus, Trash2, Package, CheckCircle2, TrendingUp, TrendingDown, Camera, Loader2 } from "lucide-react";
+import { Plus, Trash2, Package, CheckCircle2, TrendingUp, TrendingDown, Camera, Loader2, Receipt, Building2, Sparkles, FileText, CreditCard, Info } from "lucide-react";
 import { toast } from "sonner";
 import { extractInvoiceWithAI } from "@/lib/purchase-ai";
+import { cn } from "@/lib/utils";
 
 interface Props {
   open: boolean;
@@ -25,6 +26,13 @@ interface EditablePOItem extends PurchaseOrderItem {
   rawSalePrice?: string;
   rawQuantity?: string;
 }
+
+export const PAYMENT_CONDITIONS = [
+  { value: "pending", label: "A Crédito (Pendiente)", dot: "bg-amber-500" },
+  { value: "paid", label: "Pagado (Al Contado - Efectivo)", dot: "bg-emerald-500" },
+  { value: "transfer", label: "Pagado (Transferencia Bancaria)", dot: "bg-blue-500" },
+  { value: "check", label: "Pagado (Cheque)", dot: "bg-purple-500" },
+] as const;
 
 export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isOwner = true }: Props) {
   const suppliers = useStore((s) => s.suppliers).filter((s) => s.tenantId === tenantId && s.status === "activo");
@@ -43,6 +51,8 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
   const [supplierId, setSupplierId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'transfer' | 'check'>('pending');
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId);
+  const selectedPayment = PAYMENT_CONDITIONS.find((opt) => opt.value === paymentStatus) || PAYMENT_CONDITIONS[0];
   const [items, setItems] = useState<EditablePOItem[]>([]);
   const [notes, setNotes] = useState("");
   const [isScanning, setIsScanning] = useState(false);
@@ -91,7 +101,6 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
     }));
   };
 
-  const selectedSupplier = suppliers.find(s => s.id === supplierId);
   const supplierItbis = selectedSupplier?.itbis !== undefined ? selectedSupplier.itbis : 18;
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const tax = Math.round((subtotal * (supplierItbis / 100)) * 100) / 100;
@@ -169,7 +178,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
       subtotal,
       tax,
       total,
-      notes: notes.trim() || `Compra directa / Ingreso a inventario (${paymentStatus === 'transfer' ? 'Transferencia' : paymentStatus === 'check' ? 'Cheque' : paymentStatus === 'paid' ? 'Efectivo' : 'A crédito'})`,
+      notes: notes.trim() || `Compra directa / Ingreso a inventario (${paymentStatus === 'transfer' ? 'Transferencia Bancaria' : paymentStatus === 'check' ? 'Cheque' : paymentStatus === 'paid' ? 'Al Contado - Efectivo' : 'A Crédito'})`,
       createdBy: "current-user",
       createdAt: now,
       updatedAt: now,
@@ -232,7 +241,7 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
       dueDate: dueDate.toISOString(),
       status: paymentStatus !== 'pending' ? "pagada" : "pendiente",
       createdAt: now,
-      notes: paymentStatus === 'transfer' ? 'Pago con Transferencia' : paymentStatus === 'check' ? 'Pago con Cheque' : paymentStatus === 'paid' ? 'Pago en Efectivo' : 'Compra a crédito',
+      notes: paymentStatus === 'transfer' ? 'Pago con Transferencia Bancaria' : paymentStatus === 'check' ? 'Pago con Cheque' : paymentStatus === 'paid' ? 'Pago en Efectivo (Al Contado)' : 'Compra a crédito',
     });
 
     toast.success(
@@ -561,299 +570,444 @@ export default function DirectPurchaseDialog({ open, onOpenChange, tenantId, isO
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-4xl rounded-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-            Registrar Compra Directa
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-5 py-2">
-          {/* File Input for AI Scanner */}
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            accept="image/*,application/pdf,.csv,.xlsx,.xls,.xml" 
-            className="hidden" 
-          />
-          
-          {/* Header Info */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label>Proveedor *</Label>
-              <Select value={supplierId} onValueChange={(v) => setSupplierId(v || "")}>
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                  <SelectValue placeholder="Seleccionar proveedor" />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.commercialName}</SelectItem>)}
-                </SelectContent>
-              </Select>
+      <DialogContent className="sm:max-w-4xl w-[95vw] max-h-[92vh] flex flex-col p-0 overflow-hidden rounded-3xl bg-white border border-neutral-200/90 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 pr-16 border-b border-neutral-100 bg-white sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center shadow-sm shrink-0">
+              <Receipt className="h-5 w-5" />
             </div>
-            <div className="space-y-1.5">
-              <Label>NCF / Factura *</Label>
-              <Input 
-                className="h-10 rounded-xl border-neutral-200 uppercase font-mono text-sm"
-                placeholder="B01..."
-                value={invoiceNumber} 
-                onChange={(e) => setInvoiceNumber(e.target.value)} 
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Estado de Pago</Label>
-              <Select value={paymentStatus} onValueChange={(v: 'pending' | 'paid' | 'transfer' | 'check' | null) => setPaymentStatus(v || 'pending')}>
-                <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="pending">A Crédito (Pendiente)</SelectItem>
-                  <SelectItem value="paid">Pagado (Al Contado - Efectivo)</SelectItem>
-                  <SelectItem value="transfer">Pagado (Transferencia)</SelectItem>
-                  <SelectItem value="check">Pagado (Cheque)</SelectItem>
-                </SelectContent>
-              </Select>
+            <div>
+              <DialogTitle className="text-lg font-bold text-neutral-900 tracking-tight">
+                Registrar Compra Directa
+              </DialogTitle>
+              <p className="text-xs text-neutral-500 font-normal mt-0.5">
+                Entrada inmediata de productos al inventario y programación de pago
+              </p>
             </div>
           </div>
+          <div className="flex items-center gap-2">
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              className="h-9 px-3.5 text-xs font-semibold rounded-xl border-purple-200 bg-purple-50/80 text-purple-700 hover:bg-purple-100 transition-all shadow-2xs gap-1.5" 
+              onClick={handleScanClick}
+              disabled={isScanning}
+            >
+              {isScanning ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5 text-purple-600" />
+              )}
+              <span>{isScanning ? "Extrayendo factura..." : "Escanear con IA / Excel"}</span>
+            </Button>
+          </div>
+        </div>
 
-          {/* Info Banner */}
-          {isOwner ? (
-            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg flex gap-2 border border-blue-100">
-              <span className="font-bold flex-shrink-0">Automático:</span>
-              <span>Esta compra ingresará directamente los productos al inventario, actualizará los precios y generará la cuenta por pagar en tu contabilidad.</span>
-            </div>
-          ) : (
-            <div className="bg-blue-50 text-blue-800 text-xs p-3 rounded-lg flex gap-2 border border-blue-100">
-              <span className="font-bold flex-shrink-0">Automático:</span>
-              <span>Esta compra ingresará directamente los productos al inventario.</span>
-            </div>
-          )}
+        {/* Scrollable Form Body */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+          <div className="overflow-y-auto px-6 py-5 space-y-5 flex-1">
+            {/* File Input for AI Scanner */}
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileChange} 
+              accept="image/*,application/pdf,.csv,.xlsx,.xls,.xml" 
+              className="hidden" 
+            />
 
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-black uppercase text-neutral-400 tracking-wider">Productos Comprados</p>
-              <div className="flex items-center gap-2">
+            {/* General Data Card */}
+            <div className="p-4 rounded-xl bg-neutral-50/70 border border-neutral-200/70 grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-neutral-400" />
+                  Proveedor <span className="text-rose-500">*</span>
+                </Label>
+                <Select value={supplierId} onValueChange={(v) => setSupplierId(v || "")}>
+                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white font-medium text-xs shadow-2xs hover:border-neutral-300">
+                    <span className={cn("truncate", !selectedSupplier && "text-neutral-400 font-normal")}>
+                      {selectedSupplier ? (selectedSupplier.commercialName || selectedSupplier.legalName || "Proveedor") : "Seleccionar proveedor..."}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl shadow-lg border-neutral-200">
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs py-2">
+                        <div className="flex items-center justify-between w-full gap-2">
+                          <span className="font-semibold text-neutral-900">{s.commercialName}</span>
+                          {s.rnc && <span className="text-[10px] text-neutral-400 font-mono">RNC: {s.rnc}</span>}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-neutral-400" />
+                  NCF / Factura <span className="text-rose-500">*</span>
+                </Label>
+                <Input 
+                  className="h-10 rounded-xl border-neutral-200 bg-white uppercase font-mono font-semibold text-xs tracking-wider placeholder:normal-case placeholder:font-sans placeholder:font-normal placeholder:tracking-normal"
+                  placeholder="Ej: B0100001234"
+                  value={invoiceNumber} 
+                  onChange={(e) => setInvoiceNumber(e.target.value)} 
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+                  <CreditCard className="h-3.5 w-3.5 text-neutral-400" />
+                  Condición de Pago
+                </Label>
+                <Select 
+                  value={paymentStatus} 
+                  onValueChange={(v: 'pending' | 'paid' | 'transfer' | 'check' | null) => {
+                    if (v) setPaymentStatus(v);
+                  }}
+                >
+                  <SelectTrigger className="h-10 rounded-xl border-neutral-200 bg-white font-medium text-xs shadow-2xs hover:border-neutral-300">
+                    <div className="flex items-center gap-2 truncate text-neutral-900 font-medium text-xs">
+                      <span className={cn("h-2 w-2 rounded-full shrink-0", selectedPayment.dot)} />
+                      <span className="truncate">{selectedPayment.label}</span>
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl shadow-lg border-neutral-200">
+                    {PAYMENT_CONDITIONS.map((opt) => (
+                      <SelectItem 
+                        key={opt.value} 
+                        value={opt.value} 
+                        className="text-xs py-2 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={cn("h-2 w-2 rounded-full shrink-0", opt.dot)} />
+                          <span className="font-medium text-neutral-900">{opt.label}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Automation Banner */}
+            <div className="px-3.5 py-2.5 rounded-xl bg-blue-50/70 border border-blue-100 flex items-start gap-2.5 text-xs text-blue-900">
+              <Info className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-bold text-blue-950">Acción Automática:</span>{" "}
+                <span className="text-blue-800">
+                  {isOwner 
+                    ? "Esta compra incrementará directamente el stock en inventario, actualizará los costos de reposición y generará la obligación en cuentas por pagar."
+                    : "Esta compra ingresará directamente los productos con su cantidad física al inventario general."}
+                </span>
+              </div>
+            </div>
+
+            {/* Products Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-700">
+                    Artículos en Factura
+                  </span>
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200/80">
+                    {items.length} {items.length === 1 ? "artículo" : "artículos"}
+                  </span>
+                </div>
                 <Button 
                   type="button" 
                   variant="outline" 
                   size="sm" 
-                  className="h-8 text-xs gap-1 border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100" 
-                  onClick={handleScanClick}
-                  disabled={isScanning}
+                  className="h-8 text-xs font-semibold gap-1.5 rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 shadow-2xs" 
+                  onClick={addItem}
                 >
-                  {isScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-                  {isScanning ? "Procesando..." : "Importar Factura"}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={addItem}>
-                  <Plus className="h-3.5 w-3.5" /> Agregar Producto
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Agregar Producto</span>
                 </Button>
               </div>
-            </div>
 
-            {items.length === 0 ? (
-              <div className="text-center py-8 text-neutral-400 border border-dashed border-neutral-200 rounded-xl">
-                <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Agrega productos a la factura</p>
-                <Button type="button" variant="outline" size="sm" className="mt-3 rounded-lg text-xs" onClick={addItem}>
-                  <Plus className="h-3 w-3 mr-1" /> Agregar Producto
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {/* Column headers */}
-                <div className={`grid gap-2 px-3 pb-1 ${isOwner ? 'grid-cols-[1fr_70px_95px_95px_50px_85px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Producto</span>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">Cant.</span>
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase">{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
-                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase">Venta Unit.</span>}
-                  {isOwner && <span className="text-[10px] font-bold text-neutral-400 uppercase text-center">Margen</span>}
-                  <span className="text-[10px] font-bold text-neutral-400 uppercase text-right">Subtotal</span>
-                  <span></span>
+              {items.length === 0 ? (
+                <div className="text-center py-10 px-4 text-neutral-400 border border-dashed border-neutral-200 rounded-2xl bg-neutral-50/50">
+                  <div className="h-12 w-12 rounded-2xl bg-neutral-100 flex items-center justify-center mx-auto mb-3 text-neutral-400">
+                    <Package className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-700">Sin productos en la factura</p>
+                  <p className="text-xs text-neutral-400 mt-0.5 max-w-sm mx-auto">
+                    Usa el botón "Escanear con IA" para autocompletar desde una foto/PDF o agrégalos manualmente.
+                  </p>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-4 rounded-xl text-xs font-semibold border-neutral-200 bg-white hover:bg-neutral-50 shadow-2xs gap-1.5" 
+                    onClick={addItem}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Agregar Producto
+                  </Button>
                 </div>
-                {items.map((item, i) => {
-                  const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
-                  return (
-                    <div key={item.id} className={`grid gap-2 items-center p-3 rounded-xl bg-neutral-50/80 border border-neutral-100 ${isOwner ? 'grid-cols-[1fr_70px_95px_95px_50px_85px_32px]' : 'grid-cols-[1fr_80px_110px_100px_32px]'}`}>
-                      <div>
-                        <input
-                          list={`products-list-${item.id}`}
-                          className="h-8 w-full rounded-lg border border-neutral-200 text-xs px-3 bg-white focus:outline-none focus:ring-1 focus:ring-black"
-                          placeholder="Buscar o escribir producto..."
-                          value={item.productName || ""}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const match = products.find(p => p.name === val);
-                            if (match) {
-                              updateItem(i, { productId: match.id, productName: match.name, unitPrice: match.costPrice });
-                            } else {
-                              updateItem(i, { productId: "", productName: val });
-                            }
-                          }}
-                        />
-                        <datalist id={`products-list-${item.id}`}>
-                          {products.map((p) => (
-                            <option key={p.id} value={p.name}>
-                              {p.sku ? `${p.sku} - ` : ""}Stock: {p.stock} - Costo: RD$ {p.costPrice}
-                            </option>
-                          ))}
-                        </datalist>
-                      </div>
-                      <div>
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white text-center"
-                          placeholder="1"
-                          value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9]/g, "");
-                            const num = parseInt(val, 10);
-                            updateItem(i, {
-                              rawQuantity: val,
-                              quantity: isNaN(num) || num < 0 ? 0 : num,
-                            });
-                          }}
-                          onBlur={() => {
-                            if (!item.quantity || item.quantity < 1) {
-                              updateItem(i, { quantity: 1, rawQuantity: "1" });
-                            }
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <Input
-                          type="text"
-                          inputMode="decimal"
-                          className="h-8 rounded-lg border-neutral-200 text-xs bg-white"
-                          placeholder="RD$"
-                          value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/[^0-9.]/g, "");
-                            const parts = val.split(".");
-                            const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
-                            const num = parseFloat(cleanVal);
-                            updateItem(i, {
-                              rawUnitPrice: cleanVal,
-                              unitPrice: isNaN(num) ? 0 : num,
-                            });
-                          }}
-                        />
-                        {item.unitPrice > 0 && (
-                          <p className="text-[9px] text-neutral-500 font-bold text-center mt-0.5">
-                            c/ITBIS: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
-                          </p>
-                        )}
-                      </div>
-                      {isOwner && (
+              ) : (
+                <div className="space-y-2">
+                  {/* Column headers */}
+                  <div className={`grid gap-2 px-3 pb-1 text-[10px] font-bold text-neutral-400 uppercase tracking-wider ${isOwner ? 'grid-cols-[1.6fr_70px_100px_100px_65px_95px_32px]' : 'grid-cols-[2fr_80px_120px_110px_32px]'}`}>
+                    <span>Descripción del Producto</span>
+                    <span className="text-center">Cant.</span>
+                    <span>{isOwner ? 'Costo Unit.' : 'Precio Unit.'}</span>
+                    {isOwner && <span>P. Venta</span>}
+                    {isOwner && <span className="text-center">Margen</span>}
+                    <span className="text-right">Subtotal</span>
+                    <span></span>
+                  </div>
+
+                  {items.map((item, i) => {
+                    const badge = isOwner ? getMarginBadge(item.unitPrice, item.salePrice) : null;
+                    return (
+                      <div 
+                        key={item.id} 
+                        className={`grid gap-2 items-center p-2.5 rounded-xl bg-neutral-50/60 border border-neutral-200/70 hover:border-neutral-300 transition-colors ${isOwner ? 'grid-cols-[1.6fr_70px_100px_100px_65px_95px_32px]' : 'grid-cols-[2fr_80px_120px_110px_32px]'}`}
+                      >
+                        {/* Producto Search / Free text */}
+                        <div>
+                          <input
+                            list={`products-list-${item.id}`}
+                            className="h-9 w-full rounded-lg border border-neutral-200 text-xs px-2.5 bg-white font-medium focus:outline-none focus:ring-1 focus:ring-black shadow-2xs"
+                            placeholder="Buscar o escribir producto..."
+                            value={item.productName || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const match = products.find(p => p.name === val);
+                              if (match) {
+                                updateItem(i, { productId: match.id, productName: match.name, unitPrice: match.costPrice });
+                              } else {
+                                updateItem(i, { productId: "", productName: val });
+                              }
+                            }}
+                          />
+                          <datalist id={`products-list-${item.id}`}>
+                            {products.map((p) => (
+                              <option key={p.id} value={p.name}>
+                                {p.sku ? `${p.sku} - ` : ""}Stock: {p.stock} - Costo: RD$ {p.costPrice}
+                              </option>
+                            ))}
+                          </datalist>
+                        </div>
+
+                        {/* Cantidad */}
+                        <div>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            className="h-9 rounded-lg border-neutral-200 text-xs bg-white text-center font-mono font-bold shadow-2xs"
+                            placeholder="1"
+                            value={item.rawQuantity !== undefined ? item.rawQuantity : (item.quantity === 0 ? "" : String(item.quantity))}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/[^0-9]/g, "");
+                              const num = parseInt(val, 10);
+                              updateItem(i, {
+                                rawQuantity: val,
+                                quantity: isNaN(num) || num < 0 ? 0 : num,
+                              });
+                            }}
+                            onBlur={() => {
+                              if (!item.quantity || item.quantity < 1) {
+                                updateItem(i, { quantity: 1, rawQuantity: "1" });
+                              }
+                            }}
+                          />
+                        </div>
+
+                        {/* Costo Unitario */}
                         <div>
                           <Input
                             type="text"
                             inputMode="decimal"
-                            className="h-8 rounded-lg border-emerald-200 text-xs bg-emerald-50/50 font-medium"
-                            placeholder="RD$"
-                            value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                            className="h-9 rounded-lg border-neutral-200 text-xs bg-white font-mono shadow-2xs"
+                            placeholder="RD$ 0.00"
+                            value={item.rawUnitPrice !== undefined ? item.rawUnitPrice : (item.unitPrice === 0 ? "" : String(item.unitPrice))}
                             onChange={(e) => {
                               const val = e.target.value.replace(/[^0-9.]/g, "");
                               const parts = val.split(".");
                               const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
                               const num = parseFloat(cleanVal);
                               updateItem(i, {
-                                rawSalePrice: cleanVal,
-                                salePrice: isNaN(num) ? 0 : num,
+                                rawUnitPrice: cleanVal,
+                                unitPrice: isNaN(num) ? 0 : num,
                               });
                             }}
                           />
-                          {item.salePrice > 0 && (
-                            <p className="text-[9px] text-emerald-600 font-bold text-center mt-0.5">
-                              c/ITBIS: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
+                          {item.unitPrice > 0 && supplierItbis > 0 && (
+                            <p className="text-[9px] text-neutral-400 font-semibold text-center mt-0.5">
+                              c/ITB: {Math.round(item.unitPrice * (1 + supplierItbis / 100))}
                             </p>
                           )}
                         </div>
-                      )}
-                      {isOwner && (
-                        <div className="flex justify-center">
-                          {badge ? (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md border ${badge.color}`}>
-                              {badge.label}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-neutral-300">—</span>
-                          )}
+
+                        {/* Precio de Venta (Owner) */}
+                        {isOwner && (
+                          <div>
+                            <Input
+                              type="text"
+                              inputMode="decimal"
+                              className="h-9 rounded-lg border-emerald-200 text-xs bg-emerald-50/40 text-emerald-950 font-mono font-medium shadow-2xs"
+                              placeholder="RD$ 0.00"
+                              value={item.rawSalePrice !== undefined ? item.rawSalePrice : (item.salePrice === 0 ? "" : String(item.salePrice))}
+                              onChange={(e) => {
+                                const val = e.target.value.replace(/[^0-9.]/g, "");
+                                const parts = val.split(".");
+                                const cleanVal = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join("")}` : val;
+                                const num = parseFloat(cleanVal);
+                                updateItem(i, {
+                                  rawSalePrice: cleanVal,
+                                  salePrice: isNaN(num) ? 0 : num,
+                                });
+                              }}
+                            />
+                            {item.salePrice > 0 && supplierItbis > 0 && (
+                              <p className="text-[9px] text-emerald-600 font-semibold text-center mt-0.5">
+                                c/ITB: {Math.round(item.salePrice * (1 + supplierItbis / 100))}
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Margen (Owner) */}
+                        {isOwner && (
+                          <div className="flex justify-center">
+                            {badge ? (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border tracking-tight ${badge.color}`}>
+                                {badge.label}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-neutral-300">—</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Subtotal */}
+                        <div className="text-right">
+                          <p className="text-xs font-bold font-mono text-neutral-900">
+                            RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
+                          </p>
                         </div>
-                      )}
-                      <div className="text-right">
-                        <p className="text-xs font-bold text-neutral-800">
-                          RD$ {(item.quantity * item.unitPrice).toLocaleString("es-DO")}
-                        </p>
+
+                        {/* Delete Button */}
+                        <div className="flex justify-end">
+                          <Button 
+                            type="button" 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-8 w-8 p-0 rounded-lg text-neutral-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                            onClick={() => removeItem(i)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex justify-end">
-                        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
-                          onClick={() => removeItem(i)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Totals Section */}
+            {items.length > 0 && (
+              <div className={`grid gap-3.5 pt-2 ${isOwner ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+                {/* Resumen de Compra */}
+                <div className="bg-neutral-50/80 rounded-xl p-4 border border-neutral-200/80 space-y-2.5">
+                  <p className="text-[10px] font-bold uppercase text-neutral-400 tracking-wider">
+                    Resumen Financiero de Factura
+                  </p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between items-center text-neutral-600">
+                      <span>Subtotal Neto</span>
+                      <span className="font-mono font-semibold text-neutral-900">
+                        RD$ {subtotal.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-neutral-600">
+                      <span>ITBIS ({supplierItbis}%)</span>
+                      <span className="font-mono font-semibold text-neutral-900">
+                        RD$ {tax.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm font-bold text-neutral-900 border-t border-neutral-200/80 pt-2">
+                      <span>Total Factura</span>
+                      <span className="font-mono font-black text-neutral-950 text-base">
+                        RD$ {total.toLocaleString("es-DO")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Proyección de Ganancia — solo owner */}
+                {isOwner && (
+                  <div className={`rounded-xl p-4 border space-y-2.5 ${
+                    margenPromedio >= 20 
+                      ? 'bg-emerald-50/50 border-emerald-200/70' 
+                      : 'bg-amber-50/50 border-amber-200/70'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase text-neutral-500 tracking-wider flex items-center gap-1.5">
+                        <TrendingUp className="h-3 w-3 text-emerald-600" />
+                        <span>Proyección Comercial</span>
+                      </p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        margenPromedio >= 25 
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                          : 'bg-amber-100 text-amber-800 border-amber-300'
+                      }`}>
+                        {margenPromedio}% Margen Prom.
+                      </span>
+                    </div>
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span>Venta Total Estimada</span>
+                        <span className="font-mono font-semibold text-neutral-900">
+                          RD$ {totalVentaEstimado.toLocaleString("es-DO")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-neutral-600">
+                        <span>Ganancia Bruta Proyectada</span>
+                        <span className={`font-mono font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          RD$ {gananciaBruta.toLocaleString("es-DO")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm font-bold border-t border-neutral-200/80 pt-2">
+                        <span className="text-neutral-700">Retorno sobre Costo</span>
+                        <span className={`flex items-center gap-1 font-mono font-black text-sm ${
+                          margenPromedio >= 25 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'
+                        }`}>
+                          {margenPromedio >= 15 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                          {margenPromedio}%
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* Totals */}
-          {items.length > 0 && (
-            <div className={`grid gap-3 ${isOwner ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {/* Resumen de Compra */}
-              <div className="bg-neutral-50 rounded-xl p-4 border border-neutral-100 space-y-2">
-                <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2">Resumen de Compra</p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-500">Subtotal</span>
-                  <span className="font-bold">RD$ {subtotal.toLocaleString("es-DO")}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-neutral-500">ITBIS ({supplierItbis}%)</span>
-                  <span className="font-bold">RD$ {tax.toLocaleString("es-DO")}</span>
-                </div>
-                <div className="flex justify-between text-base font-black border-t border-neutral-200 pt-2 mt-2">
-                  <span>Total Factura</span>
-                  <span>RD$ {total.toLocaleString("es-DO")}</span>
-                </div>
-              </div>
-              {/* Proyección de Ganancia — solo owner */}
-              {isOwner && (
-                <div className={`rounded-xl p-4 border space-y-2 ${margenPromedio >= 15 ? 'bg-emerald-50/60 border-emerald-100' : 'bg-amber-50/60 border-amber-100'}`}>
-                  <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2 flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" /> Proyección de Venta
-                  </p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Valor Venta Total</span>
-                    <span className="font-bold">RD$ {totalVentaEstimado.toLocaleString("es-DO")}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-neutral-500">Ganancia Bruta</span>
-                    <span className={`font-bold ${gananciaBruta >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                      RD$ {gananciaBruta.toLocaleString("es-DO")}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-base font-black border-t border-neutral-200/50 pt-2 mt-2">
-                    <span>Margen</span>
-                    <span className={`flex items-center gap-1 ${margenPromedio >= 30 ? 'text-emerald-700' : margenPromedio >= 15 ? 'text-amber-700' : 'text-rose-700'}`}>
-                      {margenPromedio >= 15 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                      {margenPromedio}%
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="mt-4 pt-4 border-t border-neutral-100">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl font-bold">Cancelar</Button>
-            <Button type="submit" className="rounded-xl bg-black text-white hover:bg-neutral-800 font-bold">
+          {/* Footer Ejecutivo con Botones Agrupados */}
+          <div className="flex-shrink-0 border-t border-neutral-100 bg-neutral-50/60 px-6 py-4 flex items-center justify-end gap-3 rounded-b-3xl">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => onOpenChange(false)} 
+              className="rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 h-10 px-5 font-bold text-xs sm:text-sm cursor-pointer shadow-2xs transition-all"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="submit" 
+              className="rounded-xl bg-black hover:bg-neutral-900 text-white h-10 px-6 font-bold text-xs sm:text-sm cursor-pointer shadow-sm active:scale-[0.98] transition-all"
+            >
               Confirmar y Registrar Compra
             </Button>
-          </DialogFooter>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
   );
 }
+

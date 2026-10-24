@@ -1860,7 +1860,7 @@ export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="text-xl font-bold text-neutral-900 flex items-center gap-2">
             <FileText className="h-5 w-5 text-neutral-500" />
-            Vincular Orden de Trabajo
+            Vincular Orden de Servicio
           </DialogTitle>
         </DialogHeader>
 
@@ -1878,7 +1878,7 @@ export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps
           {selectableOrders.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-neutral-400">
               <Search className="h-8 w-8 mb-2 opacity-30" />
-              <p className="text-sm font-medium">No se encontraron órdenes de trabajo</p>
+              <p className="text-sm font-medium">No se encontraron órdenes de servicio</p>
               <p className="text-xs text-neutral-400 mt-1">Solo se muestran órdenes no facturadas.</p>
             </div>
           ) : (

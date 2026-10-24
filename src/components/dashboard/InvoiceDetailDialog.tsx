@@ -64,6 +64,8 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
   let parsedMeta: {
     condicionCobro?: string;
     instrumentoPago?: string;
+    paidAmount?: number;
+    pendingAmount?: number;
     referencia?: string;
     desgloseMixto?: {
       efectivo?: number;
@@ -300,8 +302,8 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                   itbis: invoice.tax,
                   descuento: invoice.discount || 0,
                   total: invoice.total,
-                  saldo: 0,
-                  pagado: invoice.total,
+                  saldo: invoice.pendingAmount ?? parsedMeta?.pendingAmount ?? 0,
+                  pagado: invoice.paidAmount ?? parsedMeta?.paidAmount ?? invoice.total,
                   metodo_pago: invoice.paymentMethod,
                   pago_referencia: parsedMeta?.referencia,
                   notas: cleanNotesText || undefined,

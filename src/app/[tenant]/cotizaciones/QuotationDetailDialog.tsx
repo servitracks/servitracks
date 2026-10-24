@@ -175,7 +175,7 @@ export default function QuotationDetailDialog({
       // Update quote status to accepted
       updateQuote(quote.id, { status: "accepted" });
       
-      toast.success("Cotización convertida en Orden de Trabajo con éxito");
+      toast.success("Cotización convertida en Orden de Servicio con éxito");
       onClose();
 
       if (shouldRedirectToPos) {
