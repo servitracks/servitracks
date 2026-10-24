@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { cn, isServiceItem, formatRD, parseAmount, formatAmountInput } from "@/lib/utils";
+import { cn, isServiceItem, calculateInvoiceCommission, formatRD, parseAmount, formatAmountInput } from "@/lib/utils";
 import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 const formatDateTimeRD = (dateStr: string) => {
@@ -257,7 +257,7 @@ function ReporteCuadreThermal({
 
   const shiftMovs = useMemo(() => {
     return movimientos.filter((m) => {
-      if (m.caja_id === caja.id) return true;
+      if (m.caja_id) return m.caja_id === caja.id;
       const t = new Date(m.creado_en).getTime();
       return !isNaN(t) && t >= startTime && t <= endTime;
     });
@@ -1431,10 +1431,29 @@ export default function CajaPage() {
     return Array.from(uniqueMap.values());
   }, [users, tenantId, currentUser]);
 
-  // Active caja shift
+  // Active caja shift (solo el turno más reciente puede estar abierto)
   const activeCaja = useMemo(() => {
-    return cajas.find(c => c.tenant_id === tenantId && c.estado === 'ABIERTA');
+    const tenantCajas = cajas
+      .filter(c => c.tenant_id === tenantId)
+      .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
+    return tenantCajas[0]?.estado === 'ABIERTA' ? tenantCajas[0] : undefined;
   }, [cajas, tenantId]);
+
+  // Auto-cerrar cualquier turno viejo que haya quedado con estado ABIERTA detrás de un turno más reciente
+  useEffect(() => {
+    const tenantCajas = cajas
+      .filter(c => c.tenant_id === tenantId)
+      .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
+    tenantCajas.forEach((c, idx) => {
+      if (idx > 0 && c.estado === 'ABIERTA') {
+        updateCaja(c.id, {
+          estado: 'CERRADA',
+          cerrada_en: c.cerrada_en || tenantCajas[idx - 1]?.abierta_en || new Date().toISOString(),
+          notas_cierre: c.notas_cierre || 'Cierre automático de turno anterior',
+        });
+      }
+    });
+  }, [cajas, tenantId, updateCaja]);
 
   // Current session movements
   const activeMovements = useMemo(() => {
@@ -1442,7 +1461,19 @@ export default function CajaPage() {
     return cajaMovements.filter(m => m.caja_id === activeCaja.id && m.tenant_id === tenantId);
   }, [cajaMovements, activeCaja, tenantId]);
 
-  // Calculated totals for the current open cash shift
+  // Detectar si el turno activo fue abierto en un día anterior al día de hoy
+  const isMultiDayShift = useMemo(() => {
+    if (!activeCaja?.abierta_en) return false;
+    const openDate = new Date(activeCaja.abierta_en);
+    const now = new Date();
+    return (
+      openDate.getFullYear() !== now.getFullYear() ||
+      openDate.getMonth() !== now.getMonth() ||
+      openDate.getDate() !== now.getDate()
+    );
+  }, [activeCaja]);
+
+  // Calculated totals for the current open cash shift (plus breakdown of today's movements)
   const metrics = useMemo(() => {
     if (!activeCaja) {
       return {
@@ -1453,7 +1484,11 @@ export default function CajaPage() {
         transferenciaTotal: 0,
         efectivoEsperado: 0,
         totalGeneral: 0,
-        totalManoObra: 0
+        totalManoObra: 0,
+        hoyEfectivo: 0,
+        hoyTarjeta: 0,
+        hoyTransferencia: 0,
+        hoyTotal: 0,
       };
     }
 
@@ -1463,9 +1498,24 @@ export default function CajaPage() {
     let tarjetaTotal = 0;
     let transferenciaTotal = 0;
     let totalManoObra = 0;
+    let hoyEfectivo = 0;
+    let hoyTarjeta = 0;
+    let hoyTransferencia = 0;
+
+    const now = new Date();
+    const isToday = (dateStr?: string) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return (
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate()
+      );
+    };
 
     activeMovements.forEach(m => {
       const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(m.tipo);
+      const movIsToday = isToday(m.creado_en);
       
       // Accumulate labor if present
       if (m.monto_mano_obra) {
@@ -1475,18 +1525,22 @@ export default function CajaPage() {
       if (m.metodo === 'EFECTIVO') {
         if (isIngreso) {
           ingresosEfectivo += m.monto;
+          if (movIsToday) hoyEfectivo += m.monto;
         } else {
           egresosEfectivo += m.monto;
         }
       } else if (m.metodo === 'TARJETA') {
         tarjetaTotal += m.monto;
+        if (movIsToday && isIngreso) hoyTarjeta += m.monto;
       } else if (m.metodo === 'TRANSFERENCIA') {
         transferenciaTotal += m.monto;
+        if (movIsToday && isIngreso) hoyTransferencia += m.monto;
       }
     });
 
     const efectivoEsperado = montoInicial + ingresosEfectivo - egresosEfectivo;
     const totalGeneral = efectivoEsperado + tarjetaTotal + transferenciaTotal;
+    const hoyTotal = hoyEfectivo + hoyTarjeta + hoyTransferencia;
 
     return {
       montoInicial,
@@ -1496,7 +1550,11 @@ export default function CajaPage() {
       transferenciaTotal,
       efectivoEsperado,
       totalGeneral,
-      totalManoObra
+      totalManoObra,
+      hoyEfectivo,
+      hoyTarjeta,
+      hoyTransferencia,
+      hoyTotal,
     };
   }, [activeCaja, activeMovements]);
 
@@ -1513,27 +1571,10 @@ export default function CajaPage() {
     
     pendingInvoices.forEach(inv => {
       const tech = technicians.find(t => t.id === inv.mechanicId);
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObraDirecta) {
-            globalTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech?.pagoNomina && tech?.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            globalTotal += safeLabor * (item.quantity || 1);
-          }
-        }
-      });
+      const { totalFila } = calculateInvoiceCommission(inv, tech, services);
+      globalTotal += totalFila;
     });
-    return globalTotal;
+    return Math.round(globalTotal * 100) / 100;
   }, [invoices, tenantId, services, technicians]);
 
   // Helper to calculate pending labor sum for a technician
@@ -1550,45 +1591,10 @@ export default function CajaPage() {
 
     let total = 0;
     pending.forEach(inv => {
-      let invTotal = 0;
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObraDirecta = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObraDirecta) {
-            invTotal += ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            invTotal += safeLabor * (item.quantity || 1);
-          }
-        }
-      });
-
-      // Fallback si la factura no tiene laborPrice individual por item (calculamos solo sobre los servicios de la factura)
-      if (invTotal === 0 && tech.pagoNomina) {
-        const servicesSubtotal = (inv.items || [])
-          .filter(item => isServiceItem(item, services))
-          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
-
-        if (servicesSubtotal > 0) {
-          if (tech.tipoPago === "fijo") {
-            invTotal = tech.pagoNomina;
-          } else {
-            invTotal = (servicesSubtotal * tech.pagoNomina) / 100;
-          }
-        }
-      }
-
-      total += invTotal;
+      const { totalFila } = calculateInvoiceCommission(inv, tech, services);
+      total += totalFila;
     });
-    return { total, pendingIds: pending.map(i => i.id) };
+    return { total: Math.round(total * 100) / 100, pendingIds: pending.map(i => i.id) };
   };
 
   // Dialog open states
@@ -1668,58 +1674,23 @@ export default function CajaPage() {
 
     let totalGlobal = 0;
     const rawItems = pendingTechInvoices.map(inv => {
-      let comisionTotal = 0;
-      let manoObraTotal = 0;
-      const nombresAplicables: string[] = [];
-
-      (inv.items || []).forEach(item => {
-        if (!item) return;
-        const isService = isServiceItem(item, services);
-        if (isService) {
-          const isManoObra = (item.id && item.id.startsWith("labor-")) || (item.name && item.name.toLowerCase() === "mano de obra");
-          if (isManoObra) {
-            const mTotal = ((item.laborPrice ?? item.unitPrice) || 0) * (item.quantity || 1);
-            manoObraTotal += mTotal;
-            if (mTotal > 0) nombresAplicables.push(item.name);
-          } else {
-            let safeLabor = item.laborPrice || 0;
-            if (item.unitPrice && safeLabor > item.unitPrice) {
-              safeLabor = safeLabor / 100;
-            }
-            if (safeLabor === 0 && tech.pagoNomina && tech.tipoPago === "porcentaje") {
-              safeLabor = ((item.unitPrice || 0) * tech.pagoNomina) / 100;
-            }
-            const cTotal = safeLabor * (item.quantity || 1);
-            comisionTotal += cTotal;
-            if (cTotal > 0) nombresAplicables.push(item.name);
-          }
-        }
-      });
-      
-      // Fallback si no hubo comisión por item directo pero hay subtotal de servicios
-      if (comisionTotal === 0 && manoObraTotal === 0 && tech.pagoNomina) {
-        const servicesSubtotal = (inv.items || [])
-          .filter(item => isServiceItem(item, services))
-          .reduce((sum, item) => sum + ((item.unitPrice || 0) * (item.quantity || 1)), 0);
-
-        if (servicesSubtotal > 0) {
-          if (tech.tipoPago === "fijo") {
-            comisionTotal = tech.pagoNomina;
-          } else {
-            comisionTotal = (servicesSubtotal * tech.pagoNomina) / 100;
-          }
-          nombresAplicables.push("Comisión por servicios de la factura");
-        }
-      }
-
-      const totalFila = comisionTotal + manoObraTotal;
-
-      return {
-        inv,
+      const {
+        servicesBaseTotal,
         comisionTotal,
         manoObraTotal,
         totalFila,
-        nombresAplicables
+        nombresAplicables,
+        esquemaLabel,
+      } = calculateInvoiceCommission(inv, tech, services);
+
+      return {
+        inv,
+        servicesBaseTotal,
+        comisionTotal,
+        manoObraTotal,
+        totalFila,
+        nombresAplicables,
+        esquemaLabel,
       };
     });
 
@@ -1728,7 +1699,7 @@ export default function CajaPage() {
       totalGlobal += item.totalFila;
     });
 
-    return { total: totalGlobal, items: filteredItems };
+    return { total: Math.round(totalGlobal * 100) / 100, items: filteredItems };
   }, [pendingTechInvoices, technicians, selectedTechToPay, services]);
 
   // Histórico de liquidaciones de caja
@@ -1959,7 +1930,11 @@ export default function CajaPage() {
 
   useEffect(() => {
     if (isCierreOpen) {
-      setContadoEfectivo("");
+      setContadoEfectivo(
+        metrics.efectivoEsperado > 0
+          ? metrics.efectivoEsperado.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : ""
+      );
       setContadoTarjeta(
         metrics.tarjetaTotal > 0
           ? metrics.tarjetaTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -1973,7 +1948,7 @@ export default function CajaPage() {
       setCierrePin("");
       setCierreNotas("");
     }
-  }, [isCierreOpen, metrics.tarjetaTotal, metrics.transferenciaTotal]);
+  }, [isCierreOpen, metrics.efectivoEsperado, metrics.tarjetaTotal, metrics.transferenciaTotal]);
 
   // Filters for History
   const [histFiltroCajero, setHistFiltroCajero] = useState("all");
@@ -2373,6 +2348,37 @@ export default function CajaPage() {
         </div>
       </div>
 
+      {/* ── ALERTA DE TURNO ABIERTO DE DÍAS ANTERIORES ── */}
+      {activeCaja && isMultiDayShift && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3.5 sm:p-4 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="h-9 w-9 rounded-xl bg-amber-100 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs sm:text-sm font-extrabold text-amber-950 flex items-center gap-2 flex-wrap">
+                <span>Turno abierto desde el {formatDateTimeRD(activeCaja.abierta_en)}</span>
+                <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
+                  Acumulando varios días
+                </span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-amber-900/90 leading-relaxed">
+                Los montos grandes reflejan el <strong>acumulado desde que se abrió este turno</strong>.{" "}
+                <strong>Cobrado solo HOY: {formatRD(metrics.hoyTotal)}</strong>{" "}
+                (Efectivo: {formatRD(metrics.hoyEfectivo)} · Tarjeta: {formatRD(metrics.hoyTarjeta)} · Transf.: {formatRD(metrics.hoyTransferencia)}).
+                Cierra este turno para iniciar el cuadre limpio del día de hoy.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setIsCierreOpen(true)}
+            className="h-9 rounded-xl bg-amber-900 hover:bg-amber-950 text-white font-bold text-xs gap-1.5 shrink-0 cursor-pointer shadow-xs"
+          >
+            <Lock className="h-3.5 w-3.5" /> Cerrar Turno Anterior
+          </Button>
+        </div>
+      )}
+
       {/* ── TOP METRICS ROW (Hero Cards matching Apertura Modal style) ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Card 1: Efectivo en Caja */}
@@ -2397,7 +2403,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Fondo esperado en caja</span>
+            <span>
+              {isMultiDayShift
+                ? `Fondo (${formatRD(metrics.montoInicial)}) + Turno`
+                : "Fondo esperado en caja"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2424,7 +2434,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Cobrado en efectivo hoy</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyEfectivo)}`
+                : "Cobrado en efectivo en el turno"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2451,7 +2465,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Terminal bancaria / Voucher</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyTarjeta)}`
+                : "Terminal bancaria / Voucher"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2478,7 +2496,11 @@ export default function CajaPage() {
             </span>
           </div>
           <div className="text-[11px] text-neutral-400 font-medium pt-1 border-t border-neutral-100 flex items-center justify-between">
-            <span>Transferencias digitales</span>
+            <span>
+              {isMultiDayShift
+                ? `Hoy: ${formatRD(metrics.hoyTransferencia)}`
+                : "Transferencias digitales"}
+            </span>
             <Eye className="h-3 w-3 text-neutral-300" />
           </div>
         </div>
@@ -2614,7 +2636,6 @@ export default function CajaPage() {
           <div className="mt-3 pt-2 border-t border-neutral-100">
             <Button 
               variant="outline" 
-              disabled={!activeCaja || totalGlobalPending <= 0}
               onClick={() => setIsPagoTecnicoOpen(true)}
               className="w-full h-8.5 rounded-xl border-purple-200 bg-purple-50/60 hover:bg-purple-100 text-purple-700 font-bold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all active:scale-95"
             >
@@ -3601,284 +3622,279 @@ export default function CajaPage() {
 
       {/* DIALOG 3: Registrar Movimiento Rápido */}
       <Dialog open={isMovOpen} onOpenChange={setIsMovOpen}>
-        <DialogContent className="sm:max-w-lg w-full rounded-2xl p-0 overflow-hidden bg-white shadow-2xl border border-neutral-200 max-h-[88vh] overflow-y-auto [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]]:hover:bg-white/10 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:transition-colors">
-          <div className="bg-neutral-950 text-white p-4 sm:p-5 flex items-center justify-between relative pr-12">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white border border-white/10 shadow-inner">
-                <Plus className="h-5 w-5" />
-              </div>
-              <div>
-                <DialogTitle className="font-heading text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
-                  Registrar Movimiento Extra
-                </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-400 mt-0.5">
-                  Entradas, salidas de efectivo o gastos directos del turno.
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-5">
-            <form onSubmit={handleMovSubmit} className="space-y-3">
-            {/* TIPO DE OPERACION */}
-            <div className="space-y-1">
-              <Label className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 px-0.5">
-                Tipo de Operación
-              </Label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {[
-                  { value: 'INGRESO', label: 'Ingreso Extra', icon: ArrowDownLeft, activeClass: 'border-emerald-500 bg-emerald-50/70 text-emerald-950 ring-1 ring-emerald-500 font-bold' },
-                  { value: 'EGRESO', label: 'Egreso Extra', icon: ArrowUpRight, activeClass: 'border-rose-500 bg-rose-50/70 text-rose-950 ring-1 ring-rose-500 font-bold' },
-                  { value: 'RETIRO', label: 'Retiro / Remesa', icon: Landmark, activeClass: 'border-amber-500 bg-amber-50/70 text-amber-950 ring-1 ring-amber-500 font-bold' },
-                  { value: 'GASTO_CAJA_CHICA', label: 'Caja Chica', icon: PiggyBank, activeClass: 'border-indigo-500 bg-indigo-50/70 text-indigo-950 ring-1 ring-indigo-500 font-bold' },
-                  { value: 'PAGO_NOMINA', label: 'Pago Nómina', icon: Users, activeClass: 'border-purple-500 bg-purple-50/70 text-purple-950 ring-1 ring-purple-500 font-bold' },
-                ].map(opt => {
-                  const Icon = opt.icon;
-                  const sel = movTipo === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => setMovTipo(opt.value as any)}
-                      className={cn(
-                        "flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl border text-xs transition-all cursor-pointer shadow-2xs active:scale-95",
-                        sel
-                          ? opt.activeClass
-                          : "bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50 font-medium"
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* HERO CARD MONTO */}
-            <div className="rounded-xl border border-neutral-200/90 bg-neutral-50/50 p-2.5 shadow-2xs">
-              <div className="flex items-center justify-between mb-1.5 px-0.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
-                  <Banknote className="h-3.5 w-3.5 text-neutral-900" />
-                  Monto de la Operación
-                </span>
-                <span className="text-[9px] font-semibold text-neutral-700 bg-neutral-100 border border-neutral-200 px-1.5 py-0.2 rounded-full">
-                  RD$ Dominicano
-                </span>
-              </div>
-
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-sm select-none">RD$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  required
-                  value={movMonto}
-                  onChange={(e) => setMovMonto(formatAmountInput(e.target.value))}
-                  placeholder="0.00"
-                  className="h-10 w-full pl-11 pr-3 text-center font-heading text-2xl font-bold text-neutral-900 tracking-tight rounded-lg border border-neutral-200 bg-white shadow-2xs focus:ring-2 focus:ring-neutral-900/10 outline-none placeholder:text-neutral-300"
-                />
-              </div>
-            </div>
-
-            {/* METODO O SELECT ESPECIFICO */}
-            <div className="space-y-1">
-              {movTipo !== 'GASTO_CAJA_CHICA' && movTipo !== 'PAGO_NOMINA' && (
-                <div>
-                  <Label htmlFor="mov-metodo" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 px-0.5 mb-1">
-                    Forma de Pago
-                  </Label>
-                  <Select value={movMetodo} onValueChange={(val) => val && setMovMetodo(val as any)}>
-                    <SelectTrigger className="h-8.5 rounded-xl border-neutral-200 text-xs">
-                      <SelectValue placeholder="Método" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      <SelectItem value="EFECTIVO">Efectivo</SelectItem>
-                      <SelectItem value="TARJETA">Tarjeta</SelectItem>
-                      <SelectItem value="TRANSFERENCIA">Transferencia</SelectItem>
-                    </SelectContent>
-                  </Select>
+        <DialogContent className="sm:max-w-lg w-full rounded-3xl p-0 gap-0 overflow-hidden bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.25)] border border-neutral-200/80 max-h-[90vh] flex flex-col [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:bg-neutral-100 [&_[data-slot=dialog-close]]:hover:text-neutral-900">
+          {(() => {
+            const MOV_TYPES = [
+              { value: 'INGRESO', label: 'Ingreso', hint: 'Entrada de dinero', icon: ArrowDownLeft, tone: 'text-emerald-600 bg-emerald-50' },
+              { value: 'EGRESO', label: 'Egreso', hint: 'Salida o gasto', icon: ArrowUpRight, tone: 'text-rose-600 bg-rose-50' },
+              { value: 'RETIRO', label: 'Retiro', hint: 'Remesa a gerencia', icon: Landmark, tone: 'text-amber-600 bg-amber-50' },
+              { value: 'GASTO_CAJA_CHICA', label: 'Caja chica', hint: 'Gasto menor', icon: PiggyBank, tone: 'text-indigo-600 bg-indigo-50' },
+              { value: 'PAGO_NOMINA', label: 'Nómina', hint: 'Pago a técnico', icon: Users, tone: 'text-violet-600 bg-violet-50' },
+            ] as const;
+            const current = MOV_TYPES.find(t => t.value === movTipo) ?? MOV_TYPES[0];
+            const CurrentIcon = current.icon;
+            return (
+              <form onSubmit={handleMovSubmit} className="flex flex-col min-h-0">
+                {/* Header */}
+                <div className="px-6 pt-6 pb-5 shrink-0">
+                  <div className="flex items-start gap-3.5 pr-10">
+                    <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl transition-colors duration-200", current.tone)}>
+                      <CurrentIcon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <DialogTitle className="font-heading text-lg font-bold tracking-tight text-neutral-900 leading-tight">
+                        Registrar movimiento
+                      </DialogTitle>
+                      <DialogDescription className="text-sm text-neutral-500 mt-0.5">
+                        Entradas, salidas o gastos directos del turno.
+                      </DialogDescription>
+                    </div>
+                  </div>
                 </div>
-              )}
-              {movTipo === 'GASTO_CAJA_CHICA' && (
-                <div>
-                  <Label htmlFor="mov-gasto-cat" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 px-0.5 mb-1">
-                    Categoría del Gasto
-                  </Label>
-                  <Select value={movGastoCategoria} onValueChange={(val) => val && setMovGastoCategoria(val)}>
-                    <SelectTrigger className="h-8.5 rounded-xl border-neutral-200 text-xs">
-                      <SelectValue placeholder="Categoría" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {CATEGORIAS_GASTOS.map(cat => (
-                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {movTipo === 'PAGO_NOMINA' && (
-                <div>
-                  <Label htmlFor="mov-tecnico" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 px-0.5 mb-1">
-                    Técnico a Liquidar
-                  </Label>
-                  <Select value={movTecnicoId} onValueChange={(val) => {
-                      if (!val) return;
-                      setMovTecnicoId(val);
-                      const tech = technicians.find(t => t.id === val);
-                      if (tech) {
-                        const { total, pendingIds } = calculateTechCommission(val);
-                        setMovMonto(formatAmountInput(total.toFixed(2)));
-                        setMovConcepto(`Pago Nómina a ${tech.name} (${pendingIds.length} facturas pendientes)`);
-                      }
-                    }}>
-                    <SelectTrigger className="h-8.5 rounded-xl border-neutral-200 text-xs">
-                      <SelectValue placeholder="Seleccione Técnico" />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {technicians.filter(t => t.tenantId === tenantId).map(tech => (
-                        <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
 
-            {/* CONCEPTO */}
-            <div className="space-y-1">
-              <Label htmlFor="mov-concepto" className="block text-[10px] font-bold uppercase tracking-wider text-neutral-500 px-0.5">
-                Concepto / Motivo de la Operación
-              </Label>
-              <Input 
-                id="mov-concepto"
-                placeholder="Detalle el concepto (ej: Pago almuerzo técnicos, retiro gerencia...)"
-                required
-                value={movConcepto}
-                onChange={(e) => setMovConcepto(e.target.value)}
-                className="h-8.5 rounded-lg border-neutral-200 text-xs px-2.5"
-              />
-            </div>
+                <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-5">
+                  {/* Tipo */}
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Tipo de operación</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {MOV_TYPES.map(opt => {
+                        const Icon = opt.icon;
+                        const sel = movTipo === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setMovTipo(opt.value as any)}
+                            aria-pressed={sel}
+                            className={cn(
+                              "flex items-center gap-2.5 rounded-2xl border p-2.5 text-left cursor-pointer transition-[border-color,background-color,transform] duration-150 active:scale-[0.98]",
+                              sel ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white hover:border-neutral-300"
+                            )}
+                          >
+                            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-xl", sel ? "bg-white/15 text-white" : opt.tone)}>
+                              <Icon className="h-4 w-4" />
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-xs font-semibold leading-tight">{opt.label}</span>
+                              <span className={cn("block text-[10px] leading-tight mt-0.5 truncate", sel ? "text-white/60" : "text-neutral-400")}>{opt.hint}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
-            <DialogFooter className="mt-2 pt-2 border-t border-neutral-100 flex gap-2 sm:justify-end">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => setIsMovOpen(false)}
-                className="h-8 text-xs rounded-xl border-neutral-200 cursor-pointer"
-              >
-                Cancelar
-              </Button>
-              <Button 
-                type="submit"
-                className="h-8 text-xs rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 font-bold cursor-pointer shadow-2xs gap-1.5"
-              >
-                <Check className="h-3.5 w-3.5" /> Registrar Movimiento
-              </Button>
-            </DialogFooter>
-          </form>
-          </div>
+                  {/* Monto */}
+                  <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/70 p-4">
+                    <label htmlFor="mov-monto" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">Monto</label>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                      <span className="text-lg font-semibold text-neutral-400 select-none">RD$</span>
+                      <input
+                        id="mov-monto"
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        autoFocus
+                        value={movMonto}
+                        onChange={(e) => setMovMonto(formatAmountInput(e.target.value))}
+                        placeholder="0.00"
+                        className="w-full bg-transparent font-heading text-4xl font-bold tabular-nums tracking-tight text-neutral-900 outline-none placeholder:text-neutral-300"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Campo específico */}
+                  {movTipo !== 'GASTO_CAJA_CHICA' && movTipo !== 'PAGO_NOMINA' && (
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Forma de pago</p>
+                      <div className="grid grid-cols-3 gap-1 rounded-xl bg-neutral-100 p-1">
+                        {([
+                          { v: 'EFECTIVO', l: 'Efectivo', i: Banknote },
+                          { v: 'TARJETA', l: 'Tarjeta', i: CreditCard },
+                          { v: 'TRANSFERENCIA', l: 'Transferencia', i: Landmark },
+                        ] as const).map(m => (
+                          <button
+                            key={m.v}
+                            type="button"
+                            onClick={() => setMovMetodo(m.v as any)}
+                            className={cn(
+                              "flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold cursor-pointer transition-colors duration-150",
+                              movMetodo === m.v ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-neutral-800"
+                            )}
+                          >
+                            <m.i className="h-3.5 w-3.5" /> {m.l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {movTipo === 'GASTO_CAJA_CHICA' && (
+                    <div>
+                      <Label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Categoría del gasto</Label>
+                      <Select value={movGastoCategoria} onValueChange={(val) => val && setMovGastoCategoria(val)}>
+                        <SelectTrigger className="h-11 rounded-xl border-neutral-200 text-sm">
+                          <SelectValue placeholder="Categoría" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {CATEGORIAS_GASTOS.map(cat => (
+                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {movTipo === 'PAGO_NOMINA' && (
+                    <div>
+                      <Label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Técnico</Label>
+                      <Select value={movTecnicoId} onValueChange={(val) => {
+                          if (!val) return;
+                          setMovTecnicoId(val);
+                          const tech = technicians.find(t => t.id === val);
+                          if (tech) {
+                            const { total, pendingIds } = calculateTechCommission(val);
+                            setMovMonto(formatAmountInput(total.toFixed(2)));
+                            setMovConcepto(`Pago Nómina a ${tech.name} (${pendingIds.length} facturas pendientes)`);
+                          }
+                        }}>
+                        <SelectTrigger className="h-11 rounded-xl border-neutral-200 text-sm">
+                          <SelectValue placeholder="Seleccione técnico" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl">
+                          {technicians.filter(t => t.tenantId === tenantId).map(tech => (
+                            <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {/* Concepto */}
+                  <div>
+                    <Label htmlFor="mov-concepto" className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Concepto</Label>
+                    <Input
+                      id="mov-concepto"
+                      placeholder="Ej: almuerzo técnicos, retiro gerencia…"
+                      required
+                      value={movConcepto}
+                      onChange={(e) => setMovConcepto(e.target.value)}
+                      className="h-11 rounded-xl border-neutral-200 text-sm px-3.5"
+                    />
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="shrink-0 border-t border-neutral-100 px-6 py-4 flex items-center justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setIsMovOpen(false)}
+                    className="h-10 px-4 text-sm rounded-xl border-neutral-200 cursor-pointer font-semibold hover:bg-neutral-50 active:scale-[0.98] transition-transform">
+                    Cancelar
+                  </Button>
+                  <Button type="submit"
+                    className="h-10 px-5 text-sm rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 font-semibold cursor-pointer gap-2 active:scale-[0.98] transition-transform">
+                    <Check className="h-4 w-4" /> Registrar {current.label.toLowerCase()}
+                  </Button>
+                </div>
+              </form>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
       {/* DIALOG 4: Caja Chica Setup */}
       <Dialog open={isCajaChicaOpen} onOpenChange={setIsCajaChicaOpen}>
-        <DialogContent className="sm:max-w-md w-full rounded-2xl p-0 overflow-hidden bg-white shadow-2xl border border-neutral-200 max-h-[88vh] overflow-y-auto [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]]:hover:bg-white/10 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:transition-colors">
-          <div className="bg-neutral-950 text-white p-4 sm:p-5 flex items-center justify-between relative pr-12">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white border border-white/10 shadow-inner">
-                <PiggyBank className="h-5 w-5" />
-              </div>
-              <div>
-                <DialogTitle className="font-heading text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
-                  Fondo de Caja Chica
-                </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-400 mt-0.5">
-                  Límite rotativo para gastos menores y reposición al 100%.
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
+        <DialogContent className="sm:max-w-md w-full rounded-3xl p-0 gap-0 overflow-hidden bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.25)] border border-neutral-200/80 max-h-[90vh] flex flex-col [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:bg-neutral-100 [&_[data-slot=dialog-close]]:hover:text-neutral-900">
+          {(() => {
+            const saldo = currentTenant?.monto_actual_caja_chica ?? 10000;
+            const fondo = currentTenant?.monto_caja_chica ?? 10000;
+            const pct = fondo > 0 ? Math.max(0, Math.min(100, (saldo / fondo) * 100)) : 0;
+            return (
+              <form onSubmit={handleCcSubmit} className="flex flex-col min-h-0">
+                <div className="px-6 pt-6 pb-5 shrink-0">
+                  <div className="flex items-start gap-3.5 pr-10">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                      <PiggyBank className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <DialogTitle className="font-heading text-lg font-bold tracking-tight text-neutral-900 leading-tight">
+                        Fondo de caja chica
+                      </DialogTitle>
+                      <DialogDescription className="text-sm text-neutral-500 mt-0.5">
+                        Límite rotativo para gastos menores.
+                      </DialogDescription>
+                    </div>
+                  </div>
+                </div>
 
-          <div className="p-4 sm:p-5">
-            <form onSubmit={handleCcSubmit} className="space-y-3">
-            {/* SALDO ACTUAL & ASIGNADO */}
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-neutral-200/90 bg-neutral-50/50 p-2.5 shadow-2xs">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block">Saldo Actual</span>
-                <span className="font-heading text-lg font-black text-emerald-700">
-                  {formatRD(currentTenant?.monto_actual_caja_chica ?? 10000)}
-                </span>
-              </div>
-              <div className="border-l border-neutral-200 pl-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block">Fondo Asignado</span>
-                <span className="font-heading text-lg font-black text-neutral-900">
-                  {formatRD(currentTenant?.monto_caja_chica ?? 10000)}
-                </span>
-              </div>
-            </div>
+                <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-5">
+                  {/* Estado actual */}
+                  <div className="rounded-2xl border border-neutral-200/80 p-4">
+                    <div className="flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-medium text-neutral-500">Saldo disponible</p>
+                        <p className="font-heading text-2xl font-bold tabular-nums text-neutral-900 leading-tight">{formatRD(saldo)}</p>
+                      </div>
+                      <p className="text-xs text-neutral-500 tabular-nums">de {formatRD(fondo)}</p>
+                    </div>
+                    <div className="mt-3 h-1.5 rounded-full bg-neutral-100 overflow-hidden">
+                      <div
+                        className={cn("h-full rounded-full transition-[width] duration-300", pct < 25 ? "bg-rose-500" : pct < 50 ? "bg-amber-500" : "bg-emerald-500")}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <p className="mt-2 text-[11px] text-neutral-400">{Math.round(pct)}% del fondo disponible</p>
+                  </div>
 
-            {/* HERO CARD MONTO FIJO */}
-            <div className="rounded-xl border border-neutral-200/90 bg-neutral-50/50 p-2.5 shadow-2xs space-y-2">
-              <div className="flex items-center justify-between px-0.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-600 flex items-center gap-1.5">
-                  <Banknote className="h-3.5 w-3.5 text-neutral-900" />
-                  Nuevo Límite de Fondo Fijo
-                </span>
-                <span className="text-[9px] font-semibold text-neutral-700 bg-neutral-100 border border-neutral-200 px-1.5 py-0.2 rounded-full">
-                  Rotativo
-                </span>
-              </div>
+                  {/* Nuevo límite */}
+                  <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/70 p-4">
+                    <label htmlFor="cc-monto" className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">Nuevo fondo fijo</label>
+                    <div className="mt-1.5 flex items-baseline gap-2">
+                      <span className="text-lg font-semibold text-neutral-400 select-none">RD$</span>
+                      <input
+                        id="cc-monto"
+                        type="text"
+                        inputMode="decimal"
+                        required
+                        value={ccMontoFijo}
+                        onChange={(e) => setCcMontoFijo(formatAmountInput(e.target.value))}
+                        placeholder="10,000.00"
+                        className="w-full bg-transparent font-heading text-4xl font-bold tabular-nums tracking-tight text-neutral-900 outline-none placeholder:text-neutral-300"
+                      />
+                    </div>
+                    <div className="mt-3 grid grid-cols-4 gap-1.5">
+                      {["5,000", "10,000", "15,000", "20,000"].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setCcMontoFijo(preset)}
+                          className={cn(
+                            "rounded-lg border py-1.5 text-xs font-semibold tabular-nums cursor-pointer transition-colors duration-150 active:scale-[0.97]",
+                            ccMontoFijo === preset ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300"
+                          )}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-sm select-none">RD$</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  required
-                  value={ccMontoFijo}
-                  onChange={(e) => setCcMontoFijo(formatAmountInput(e.target.value))}
-                  placeholder="10,000.00"
-                  className="h-10 w-full pl-11 pr-3 text-center font-heading text-2xl font-bold text-neutral-900 tracking-tight rounded-lg border border-neutral-200 bg-white shadow-2xs focus:ring-2 focus:ring-neutral-900/10 outline-none placeholder:text-neutral-300"
-                />
-              </div>
+                  <p className="flex items-start gap-2 text-xs text-neutral-500">
+                    <RefreshCw className="h-3.5 w-3.5 mt-0.5 shrink-0 text-neutral-400" />
+                    Al guardar, el saldo se repone automáticamente hasta completar el nuevo fondo.
+                  </p>
+                </div>
 
-              <div className="grid grid-cols-4 gap-1 pt-0.5">
-                {["5,000", "10,000", "15,000", "20,000"].map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setCcMontoFijo(preset)}
-                    className="text-[10px] font-semibold py-1 px-1 rounded-md border text-center transition-all active:scale-95 cursor-pointer bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className="text-[10px] text-neutral-400 px-1">
-              Al guardar, el saldo actual se repondrá automáticamente completando el total de esta asignación.
-            </p>
-
-            <DialogFooter className="mt-2 pt-2 border-t border-neutral-100 flex gap-2 sm:justify-end">
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => setIsCajaChicaOpen(false)}
-                className="h-8 text-xs rounded-xl border-neutral-200 cursor-pointer"
-              >
-                Cancelar
-              </Button>
-              <Button 
-                type="submit"
-                className="h-8 text-xs rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 font-bold cursor-pointer shadow-2xs gap-1.5"
-              >
-                <Check className="h-3.5 w-3.5" /> Reponer y Guardar
-              </Button>
-            </DialogFooter>
-          </form>
-          </div>
+                <div className="shrink-0 border-t border-neutral-100 px-6 py-4 flex items-center justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setIsCajaChicaOpen(false)}
+                    className="h-10 px-4 text-sm rounded-xl border-neutral-200 cursor-pointer font-semibold hover:bg-neutral-50 active:scale-[0.98] transition-transform">
+                    Cancelar
+                  </Button>
+                  <Button type="submit"
+                    className="h-10 px-5 text-sm rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 font-semibold cursor-pointer gap-2 active:scale-[0.98] transition-transform">
+                    <Check className="h-4 w-4" /> Reponer y guardar
+                  </Button>
+                </div>
+              </form>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -3894,371 +3910,371 @@ export default function CajaPage() {
       
       {/* DIALOG 7: Cuentas x Cobrar */}
       <Dialog open={isCxcOpen} onOpenChange={setIsCxcOpen}>
-        <DialogContent className="sm:max-w-3xl md:max-w-4xl w-full rounded-2xl p-0 overflow-hidden bg-white shadow-2xl border border-neutral-200 max-h-[88vh] overflow-y-auto [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]]:hover:bg-white/10 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:transition-colors">
-          <div className="bg-neutral-950 text-white p-4 sm:p-5 flex items-center justify-between relative pr-12">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white border border-white/10 shadow-inner">
-                <FileText className="h-5 w-5" />
-              </div>
-              <div>
-                <DialogTitle className="font-heading text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
-                  Cuentas por Cobrar
-                </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-400 mt-0.5">
-                  Facturas a crédito pendientes y recepción de abonos.
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-5 space-y-3">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
-              <Input 
-                placeholder="Buscar por cliente o número de factura..."
-                value={cxcSearch}
-                onChange={(e) => setCxcSearch(e.target.value)}
-                className="pl-8 h-8.5 rounded-xl border-neutral-200/90 text-xs bg-neutral-50/50 focus:bg-white"
-              />
-            </div>
-
-            <div className="space-y-2">
-              {processedCxcInvoices.length === 0 ? (
-                <div className="py-12 px-4 text-center">
-                  <div className="h-10 w-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/80 flex items-center justify-center mx-auto mb-2 shadow-2xs">
-                    <CheckCircle2 className="h-5 w-5" />
+        <DialogContent className="sm:max-w-2xl md:max-w-3xl w-full rounded-3xl p-0 gap-0 overflow-hidden bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.25)] border border-neutral-200/80 max-h-[88vh] flex flex-col [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:bg-neutral-100 [&_[data-slot=dialog-close]]:hover:text-neutral-900">
+          {(() => {
+            const cxcTotal = processedCxcInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
+            return (
+              <>
+                {/* Header */}
+                <div className="px-6 pt-6 pb-5 shrink-0">
+                  <div className="flex items-start gap-3.5 pr-10">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <DialogTitle className="font-heading text-lg font-bold tracking-tight text-neutral-900 leading-tight">
+                        Cuentas por cobrar
+                      </DialogTitle>
+                      <DialogDescription className="text-sm text-neutral-500 mt-0.5">
+                        Facturas a crédito pendientes y recepción de abonos.
+                      </DialogDescription>
+                    </div>
                   </div>
-                  <div className="text-xs font-bold text-neutral-800">Cuentas al día</div>
-                  <p className="text-[11px] text-neutral-400 mt-0.5">No hay facturas de crédito pendientes de cobro.</p>
+
+                  {/* Resumen */}
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-neutral-200/80 p-3.5">
+                      <p className="text-[11px] font-medium text-neutral-500">Total pendiente</p>
+                      <p className="mt-1 font-heading text-xl font-bold tabular-nums text-neutral-900 leading-tight">{formatRD(cxcTotal)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-neutral-200/80 p-3.5">
+                      <p className="text-[11px] font-medium text-neutral-500">Facturas abiertas</p>
+                      <p className="mt-1 font-heading text-xl font-bold tabular-nums text-neutral-900 leading-tight">{processedCxcInvoices.length}</p>
+                    </div>
+                  </div>
+
+                  {/* Buscador */}
+                  <div className="relative mt-4">
+                    <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+                    <Input
+                      placeholder="Buscar por cliente o número de factura…"
+                      value={cxcSearch}
+                      onChange={(e) => setCxcSearch(e.target.value)}
+                      className="pl-10 h-11 rounded-xl border-neutral-200 text-sm bg-neutral-50 focus:bg-white focus-visible:ring-2 focus-visible:ring-neutral-900/10 focus-visible:border-neutral-300"
+                    />
+                  </div>
                 </div>
-              ) : (
-                processedCxcInvoices.map((inv) => (
-                  <div key={inv.id} className="rounded-xl border border-neutral-200/90 bg-white hover:bg-neutral-50/50 p-2.5 sm:p-3 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="h-8 w-8 bg-blue-50 text-blue-700 border border-blue-200/80 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
-                        {inv.customerName ? inv.customerName.charAt(0).toUpperCase() : '?'}
+
+                {/* Lista */}
+                <div className="flex-1 min-h-0 overflow-y-auto border-t border-neutral-100 bg-neutral-50/60 px-6 py-5">
+                  {processedCxcInvoices.length === 0 ? (
+                    <div className="py-10 text-center">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600">
+                        <CheckCircle2 className="h-5 w-5" />
                       </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-neutral-900 text-xs truncate">{inv.customerName || 'Cliente No Registrado'}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-md bg-neutral-100 text-neutral-600 border border-neutral-200">
-                            #{inv.id.slice(-6).toUpperCase()}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[10px] text-neutral-400 mt-0.5">
-                          <span className="flex items-center gap-1">
-                            <FileText className="h-3 w-3 text-neutral-400" />
-                            {formatDateTimeRD(inv.createdAt).split(',')[0]}
-                          </span>
-                          <span>•</span>
-                          <span className="text-amber-600 font-semibold flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" /> Pendiente
-                          </span>
-                        </div>
-                      </div>
+                      <p className="text-sm font-semibold text-neutral-800">{cxcSearch ? 'Sin resultados' : 'Cuentas al día'}</p>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        {cxcSearch ? 'Ninguna factura coincide con tu búsqueda.' : 'No hay facturas a crédito pendientes de cobro.'}
+                      </p>
                     </div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {processedCxcInvoices.map((inv) => (
+                        <li key={inv.id} className="rounded-2xl border border-neutral-200/80 bg-white p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-xs font-bold text-neutral-700">
+                              {(inv.customerName || '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-neutral-900 truncate">{inv.customerName || 'Cliente no registrado'}</p>
+                              <p className="text-xs text-neutral-500 flex items-center gap-1.5 mt-0.5">
+                                <span className="font-mono">#{inv.id.slice(-6).toUpperCase()}</span>
+                                <span className="text-neutral-300">·</span>
+                                <span>{formatDateTimeRD(inv.createdAt).split(',')[0]}</span>
+                                <span className="text-neutral-300">·</span>
+                                <span className="inline-flex items-center gap-1 text-amber-600 font-medium"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" />Pendiente</span>
+                              </p>
+                            </div>
+                          </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-neutral-100">
-                      <span className="font-heading text-base sm:text-lg font-black text-neutral-900">
-                        {formatRD(inv.total)}
-                      </span>
+                          <div className="flex items-center justify-between sm:justify-end gap-3">
+                            <span className="font-heading text-lg font-bold tabular-nums text-neutral-900">{formatRD(inv.total)}</span>
+                            <div className="flex items-center gap-1">
+                              {([
+                                { m: 'EFECTIVO', l: 'Efectivo', i: Banknote },
+                                { m: 'TARJETA', l: 'Tarjeta', i: CreditCard },
+                                { m: 'TRANSFERENCIA', l: 'Transferencia', i: Landmark },
+                              ] as const).map(b => (
+                                <button
+                                  key={b.m}
+                                  type="button"
+                                  title={`Cobrar con ${b.l.toLowerCase()}`}
+                                  onClick={() => handlePayCxc(inv, b.m)}
+                                  className="flex h-9 items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-2.5 text-xs font-semibold text-neutral-700 cursor-pointer transition-colors duration-150 hover:border-neutral-900 hover:bg-neutral-900 hover:text-white active:scale-[0.97]"
+                                >
+                                  <b.i className="h-3.5 w-3.5" />
+                                  <span className="hidden md:inline">{b.l}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
 
-                      <div className="flex items-center gap-1 bg-neutral-50 p-0.5 rounded-xl border border-neutral-200/90 shadow-2xs">
-                        <span className="text-[9px] font-bold uppercase text-neutral-400 px-1">Cobrar:</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 rounded-lg hover:bg-emerald-50 text-emerald-700 text-[11px] font-bold gap-1 cursor-pointer"
-                          onClick={() => handlePayCxc(inv, 'EFECTIVO')}
-                        >
-                          <Coins className="h-3 w-3" /> Efectivo
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 rounded-lg hover:bg-sky-50 text-sky-700 text-[11px] font-bold gap-1 cursor-pointer"
-                          onClick={() => handlePayCxc(inv, 'TARJETA')}
-                        >
-                          <CreditCard className="h-3 w-3" /> Tarjeta
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 rounded-lg hover:bg-indigo-50 text-indigo-700 text-[11px] font-bold gap-1 cursor-pointer"
-                          onClick={() => handlePayCxc(inv, 'TRANSFERENCIA')}
-                        >
-                          <Landmark className="h-3 w-3" /> Transf.
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <DialogFooter className="p-3.5 sm:p-4 border-t border-neutral-100 bg-neutral-50/80 flex flex-row items-center justify-between gap-3 sm:justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">Total Pendiente:</span>
-              <span className="font-heading text-lg sm:text-xl font-black text-neutral-950">
-                {formatRD(processedCxcInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0))}
-              </span>
-              <span className="text-[11px] text-neutral-400 font-medium">
-                ({processedCxcInvoices.length} facturas)
-              </span>
-            </div>
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => setIsCxcOpen(false)}
-              className="h-8 text-xs rounded-xl border-neutral-200 cursor-pointer font-medium hover:bg-neutral-100"
-            >
-              Cerrar Panel
-            </Button>
-          </DialogFooter>
+                {/* Footer */}
+                <div className="shrink-0 border-t border-neutral-100 bg-white px-6 py-4 flex items-center justify-between gap-3">
+                  <p className="text-xs text-neutral-500">Elige el método de pago en cada factura para registrar el cobro.</p>
+                  <Button type="button" variant="outline" onClick={() => setIsCxcOpen(false)}
+                    className="h-10 px-4 text-sm rounded-xl border-neutral-200 cursor-pointer font-semibold hover:bg-neutral-50 active:scale-[0.98] transition-transform">
+                    Cerrar
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
       
       {/* DIALOG 8: Liquidación de Técnicos (Pago Técnico Detallado) */}
       <Dialog open={isPagoTecnicoOpen} onOpenChange={setIsPagoTecnicoOpen}>
-        <DialogContent className="sm:max-w-3xl md:max-w-4xl w-full rounded-2xl p-0 overflow-hidden bg-white shadow-2xl border border-neutral-200 max-h-[88vh] overflow-y-auto [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]]:hover:bg-white/10 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:transition-colors">
-          <div className="bg-neutral-950 text-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative pr-12">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white border border-white/10 shadow-inner">
+        <DialogContent className="sm:max-w-3xl md:max-w-4xl w-full rounded-3xl p-0 gap-0 overflow-hidden bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.25)] border border-neutral-200/80 max-h-[88vh] flex flex-col [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:bg-neutral-100 [&_[data-slot=dialog-close]]:hover:text-neutral-900">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-4 shrink-0">
+            <div className="flex items-start gap-3.5 pr-10">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-neutral-900 text-white">
                 <Users className="h-5 w-5" />
               </div>
-              <div>
-                <DialogTitle className="font-heading text-base sm:text-lg font-bold tracking-tight text-white leading-tight">
+              <div className="min-w-0">
+                <DialogTitle className="font-heading text-lg font-bold tracking-tight text-neutral-900 leading-tight">
                   Liquidación por Técnico
                 </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-400 mt-0.5">
-                  Comisiones de mano de obra y archivo de pagos.
+                <DialogDescription className="text-sm text-neutral-500 mt-0.5">
+                  Comisiones de mano de obra pendientes y archivo de pagos.
                 </DialogDescription>
               </div>
             </div>
 
-            {/* Selector de Pestañas Pendientes vs Historial */}
-            <div className="flex items-center bg-white/10 p-0.5 rounded-xl border border-white/10 mr-2">
-              <button
+            {/* Tabs + acciones */}
+            <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="inline-flex items-center rounded-xl bg-neutral-100 p-1 self-start">
+                {([
+                  { id: 'pending', label: 'Pendientes', icon: Coins },
+                  { id: 'history', label: 'Historial', icon: History },
+                ] as const).map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setPagoTecnicoTab(t.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold cursor-pointer transition-[background-color,color,box-shadow] duration-150",
+                      pagoTecnicoTab === t.id
+                        ? "bg-neutral-900 text-white shadow-[0_1px_2px_rgba(0,0,0,0.15)]"
+                        : "text-neutral-500 hover:text-neutral-800"
+                    )}
+                  >
+                    <t.icon className="h-3.5 w-3.5" /> {t.label}
+                  </button>
+                ))}
+              </div>
+              <Button
                 type="button"
-                onClick={() => setPagoTecnicoTab('pending')}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
-                  pagoTecnicoTab === 'pending'
-                    ? "bg-white text-neutral-950 shadow-2xs"
-                    : "text-white/80 hover:text-white"
-                )}
+                variant="outline"
+                onClick={() => handlePrintLiquidacion()}
+                disabled={!selectedTechToPay || selectedTechToPay === 'all' || (pagoTecnicoTab === 'pending' && techCommissionInfo.items.length === 0)}
+                className="h-9 rounded-xl border-neutral-200 bg-white hover:bg-neutral-50 font-semibold gap-1.5 text-xs text-neutral-700 cursor-pointer active:scale-[0.98] transition-transform"
               >
-                <Users className="h-3.5 w-3.5" /> Pendientes
-              </button>
-              <button
-                type="button"
-                onClick={() => setPagoTecnicoTab('history')}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
-                  pagoTecnicoTab === 'history'
-                    ? "bg-white text-neutral-950 shadow-2xs"
-                    : "text-white/80 hover:text-white"
-                )}
-              >
-                <History className="h-3.5 w-3.5" /> Historial
-              </button>
+                <Printer className="h-3.5 w-3.5" /> Imprimir comprobante
+              </Button>
             </div>
           </div>
 
-          <div className="p-4 sm:p-5 space-y-3">
-            {/* Controles de Selección e Impresión/Historial */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-neutral-50/70 p-2.5 rounded-xl border border-neutral-200/90 shadow-2xs">
-              <div className="flex-1 max-w-sm">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 block mb-1">
-                  Técnico a Liquidar
-                </Label>
-                <Select value={selectedTechToPay} onValueChange={(val) => val && setSelectedTechToPay(val)}>
-                  <SelectTrigger className="h-8.5 rounded-xl border-neutral-200 bg-white text-xs font-semibold">
-                    <SelectValue placeholder={pagoTecnicoTab === 'history' ? "Todos los Técnicos" : "Seleccione Técnico"}>
-                      {selectedTechToPay && selectedTechToPay !== 'all' 
-                        ? technicians.find(t => t.id === selectedTechToPay)?.name 
-                        : (pagoTecnicoTab === 'history' ? "Todos los Técnicos" : "Seleccione Técnico")}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {pagoTecnicoTab === 'history' && (
-                      <SelectItem value="all">Todos los Técnicos</SelectItem>
-                    )}
-                    {technicians.filter(t => t.tenantId === tenantId).map(tech => (
-                      <SelectItem key={tech.id} value={tech.id}>{tech.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center gap-1.5 self-end sm:self-auto pt-1 sm:pt-4">
-                <Button
+          {/* Selector de técnicos (chips con avatar) */}
+          <div className="px-6 pb-4 shrink-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">
+              {pagoTecnicoTab === 'history' ? 'Filtrar por técnico' : 'Técnico a liquidar'}
+            </p>
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 custom-scrollbar">
+              {pagoTecnicoTab === 'history' && (
+                <button
                   type="button"
-                  variant="outline"
-                  onClick={() => handlePrintLiquidacion()}
-                  disabled={!selectedTechToPay || (pagoTecnicoTab === 'pending' && techCommissionInfo.items.length === 0)}
-                  className="h-8.5 rounded-xl border-neutral-200/90 bg-white hover:bg-neutral-50 font-bold gap-1.5 text-xs text-neutral-700 shadow-2xs cursor-pointer"
+                  onClick={() => setSelectedTechToPay('all')}
+                  className={cn(
+                    "shrink-0 flex items-center gap-2 rounded-full border pl-1 pr-3.5 py-1 text-xs font-semibold cursor-pointer transition-colors duration-150",
+                    !selectedTechToPay || selectedTechToPay === 'all'
+                      ? "border-neutral-900 bg-neutral-900 text-white"
+                      : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-300"
+                  )}
                 >
-                  <Printer className="h-3.5 w-3.5 text-neutral-500" />
-                  Imprimir Comprobante
-                </Button>
-              </div>
-            </div>
-
-            {pagoTecnicoTab === 'pending' ? (
-              <>
-                {selectedTechToPay && (
-                  <>
-                    {techCommissionInfo.items.length === 0 ? (
-                      <div className="py-10 px-4 text-center">
-                        <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-1.5 opacity-80" />
-                        <p className="text-xs font-bold text-neutral-700">El técnico está al día</p>
-                        <p className="text-[11px] text-neutral-400 mt-0.5">No hay facturas pendientes de comisión.</p>
-                      </div>
-                    ) : (
-                      <div className="border border-neutral-200/90 rounded-xl overflow-hidden shadow-2xs bg-white">
-                        <table className="w-full text-left text-xs">
-                          <thead className="bg-neutral-50/80 border-b border-neutral-100 text-neutral-500 uppercase text-[10px] font-bold">
-                            <tr>
-                              <th className="py-2.5 px-3"><span className="flex items-center gap-1.5"><Receipt className="h-3.5 w-3.5 text-neutral-400" /> Factura / Fecha</span></th>
-                              <th className="py-2.5 px-3 text-right text-purple-700"><span className="flex items-center justify-end gap-1.5"><Percent className="h-3.5 w-3.5 text-purple-600" /> Comisión</span></th>
-                              <th className="py-2.5 px-3 text-right text-blue-700"><span className="flex items-center justify-end gap-1.5"><Wrench className="h-3.5 w-3.5 text-blue-600" /> Mano de Obra</span></th>
-                              <th className="py-2.5 px-3 text-right text-neutral-900"><span className="flex items-center justify-end gap-1.5"><Coins className="h-3.5 w-3.5 text-neutral-600" /> Total Fila</span></th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-neutral-100">
-                            {techCommissionInfo.items.map((item, idx) => (
-                              <tr key={idx} className="hover:bg-neutral-50/50 transition-colors">
-                                <td className="py-2.5 px-3">
-                                  <div className="font-bold text-neutral-800 text-xs">#{item.inv.id.slice(-6).toUpperCase()}</div>
-                                  <div className="text-[10px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString()}</div>
-                                  <div className="text-[10px] text-blue-600 font-medium mt-0.5 line-clamp-1" title={item.nombresAplicables.join(', ')}>
-                                    {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-3 text-right font-bold text-purple-700">{formatRD(item.comisionTotal)}</td>
-                                <td className="py-2.5 px-3 text-right font-bold text-blue-700">{formatRD(item.manoObraTotal)}</td>
-                                <td className="py-2.5 px-3 text-right font-black text-neutral-900">{formatRD(item.totalFila)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="bg-neutral-50 border-t border-neutral-200">
-                            <tr>
-                              <td colSpan={3} className="py-2.5 px-3 text-right font-bold text-neutral-700 uppercase text-[11px]">
-                                Total a Liquidar:
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-black text-neutral-950 text-sm">
-                                {formatRD(techCommissionInfo.total)}
-                              </td>
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-neutral-600"><Users className="h-3.5 w-3.5" /></span>
+                  Todos
+                </button>
+              )}
+              {technicians.filter(t => t.tenantId === tenantId).map(tech => {
+                const active = selectedTechToPay === tech.id;
+                const initials = tech.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+                return (
+                  <button
+                    key={tech.id}
+                    type="button"
+                    onClick={() => setSelectedTechToPay(tech.id)}
+                    className={cn(
+                      "shrink-0 flex items-center gap-2 rounded-full border pl-1 pr-3.5 py-1 text-xs font-semibold cursor-pointer transition-colors duration-150 active:scale-[0.98]",
+                      active
+                        ? "border-neutral-900 bg-neutral-900 text-white"
+                        : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-300"
                     )}
-                  </>
-                )}
-              </>
+                  >
+                    <span className={cn(
+                      "flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-bold",
+                      active ? "bg-white/15 text-white" : "bg-neutral-100 text-neutral-600"
+                    )}>{initials}</span>
+                    {tech.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Contenido scrolleable */}
+          <div className="flex-1 min-h-0 overflow-y-auto border-t border-neutral-100 bg-neutral-50/60 px-6 py-5">
+            {pagoTecnicoTab === 'pending' ? (
+              !selectedTechToPay || selectedTechToPay === 'all' ? (
+                <div className="py-12 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white border border-neutral-200 text-neutral-400">
+                    <User className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-800">Selecciona un técnico</p>
+                  <p className="text-xs text-neutral-500 mt-1">Verás sus facturas con comisión pendiente de pago.</p>
+                </div>
+              ) : techCommissionInfo.items.length === 0 ? (
+                <div className="py-12 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600">
+                    <CheckCircle2 className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-semibold text-neutral-800">Técnico al día</p>
+                  <p className="text-xs text-neutral-500 mt-1">No hay facturas pendientes de comisión.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Resumen */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Comisiones', value: techCommissionInfo.items.reduce((s, i) => s + i.comisionTotal, 0), icon: Percent, tone: 'text-violet-600 bg-violet-50' },
+                      { label: 'Mano de obra', value: techCommissionInfo.items.reduce((s, i) => s + i.manoObraTotal, 0), icon: Wrench, tone: 'text-blue-600 bg-blue-50' },
+                      { label: 'Facturas', value: null, count: techCommissionInfo.items.length, icon: Receipt, tone: 'text-neutral-700 bg-neutral-100' },
+                    ].map(s => (
+                      <div key={s.label} className="rounded-2xl border border-neutral-200/80 bg-white p-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("flex h-7 w-7 items-center justify-center rounded-lg", s.tone)}><s.icon className="h-3.5 w-3.5" /></span>
+                          <span className="text-[11px] font-medium text-neutral-500">{s.label}</span>
+                        </div>
+                        <p className="mt-2 text-base font-bold tabular-nums text-neutral-900">
+                          {s.value === null ? s.count : formatRD(s.value)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Lista de facturas */}
+                  <div className="rounded-2xl border border-neutral-200/80 bg-white overflow-hidden">
+                    <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-6 px-4 py-2.5 border-b border-neutral-100 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-400">
+                      <span>Factura</span>
+                      <span className="text-right w-24">Comisión</span>
+                      <span className="text-right w-24 hidden sm:block">Mano de obra</span>
+                      <span className="text-right w-24">Total</span>
+                    </div>
+                    <ul className="divide-y divide-neutral-100">
+                      {techCommissionInfo.items.map((item, idx) => (
+                        <li key={idx} className="grid grid-cols-[1fr_auto_auto_auto] gap-x-6 items-center px-4 py-3 hover:bg-neutral-50/70 transition-colors duration-150">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-semibold text-neutral-900">#{item.inv.id.slice(-6).toUpperCase()}</span>
+                              <span className="text-[11px] text-neutral-400">{new Date(item.inv.createdAt).toLocaleDateString('es-DO', { day: '2-digit', month: 'short' })}</span>
+                            </div>
+                            <p className="text-xs text-neutral-500 truncate mt-0.5" title={item.nombresAplicables.join(', ')}>
+                              {item.nombresAplicables.length > 0 ? item.nombresAplicables.join(', ') : 'Servicio general'}
+                            </p>
+                          </div>
+                          <span className="text-right w-24 text-xs font-semibold tabular-nums text-violet-700">{formatRD(item.comisionTotal)}</span>
+                          <span className="text-right w-24 text-xs font-semibold tabular-nums text-blue-700 hidden sm:block">{formatRD(item.manoObraTotal)}</span>
+                          <span className="text-right w-24 text-sm font-bold tabular-nums text-neutral-900">{formatRD(item.totalFila)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )
             ) : (
-              /* TAB HISTORIAL DE LIQUIDACIONES REALIZADAS */
-              <div className="space-y-3">
-                {filteredHistoricalLiquidaciones.length === 0 ? (
-                  <div className="py-10 px-4 text-center">
-                    <History className="h-8 w-8 text-neutral-300 mx-auto mb-1.5" />
-                    <p className="text-xs font-bold text-neutral-700">Sin historial registrado</p>
-                    <p className="text-[11px] text-neutral-400 mt-0.5">No hay pagos de liquidación para este criterio.</p>
+              /* TAB HISTORIAL */
+              filteredHistoricalLiquidaciones.length === 0 ? (
+                <div className="py-12 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white border border-neutral-200 text-neutral-400">
+                    <History className="h-5 w-5" />
                   </div>
-                ) : (
-                  <div className="border border-neutral-200/90 rounded-xl overflow-hidden shadow-2xs bg-white">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-neutral-50/80 border-b border-neutral-100 text-neutral-500 uppercase text-[10px] font-bold">
-                        <tr>
-                          <th className="py-2.5 px-3"><span className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-neutral-400" /> Fecha</span></th>
-                          <th className="py-2.5 px-3"><span className="flex items-center gap-1.5"><User className="h-3.5 w-3.5 text-neutral-400" /> Técnico</span></th>
-                          <th className="py-2.5 px-3"><span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-neutral-400" /> Concepto</span></th>
-                          <th className="py-2.5 px-3 text-right"><span className="flex items-center justify-end gap-1.5"><Coins className="h-3.5 w-3.5 text-emerald-600" /> Monto</span></th>
-                          <th className="py-2.5 px-3 text-center"><span className="flex items-center justify-center gap-1.5"><Printer className="h-3.5 w-3.5 text-neutral-400" /> Acción</span></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-neutral-100">
-                        {filteredHistoricalLiquidaciones.map((mov) => {
-                          const techName = technicians.find(t => t.id === mov.tecnico_id)?.name || "Técnico";
-                          return (
-                            <tr key={mov.id} className="hover:bg-neutral-50/50 transition-colors">
-                              <td className="py-2.5 px-3 font-medium text-neutral-500 whitespace-nowrap text-[11px]">
-                                {new Date(mov.creado_en).toLocaleString('es-DO', { dateStyle: 'short', timeStyle: 'short' })}
-                              </td>
-                              <td className="py-2.5 px-3 font-bold text-neutral-900 text-xs">
-                                {techName}
-                              </td>
-                              <td className="py-2.5 px-3 text-neutral-600 text-xs">
-                                <span className="line-clamp-1">{mov.concepto}</span>
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-black text-emerald-600 whitespace-nowrap text-xs">
-                                {formatRD(mov.monto)}
-                              </td>
-                              <td className="py-2.5 px-3 text-center">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handlePrintLiquidacion(
-                                    mov.tecnico_id,
-                                    [],
-                                    mov.monto,
-                                    true,
-                                    new Date(mov.creado_en).toLocaleString('es-DO')
-                                  )}
-                                  className="h-6 px-2 text-[11px] font-bold text-neutral-700 hover:text-neutral-950 hover:bg-neutral-100 gap-1 rounded-md cursor-pointer"
-                                >
-                                  <Printer className="h-3 w-3" /> Reimprimir
-                                </Button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+                  <p className="text-sm font-semibold text-neutral-800">Sin pagos registrados</p>
+                  <p className="text-xs text-neutral-500 mt-1">No hay liquidaciones para este filtro.</p>
+                </div>
+              ) : (
+                <ul className="rounded-2xl border border-neutral-200/80 bg-white divide-y divide-neutral-100 overflow-hidden">
+                  {filteredHistoricalLiquidaciones.map((mov) => {
+                    const techName = technicians.find(t => t.id === mov.tecnico_id)?.name || "Técnico";
+                    return (
+                      <li key={mov.id} className="flex items-center gap-4 px-4 py-3 hover:bg-neutral-50/70 transition-colors duration-150">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                          <Coins className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-neutral-900 truncate">{techName}</p>
+                          <p className="text-xs text-neutral-500 truncate">
+                            {new Date(mov.creado_en).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' })} · {mov.concepto}
+                          </p>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums text-neutral-900 whitespace-nowrap">{formatRD(mov.monto)}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handlePrintLiquidacion(mov.tecnico_id, [], mov.monto, true, new Date(mov.creado_en).toLocaleString('es-DO'))}
+                          className="h-8 w-8 p-0 rounded-lg text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 cursor-pointer"
+                          title="Reimprimir comprobante"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )
             )}
           </div>
 
-          <DialogFooter className="p-3.5 sm:p-4 border-t border-neutral-100 bg-neutral-50/80 flex flex-row items-center justify-between gap-3 sm:justify-between">
-            <div className="flex items-center gap-2">
-              {pagoTecnicoTab === 'pending' && selectedTechToPay && techCommissionInfo.total > 0 && (
+          {/* Footer */}
+          <div className="shrink-0 border-t border-neutral-100 bg-white px-6 py-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              {pagoTecnicoTab === 'pending' && selectedTechToPay && techCommissionInfo.total > 0 ? (
                 <>
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">Total a Liquidar:</span>
-                  <span className="font-heading text-lg sm:text-xl font-black text-neutral-950">
-                    {formatRD(techCommissionInfo.total)}
-                  </span>
-                  <span className="text-[11px] text-neutral-400 font-medium">
-                    ({techCommissionInfo.items.length} {techCommissionInfo.items.length === 1 ? 'factura' : 'facturas'})
-                  </span>
+                  <p className="text-[11px] font-medium text-neutral-500">Total a liquidar</p>
+                  <p className="font-heading text-xl font-bold tabular-nums text-neutral-900 leading-tight">{formatRD(techCommissionInfo.total)}</p>
                 </>
+              ) : (
+                <p className="text-xs text-neutral-400">
+                  {pagoTecnicoTab === 'history' ? `${filteredHistoricalLiquidaciones.length} pagos registrados` : 'Nada pendiente por liquidar'}
+                </p>
               )}
             </div>
             <div className="flex items-center gap-2">
-              <Button 
-                type="button" 
-                variant="outline" 
+              <Button
+                type="button"
+                variant="outline"
                 onClick={() => setIsPagoTecnicoOpen(false)}
-                className="h-8 text-xs rounded-xl border-neutral-200 cursor-pointer font-medium hover:bg-neutral-100"
+                className="h-10 px-4 text-sm rounded-xl border-neutral-200 cursor-pointer font-semibold hover:bg-neutral-50 active:scale-[0.98] transition-transform"
               >
                 Cerrar
               </Button>
               {pagoTecnicoTab === 'pending' && (
-                <Button 
+                <Button
                   onClick={handleLiquidarTecnico}
                   disabled={!selectedTechToPay || techCommissionInfo.total <= 0}
-                  className="h-8 text-xs rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 font-bold shadow-2xs cursor-pointer gap-1.5"
+                  className="h-10 px-5 text-sm rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 font-semibold cursor-pointer gap-2 active:scale-[0.98] transition-transform disabled:bg-neutral-200 disabled:text-neutral-400 disabled:opacity-100"
                 >
-                  <Check className="h-3.5 w-3.5" /> Liquidar ({formatRD(techCommissionInfo.total)})
+                  <Check className="h-4 w-4" /> Liquidar pago
                 </Button>
               )}
             </div>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -4278,130 +4294,130 @@ export default function CajaPage() {
           setDetailsSearch("");
         }
       }}>
-        <DialogContent className="sm:max-w-2xl md:max-w-3xl w-full rounded-2xl p-0 overflow-hidden bg-white shadow-2xl border border-neutral-200 max-h-[88vh] [&_[data-slot=dialog-close]]:text-neutral-400 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]]:hover:bg-white/10 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:p-1.5 [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:transition-colors">
-          <div className="bg-neutral-950 text-white p-4 sm:p-5 flex items-center justify-between relative pr-12">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white border border-white/10 shadow-inner">
-                <Receipt className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <DialogTitle className="font-heading text-base sm:text-lg font-bold tracking-tight text-white leading-tight truncate">
-                  {detailsData.title}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-neutral-400 mt-0.5">
-                  Desglose detallado de pagos y transacciones registradas.
-                </DialogDescription>
-              </div>
-            </div>
-          </div>
+        <DialogContent className="sm:max-w-2xl md:max-w-3xl w-full rounded-3xl p-0 gap-0 overflow-hidden bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.25)] border border-neutral-200/80 max-h-[88vh] flex flex-col">
+          {(() => {
+            const META: Record<string, { label: string; icon: any; tone: string }> = {
+              CASH_IN_BOX: { label: 'Efectivo en caja', icon: Wallet, tone: 'bg-emerald-50 text-emerald-600' },
+              SALES_CASH: { label: 'Ventas en efectivo', icon: Banknote, tone: 'bg-emerald-50 text-emerald-600' },
+              SALES_CARD: { label: 'Ventas con tarjeta', icon: CreditCard, tone: 'bg-blue-50 text-blue-600' },
+              SALES_TRANSFER: { label: 'Ventas por transferencia', icon: Landmark, tone: 'bg-violet-50 text-violet-600' },
+            };
+            const meta = META[detailsModalType ?? ''] ?? { label: detailsData.title, icon: Receipt, tone: 'bg-neutral-100 text-neutral-700' };
+            const MetaIcon = meta.icon;
+            const count = filteredDetailsItems.length;
+            return (
+              <>
+                {/* Header */}
+                <div className="px-6 pt-6 pb-5 shrink-0">
+                  <div className="flex items-start gap-3.5 pr-10">
+                    <div className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl", meta.tone)}>
+                      <MetaIcon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <DialogTitle className="font-heading text-lg font-bold tracking-tight text-neutral-900 leading-tight">
+                        {meta.label}
+                      </DialogTitle>
+                      <DialogDescription className="text-sm text-neutral-500 mt-0.5">
+                        Transacciones registradas en el turno actual.
+                      </DialogDescription>
+                    </div>
+                  </div>
 
-          {/* Barra de búsqueda */}
-          <div className="p-3 sm:px-4 border-b border-neutral-100 bg-neutral-50/60">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-400" />
-              <Input
-                placeholder="Buscar transacción por concepto, tipo, monto..."
-                value={detailsSearch}
-                onChange={(e) => setDetailsSearch(e.target.value)}
-                className="pl-9 pr-8 h-8.5 rounded-xl border-neutral-200 text-xs bg-white focus:bg-white shadow-2xs"
-              />
-              {detailsSearch && (
-                <button 
-                  type="button"
-                  onClick={() => setDetailsSearch("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 text-xs cursor-pointer p-0.5"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
+                  {/* Total destacado */}
+                  <div className="mt-5 rounded-2xl border border-neutral-200/80 bg-neutral-50/70 p-4 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-medium text-neutral-500">Total</p>
+                      <p className="font-heading text-3xl font-bold tabular-nums tracking-tight text-neutral-900 leading-tight">{formatRD(filteredDetailsTotal)}</p>
+                    </div>
+                    <span className="rounded-full bg-white border border-neutral-200 px-2.5 py-1 text-xs font-semibold tabular-nums text-neutral-600">
+                      {count} {count === 1 ? 'transacción' : 'transacciones'}
+                    </span>
+                  </div>
 
-          <div className="p-0 max-h-[50vh] overflow-y-auto">
-            <table className="w-full text-left text-xs border-collapse bg-white">
-              <thead className="sticky top-0 bg-neutral-50/95 backdrop-blur-sm border-b border-neutral-200 z-10">
-                <tr className="text-neutral-500 font-bold uppercase tracking-wider text-[10px]">
-                  <th className="py-3 px-4 w-28 whitespace-nowrap">
-                    <span className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-neutral-400" /> Hora</span>
-                  </th>
-                  <th className="py-3 px-4 w-28 whitespace-nowrap">
-                    <span className="flex items-center gap-1.5"><Tag className="h-3.5 w-3.5 text-neutral-400" /> Tipo</span>
-                  </th>
-                  <th className="py-3 px-4">
-                    <span className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-neutral-400" /> Concepto</span>
-                  </th>
-                  <th className="py-3 px-4 text-right w-32 whitespace-nowrap">
-                    <span className="flex items-center justify-end gap-1.5"><Coins className="h-3.5 w-3.5 text-neutral-400" /> Monto</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100">
-                {filteredDetailsItems.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} className="py-12 px-4 text-center text-neutral-400 font-medium bg-white">
-                      {detailsSearch.trim() 
-                        ? "No se encontraron transacciones que coincidan con la búsqueda."
-                        : "No hay transacciones para mostrar en esta categoría."}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredDetailsItems.map(mov => {
-                    const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
-                    const isEgreso = ['EGRESO', 'RETIRO', 'GASTO_CAJA_CHICA', 'PAGO_NOMINA'].includes(mov.tipo);
-                    
-                    return (
-                      <tr key={mov.id} className="hover:bg-neutral-50/50 transition-colors">
-                        <td className="py-2.5 px-4 text-neutral-500 font-medium whitespace-nowrap">
-                          {new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td className="py-2.5 px-4 whitespace-nowrap">
-                          <Badge className={cn(
-                            "rounded-full px-2 py-0.5 text-[9px] font-bold border shadow-2xs",
-                            isIngreso ? "bg-emerald-50 text-emerald-700 border-emerald-200" : isEgreso ? "bg-rose-50 text-rose-700 border-rose-200" : "bg-neutral-100 text-neutral-700 border-neutral-200"
-                          )}>
-                            {mov.tipo}
-                          </Badge>
-                        </td>
-                        <td className="py-2.5 px-4 font-semibold text-neutral-800">
-                          {mov.concepto}
-                        </td>
-                        <td className={cn(
-                          "py-2.5 px-4 text-right font-bold text-sm tabular-nums whitespace-nowrap",
-                          isIngreso ? "text-emerald-600" : "text-rose-500"
-                        )}>
-                          {isIngreso ? "+" : "-"}{formatRD(mov.monto)}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                  {/* Buscador */}
+                  <div className="relative mt-4">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
+                    <Input
+                      placeholder="Buscar por concepto, tipo o monto…"
+                      value={detailsSearch}
+                      onChange={(e) => setDetailsSearch(e.target.value)}
+                      className="pl-10 pr-10 h-11 rounded-xl border-neutral-200 text-sm bg-neutral-50 focus:bg-white focus-visible:ring-2 focus-visible:ring-neutral-900/10 focus-visible:border-neutral-300"
+                    />
+                    {detailsSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setDetailsSearch("")}
+                        aria-label="Limpiar búsqueda"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 cursor-pointer transition-colors"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-          {/* TOTAL EN LA PARTE INFERIOR Y BOTON CERRAR */}
-          <DialogFooter className="p-3.5 sm:p-4 border-t border-neutral-100 bg-neutral-50/80 flex flex-row items-center justify-between gap-3 sm:justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">Total:</span>
-              <span className="font-heading text-lg sm:text-xl font-black text-neutral-950">
-                {formatRD(filteredDetailsTotal)}
-              </span>
-              <span className="text-[11px] text-neutral-400 font-medium">
-                ({filteredDetailsItems.length} {filteredDetailsItems.length === 1 ? 'transacción' : 'transacciones'})
-              </span>
-            </div>
-            <Button 
-              type="button" 
-              variant="outline" 
-              onClick={() => {
-                setDetailsModalType(null);
-                setDetailsSearch("");
-              }} 
-              className="h-8 text-xs rounded-xl border-neutral-200 cursor-pointer font-medium hover:bg-neutral-100"
-            >
-              Cerrar
-            </Button>
-          </DialogFooter>
+                {/* Lista */}
+                <div className="flex-1 min-h-0 overflow-y-auto border-t border-neutral-100 bg-neutral-50/60 px-6 py-5">
+                  {count === 0 ? (
+                    <div className="py-10 text-center">
+                      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-white border border-neutral-200 text-neutral-400">
+                        {detailsSearch.trim() ? <Search className="h-5 w-5" /> : <Receipt className="h-5 w-5" />}
+                      </div>
+                      <p className="text-sm font-semibold text-neutral-800">
+                        {detailsSearch.trim() ? 'Sin resultados' : 'Sin transacciones'}
+                      </p>
+                      <p className="text-xs text-neutral-500 mt-1">
+                        {detailsSearch.trim() ? 'Ninguna transacción coincide con tu búsqueda.' : 'Aún no hay movimientos en esta categoría.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <ul className="rounded-2xl border border-neutral-200/80 bg-white divide-y divide-neutral-100 overflow-hidden">
+                      {filteredDetailsItems.map(mov => {
+                        const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
+                        const tipoLabel = mov.tipo.replace(/_/g, ' ').toLowerCase();
+                        return (
+                          <li key={mov.id} className="flex items-center gap-3.5 px-4 py-3 hover:bg-neutral-50/70 transition-colors duration-150">
+                            <span className={cn(
+                              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                              isIngreso ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+                            )}>
+                              {isIngreso ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-neutral-900 truncate">{mov.concepto}</p>
+                              <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5">
+                                <span className="tabular-nums">{new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}</span>
+                                <span className="text-neutral-300">·</span>
+                                <span className="capitalize">{tipoLabel}</span>
+                              </p>
+                            </div>
+                            <span className={cn(
+                              "text-sm font-bold tabular-nums whitespace-nowrap",
+                              isIngreso ? "text-emerald-600" : "text-rose-600"
+                            )}>
+                              {isIngreso ? "+" : "−"}{formatRD(mov.monto)}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="shrink-0 border-t border-neutral-100 bg-white px-6 py-4 flex items-center justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setDetailsModalType(null); setDetailsSearch(""); }}
+                    className="h-10 px-4 text-sm rounded-xl border-neutral-200 cursor-pointer font-semibold hover:bg-neutral-50 active:scale-[0.98] transition-transform"
+                  >
+                    Cerrar
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

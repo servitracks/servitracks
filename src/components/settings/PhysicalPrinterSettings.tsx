@@ -307,7 +307,7 @@ export function PhysicalPrinterSettings() {
             className="w-full rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 h-11 font-bold mt-2 shadow-sm"
             onClick={() => toast.success("Perfil de impresión guardado")}
           >
-            ✓ Guardar configuración
+            Guardar configuración
           </Button>
           
           <div className="pt-6 border-t border-neutral-100">

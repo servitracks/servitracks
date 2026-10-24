@@ -307,6 +307,40 @@ export function Ticket({
     };
   });
 
+  const rawNotesStr = orden?.notas || notes;
+  let parsedCheckoutMeta: {
+    condicionCobro?: string;
+    instrumentoPago?: string;
+    referencia?: string;
+    desgloseMixto?: {
+      efectivo?: number;
+      efectivoRecibido?: number;
+      cambioEfectivo?: number;
+      tarjeta?: number;
+      transferencia?: number;
+      tarjetaRef?: string;
+      transferenciaRef?: string;
+    };
+  } | null = null;
+  let displayNotes: string | undefined = rawNotesStr;
+
+  if (rawNotesStr && rawNotesStr.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(rawNotesStr);
+      if (parsed && typeof parsed === "object" && ("condicionCobro" in parsed || "instrumentoPago" in parsed)) {
+        parsedCheckoutMeta = parsed;
+        displayNotes = undefined;
+      }
+    } catch {
+      // Si no es JSON válido, conservar el texto original
+    }
+  }
+
+  const effectivePaymentMethodLabel =
+    parsedCheckoutMeta?.instrumentoPago === "MIXTO"
+      ? "PAGO MIXTO"
+      : translatePaymentMethod(parsedCheckoutMeta?.instrumentoPago || orden?.metodo_pago || payMethod);
+
   const ordenObj = {
     numero:
       orden?.numero ??
@@ -324,11 +358,11 @@ export function Ticket({
     total: orden?.total ?? total ?? 0,
     saldo: orden?.saldo ?? 0,
     pagado: orden?.pagado ?? (orden?.total ?? total ?? 0),
-    metodo_pago: translatePaymentMethod(orden?.metodo_pago || payMethod),
-    pago_referencia: orden?.pago_referencia,
+    metodo_pago: effectivePaymentMethodLabel,
+    pago_referencia: orden?.pago_referencia || parsedCheckoutMeta?.referencia,
     estado: orden?.estado || "PAGADA",
     es_urgente: orden?.es_urgente ?? false,
-    notas: orden?.notas || notes,
+    notas: displayNotes,
     items: normalizedItems,
     ncf: orden?.ncf || ncf,
     nota_credito_ncf: orden?.nota_credito_ncf,
@@ -481,8 +515,12 @@ export function Ticket({
                 const totalItem = qty * price;
                 let itbisItem = 0;
                 if (!it.is_exento && ordenObj.itbis > 0) {
-                  if (typeof it.tax === 'number') {
-                    itbisItem = it.tax;
+                  if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
+                    itbisItem = totalItem * it.tax;
+                  } else if (typeof it.tax === 'number' && it.tax > 1) {
+                    itbisItem = totalItem * (it.tax / 100);
+                  } else if (typeof it.tax === 'number' && it.tax === 0) {
+                    itbisItem = 0;
                   } else {
                     itbisItem = totalItem * 0.18;
                   }
@@ -563,6 +601,42 @@ export function Ticket({
               <span>{esCotizacion ? "TOTAL ESTIMADO:" : "TOTAL A PAGAR:"}</span>
               <span className="text-xl text-[#0051A8]">{formatRD(ordenObj.total)}</span>
             </div>
+            {!esCotizacion && (
+              <div className="pt-2 border-t border-dashed border-neutral-300 space-y-1">
+                <div className="flex justify-between text-neutral-600">
+                  <span>Método de Pago:</span>
+                  <span className="font-bold text-neutral-900 uppercase">{ordenObj.metodo_pago}</span>
+                </div>
+                {ordenObj.pago_referencia && (
+                  <div className="flex justify-between text-neutral-600">
+                    <span>No. Referencia:</span>
+                    <span className="font-mono font-bold text-neutral-900">{ordenObj.pago_referencia}</span>
+                  </div>
+                )}
+                {parsedCheckoutMeta?.instrumentoPago === "MIXTO" && parsedCheckoutMeta.desgloseMixto && (
+                  <div className="text-[11px] bg-white p-2 rounded border border-neutral-200 space-y-0.5 mt-1">
+                    {Number(parsedCheckoutMeta.desgloseMixto.efectivo || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>• Efectivo:</span>
+                        <span className="font-bold">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.efectivo))}</span>
+                      </div>
+                    )}
+                    {Number(parsedCheckoutMeta.desgloseMixto.tarjeta || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>• Tarjeta {parsedCheckoutMeta.desgloseMixto.tarjetaRef ? `(${parsedCheckoutMeta.desgloseMixto.tarjetaRef})` : ""}:</span>
+                        <span className="font-bold">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.tarjeta))}</span>
+                      </div>
+                    )}
+                    {Number(parsedCheckoutMeta.desgloseMixto.transferencia || 0) > 0 && (
+                      <div className="flex justify-between">
+                        <span>• Transf. {parsedCheckoutMeta.desgloseMixto.transferenciaRef ? `(${parsedCheckoutMeta.desgloseMixto.transferenciaRef})` : ""}:</span>
+                        <span className="font-bold">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.transferencia))}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {!esCotizacion && vuelto > 0 && (
               <div className="flex justify-between text-emerald-700 font-bold pt-1 border-t border-dashed border-neutral-300">
                 <span>Cambio:</span>
@@ -793,8 +867,12 @@ export function Ticket({
             // ITBIS del ítem: si es exento o mano de obra, es estrictamente 0
             let itbisVal = 0;
             if (!it.is_exento && ordenObj.itbis > 0) {
-              if (typeof it.tax === 'number') {
-                itbisVal = it.tax;
+              if (typeof it.tax === 'number' && it.tax > 0 && it.tax <= 1) {
+                itbisVal = baseTotal * it.tax;
+              } else if (typeof it.tax === 'number' && it.tax > 1) {
+                itbisVal = baseTotal * (it.tax / 100);
+              } else if (typeof it.tax === 'number' && it.tax === 0) {
+                itbisVal = 0;
               } else {
                 itbisVal = baseTotal * 0.18;
               }
@@ -902,6 +980,49 @@ export function Ticket({
             </div>
             <span className="font-bold uppercase truncate">{ordenObj.metodo_pago}</span>
           </div>
+
+          {ordenObj.pago_referencia && (
+            <div className="flex justify-between items-center gap-2">
+              <div className="flex items-center gap-1.5 font-semibold shrink-0">
+                <FileText className="h-3.5 w-3.5 shrink-0 text-black" />
+                <span>No. Referencia:</span>
+              </div>
+              <span className="font-bold font-mono uppercase truncate">{ordenObj.pago_referencia}</span>
+            </div>
+          )}
+
+          {parsedCheckoutMeta?.instrumentoPago === "MIXTO" && parsedCheckoutMeta.desgloseMixto && (
+            <div className="pl-5 space-y-0.5 text-[10px] border-l border-dashed border-black/40 my-0.5">
+              {Number(parsedCheckoutMeta.desgloseMixto.efectivo || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>• Efectivo:</span>
+                  <span className="font-bold tabular-nums">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.efectivo))}</span>
+                </div>
+              )}
+              {Number(parsedCheckoutMeta.desgloseMixto.tarjeta || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>
+                    • Tarjeta{parsedCheckoutMeta.desgloseMixto.tarjetaRef ? ` (${parsedCheckoutMeta.desgloseMixto.tarjetaRef})` : ""}:
+                  </span>
+                  <span className="font-bold tabular-nums">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.tarjeta))}</span>
+                </div>
+              )}
+              {Number(parsedCheckoutMeta.desgloseMixto.transferencia || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>
+                    • Transferencia{parsedCheckoutMeta.desgloseMixto.transferenciaRef ? ` (${parsedCheckoutMeta.desgloseMixto.transferenciaRef})` : ""}:
+                  </span>
+                  <span className="font-bold tabular-nums">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.transferencia))}</span>
+                </div>
+              )}
+              {Number(parsedCheckoutMeta.desgloseMixto.cambioEfectivo || 0) > 0 && (
+                <div className="flex justify-between font-bold border-t border-dotted border-black/30 pt-0.5 mt-0.5">
+                  <span>• Cambio Efectivo:</span>
+                  <span className="tabular-nums">{formatRD(Number(parsedCheckoutMeta.desgloseMixto.cambioEfectivo))}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex justify-between items-center gap-2">
             <div className="flex items-center gap-1.5 font-semibold shrink-0">

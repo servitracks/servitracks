@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
 import { supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
-import { Building2, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown } from "lucide-react";
+import { Building2, MessageSquare, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,16 +21,18 @@ import type { Plan } from "@/store/types";
 import { navigation } from "@/components/dashboard/Sidebar";
 import { isModuleEnabled } from "@/lib/permissions";
 
+const TAB_GROUPS = ["General", "Operación", "Equipo y cuenta"] as const;
+
 const TABS = [
-  { id: "taller", label: "Taller", icon: Building2 },
-  { id: "interface", label: "Interfaz", icon: Sparkles },
-  { id: "tenants", label: "Sucursales", icon: Store },
-  { id: "ecf", label: "Facturación e-CF", icon: FileCheck2 },
-  { id: "whatsapp", label: "WhatsApp", icon: Bell },
-  { id: "print", label: "Impresión", icon: Printer },
-  { id: "users", label: "Usuarios y Roles", icon: Users },
-  { id: "security", label: "Seguridad", icon: Shield },
-  { id: "planes", label: "Planes", icon: CreditCard },
+  { id: "taller", label: "Taller", icon: Building2, group: "General", description: "Logo, datos fiscales y contacto" },
+  { id: "interface", label: "Interfaz", icon: Sparkles, group: "General", description: "Apariencia y orden del menú" },
+  { id: "tenants", label: "Sucursales", icon: Store, group: "General", description: "Gestiona tus ubicaciones" },
+  { id: "ecf", label: "Facturación e-CF", icon: FileCheck2, group: "Operación", description: "Comprobantes fiscales DGII" },
+  { id: "whatsapp", label: "WhatsApp", icon: Bell, group: "Operación", description: "Notificaciones a clientes" },
+  { id: "print", label: "Impresión", icon: Printer, group: "Operación", description: "Tickets, etiquetas y garantías" },
+  { id: "users", label: "Usuarios y Roles", icon: Users, group: "Equipo y cuenta", description: "Accesos de tu equipo" },
+  { id: "security", label: "Seguridad", icon: Shield, group: "Equipo y cuenta", description: "Contraseña y sesión" },
+  { id: "planes", label: "Planes", icon: CreditCard, group: "Equipo y cuenta", description: "Suscripción y facturación" },
 ];
 
 const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
@@ -301,7 +303,7 @@ export default function SettingsPage() {
       });
     }
 
-    toast.success(`🎉 Sucursal "${branchForm.name}" registrada con membresía pendiente.`);
+    toast.success(`Sucursal "${branchForm.name}" registrada con membresía pendiente.`);
     setBranchOpen(false);
     setBranchForm({ name: "", rnc: "", address: "", phone: "", email: "", slug: "" });
   };
@@ -316,7 +318,7 @@ export default function SettingsPage() {
 
   const handleSimulatePayment = (branchId: string, branchName: string) => {
     updateTenant(branchId, { status: "active" });
-    toast.success(`💳 Membresía activada. La sucursal "${branchName}" ya se encuentra operativa.`);
+    toast.success(`Membresía activada. La sucursal "${branchName}" ya se encuentra operativa.`);
   };
 
   // ── WhatsApp tab state ──
@@ -346,7 +348,7 @@ export default function SettingsPage() {
     setWaTesting(true);
     const result = await waSendTestMessage(waKey, waPhone);
     if (result.ok) {
-      toast.success("✅ Mensaje de prueba enviado correctamente");
+      toast.success("Mensaje de prueba enviado correctamente");
     } else {
       toast.error(`Error WaSender: ${result.error}`);
     }
@@ -618,6 +620,13 @@ export default function SettingsPage() {
   const plans = useStore((s) => s.plans);
   const primaryTenant = allowedTenants[0];
   const currentPlan = plans.find(p => p.id === primaryTenant?.plan_id) || plans[0];
+  const visibleTabs = TABS.filter(t => {
+    if (t.id === "whatsapp" && !isModuleEnabled(taller, "whatsapp", currentPlan)) return false;
+    if (t.id === "tenants" && !isModuleEnabled(taller, "multisucursal", currentPlan)) return false;
+    if (t.id === "ecf" && !isModuleEnabled(taller, "facturacion_fiscal", currentPlan)) return false;
+    return true;
+  });
+  const activeTabMeta = TABS.find(t => t.id === tab);
   const branchLimit = currentPlan?.limite_sucursales;
   const canAddBranch = branchLimit === null || branchLimit === undefined || totalBranches < branchLimit;
   const nextPlan = !canAddBranch
@@ -631,20 +640,79 @@ export default function SettingsPage() {
         <p className="text-neutral-500">Personaliza tu taller y gestiona los parámetros del sistema.</p>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl overflow-x-auto whitespace-nowrap custom-scrollbar">
-        {TABS.filter(t => {
-          if (t.id === "whatsapp" && !isModuleEnabled(taller, "whatsapp", currentPlan)) return false;
-          if (t.id === "tenants" && !isModuleEnabled(taller, "multisucursal", currentPlan)) return false;
-          return true;
-        }).map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={cn("flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer",
-              tab === t.id ? "bg-white shadow-sm text-neutral-900" : "text-neutral-500 hover:text-neutral-700")}>
-            <t.icon className="h-4 w-4" /> {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Vertical settings layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6 lg:gap-10 items-start">
+        <aside className="lg:sticky lg:top-6">
+          <nav aria-label="Secciones de configuración" className="rounded-2xl border border-neutral-200/80 bg-white p-2 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+            {/* Mobile: compact select */}
+            <div className="lg:hidden p-1">
+              <select
+                value={tab}
+                onChange={(e) => setTab(e.target.value)}
+                className="w-full h-11 rounded-xl border border-neutral-200 bg-neutral-50 px-3 text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+              >
+                {visibleTabs.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            {/* Desktop: grouped vertical list */}
+            <div className="hidden lg:block">
+              {TAB_GROUPS.map(group => {
+                const items = visibleTabs.filter(t => t.group === group);
+                if (!items.length) return null;
+                return (
+                  <div key={group} className="py-1.5 first:pt-1 last:pb-1">
+                    <p className="px-3 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">{group}</p>
+                    <ul className="space-y-0.5">
+                      {items.map(t => {
+                        const active = tab === t.id;
+                        return (
+                          <li key={t.id}>
+                            <button
+                              type="button"
+                              onClick={() => setTab(t.id)}
+                              aria-current={active ? "page" : undefined}
+                              className={cn(
+                                "group relative w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left cursor-pointer",
+                                "transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.98]",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900/15",
+                                active ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+                              )}
+                            >
+                              <span className={cn(
+                                "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-150",
+                                active ? "bg-white/10" : "bg-neutral-100 group-hover:bg-white"
+                              )}>
+                                <t.icon className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-semibold leading-tight">{t.label}</span>
+                                <span className={cn("block truncate text-xs leading-tight mt-0.5", active ? "text-white/60" : "text-neutral-400")}>{t.description}</span>
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </nav>
+        </aside>
+
+        <main className="min-w-0">
+          {activeTabMeta && (
+            <div className="mb-6 flex items-center gap-4 border-b border-neutral-100 pb-5">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900 text-white">
+                <activeTabMeta.icon className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="text-xl font-bold tracking-tight text-neutral-900">{activeTabMeta.label}</h2>
+                <p className="text-sm text-neutral-500">{activeTabMeta.description}</p>
+              </div>
+            </div>
+          )}
+          <div key={tab} className="settings-panel-enter space-y-6">
 
       {/* ── TALLER ── */}
       {tab === "taller" && (
@@ -852,7 +920,7 @@ export default function SettingsPage() {
                       <div className="flex items-center justify-between px-5 py-3">
                         <div className="flex items-center gap-2">
                           <div className="h-6 w-6 rounded-md bg-neutral-100 flex items-center justify-center">
-                            <span className="text-[10px] font-black text-neutral-600">📋</span>
+                            <FileText className="h-3.5 w-3.5 text-neutral-600" />
                           </div>
                           <div>
                             <span className="text-sm font-semibold text-neutral-800">Plan {currentPlan?.nombre}</span>
@@ -865,7 +933,7 @@ export default function SettingsPage() {
                       <div className="flex items-center justify-between px-5 py-3">
                         <div className="flex items-center gap-2">
                           <div className="h-6 w-6 rounded-md bg-neutral-100 flex items-center justify-center">
-                            <span className="text-[10px] font-black text-neutral-600">🏪</span>
+                            <Store className="h-3.5 w-3.5 text-neutral-600" />
                           </div>
                           <div>
                             <span className="text-sm font-semibold text-neutral-800">Taller Principal</span>
@@ -881,7 +949,7 @@ export default function SettingsPage() {
                         <div className="flex items-center justify-between px-5 py-3 bg-amber-50/50">
                           <div className="flex items-center gap-2">
                             <div className="h-6 w-6 rounded-md bg-amber-100 flex items-center justify-center">
-                              <span className="text-[10px] font-black text-amber-600">➕</span>
+                              <Plus className="h-3.5 w-3.5 text-amber-600" />
                             </div>
                             <div>
                               <span className="text-sm font-semibold text-neutral-800">Sucursales adicionales</span>
@@ -1512,7 +1580,7 @@ export default function SettingsPage() {
 
       {/* ── SEGURIDAD ── */}
       {tab === "security" && (
-        <div className="space-y-6 max-w-md">
+        <div className="space-y-6 max-w-3xl">
           {currentUser?.role === 'owner' && (
             <Card className="border-neutral-100 shadow-sm">
               <CardHeader className="pb-3">
@@ -1644,64 +1712,179 @@ export default function SettingsPage() {
       {/* ── PLANES ── */}
       {tab === "planes" && (
         <div className="space-y-6">
-          <div>
-            <CardTitle>Planes de Suscripción</CardTitle>
-            <CardDescription>Explora y contrata el plan que mejor se adapte a las necesidades de tu taller.</CardDescription>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="text-xl font-bold tracking-tight text-neutral-900">Planes de Suscripción</h3>
+              <p className="text-sm text-neutral-500">Selecciona el plan que mejor se adapte al volumen y necesidades de tu taller.</p>
+            </div>
+            {primaryTenant?.plan_id && (
+              <div className="inline-flex items-center gap-2 rounded-xl bg-neutral-100 px-3.5 py-1.5 text-xs font-semibold text-neutral-700 self-start sm:self-auto border border-neutral-200/80">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Plan actual: <strong className="text-neutral-900 uppercase">{currentPlan?.nombre || primaryTenant.plan_id}</strong></span>
+              </div>
+            )}
           </div>
           
           {plansLoading ? (
-            <div className="text-center py-12 text-sm text-neutral-500 font-medium">Cargando planes...</div>
+            <div className="text-center py-16 text-sm text-neutral-500 font-medium">Cargando planes disponibles...</div>
           ) : (
-            <div className="grid gap-4 md:grid-cols-3">
-              {plansData.map((p) => (
-                <Card key={p.id} className={cn("border p-6 shadow-sm bg-white rounded-xl flex flex-col", p.destacado ? "ring-2 ring-black border-black" : "border-neutral-200/80")}>
-                  <div className="flex items-start justify-between">
-                    <span className="font-display text-xl font-black text-neutral-900">{p.nombre}</span>
-                    {p.destacado && <Badge className="bg-neutral-900 text-white border-none">Popular</Badge>}
-                  </div>
-                  <div className="mt-2 font-display text-2xl font-extrabold text-neutral-900">{formatRD(p.precio_mensual)}<span className="text-sm font-normal text-neutral-400">/mes</span></div>
-                  {(p.precio_anual || 0) > 0 && (
-                    <div className="text-xs text-neutral-400 font-semibold mt-0.5">o {formatRD(p.precio_anual || 0)}/año</div>
-                  )}
-                  <div className="mt-4 space-y-2 text-sm text-neutral-700 border-t border-neutral-100 pt-3 flex-grow">
-                    <div>👥 Hasta {p.limite_empleados} Técnicos/Empleados</div>
-                    <div>📦 {p.limite_ordenes_mes ?? "∞"} Órdenes/mes</div>
-                    {(p.precio_sucursal_adicional || 0) > 0 ? (
-                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra a {formatRD(p.precio_sucursal_adicional)}/mes</div>
-                    ) : (
-                      <div className="text-emerald-600 font-semibold">🏪 Sucursales Extra sin costo</div>
+            <div className="grid gap-6 md:grid-cols-3 items-stretch">
+              {plansData.map((p) => {
+                const isCurrent = primaryTenant?.plan_id === p.id;
+                const isPopular = p.destacado && !isCurrent;
+                
+                return (
+                  <div
+                    key={p.id}
+                    className={cn(
+                      "relative rounded-3xl p-6 transition-all duration-200 flex flex-col justify-between",
+                      isCurrent 
+                        ? "bg-neutral-900 text-white shadow-xl ring-2 ring-neutral-900" 
+                        : isPopular
+                          ? "bg-white text-neutral-900 border-2 border-neutral-900 shadow-lg"
+                          : "bg-white text-neutral-900 border border-neutral-200/80 shadow-xs hover:border-neutral-300"
                     )}
-                    <div className="text-blue-600 font-semibold">💬 {(p.limite_whatsapp_mes || 0).toLocaleString()} Mensajes WhatsApp</div>
-                    <div className="border-t border-neutral-100 pt-2 space-y-1">
-                      {Object.entries(p.modulos).map(([k, v]) => (
-                        <div key={k} className={cn("flex items-center gap-2", v ? "text-neutral-950 font-bold" : "text-neutral-400 line-through opacity-50 font-medium")}>
-                          <span>{v ? "✓" : "✗"}</span>
-                          <span className="capitalize">{k === "facturacion_fiscal" ? "Facturación Electrónica" : k.replace(/_/g, " ")}</span>
+                  >
+                    {/* Badge destacado / actual */}
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <span className={cn(
+                        "text-xs font-black uppercase tracking-wider px-2.5 py-1 rounded-full",
+                        isCurrent 
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" 
+                          : isPopular 
+                            ? "bg-neutral-900 text-white" 
+                            : "bg-neutral-100 text-neutral-600"
+                      )}>
+                        {isCurrent ? "Tu Plan Activo" : isPopular ? "Más Popular" : "Plan"}
+                      </span>
+                      {p.modulos?.facturacion_fiscal && (
+                        <span className={cn(
+                          "text-[10px] font-bold px-2 py-0.5 rounded-md",
+                          isCurrent ? "bg-white/10 text-white/80" : "bg-neutral-100 text-neutral-600"
+                        )}>
+                          e-CF Incluido
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Titulo y Precio */}
+                    <div>
+                      <h4 className={cn("text-2xl font-black tracking-tight", isCurrent ? "text-white" : "text-neutral-900")}>
+                        {p.nombre}
+                      </h4>
+                      
+                      <div className="mt-4 flex items-baseline gap-1">
+                        <span className={cn("text-3xl sm:text-4xl font-black tracking-tight", isCurrent ? "text-white" : "text-neutral-900")}>
+                          {formatRD(p.precio_mensual)}
+                        </span>
+                        <span className={cn("text-xs font-semibold", isCurrent ? "text-white/60" : "text-neutral-400")}>
+                          /mes
+                        </span>
+                      </div>
+
+                      {(p.precio_anual || 0) > 0 && (
+                        <p className={cn("text-xs font-medium mt-1", isCurrent ? "text-white/50" : "text-neutral-400")}>
+                          o {formatRD(p.precio_anual || 0)} facturado anual
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Características y Cuotas */}
+                    <div className={cn(
+                      "my-6 space-y-3 text-xs border-y py-5 flex-grow",
+                      isCurrent ? "border-white/10 text-white/80" : "border-neutral-100 text-neutral-600"
+                    )}>
+                      <div className="flex items-center gap-2.5">
+                        <Users className={cn("h-4 w-4 shrink-0", isCurrent ? "text-emerald-400" : "text-neutral-500")} />
+                        <span>Hasta <strong>{p.limite_empleados >= 9999 ? "ilimitados" : p.limite_empleados}</strong> empleados/técnicos</span>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <Package className={cn("h-4 w-4 shrink-0", isCurrent ? "text-emerald-400" : "text-neutral-500")} />
+                        <span><strong>{p.limite_ordenes_mes ? `${p.limite_ordenes_mes} órdenes` : "Órdenes Ilimitadas"}</strong> al mes</span>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <MessageSquare className={cn("h-4 w-4 shrink-0", isCurrent ? "text-emerald-400" : "text-neutral-500")} />
+                        <span><strong>{(p.limite_whatsapp_mes || 0) >= 99999 ? "Ilimitados" : (p.limite_whatsapp_mes || 0).toLocaleString()}</strong> mensajes WhatsApp</span>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <Store className={cn("h-4 w-4 shrink-0", isCurrent ? "text-emerald-400" : "text-neutral-500")} />
+                        <span>
+                          {(p.precio_sucursal_adicional || 0) > 0 
+                            ? `Sucursales extra a ${formatRD(p.precio_sucursal_adicional)}/mes` 
+                            : "Sucursales adicionales sin costo adicional"}
+                        </span>
+                      </div>
+
+                      {/* Módulos Funcionales */}
+                      <div className={cn("pt-3 border-t space-y-2", isCurrent ? "border-white/10" : "border-neutral-100")}>
+                        <p className={cn("text-[10px] font-bold uppercase tracking-wider", isCurrent ? "text-white/40" : "text-neutral-400")}>
+                          Módulos & Capacidades
+                        </p>
+                        {Object.entries(p.modulos).map(([k, v]) => (
+                          <div key={k} className={cn(
+                            "flex items-center gap-2 font-medium",
+                            v 
+                              ? isCurrent ? "text-white" : "text-neutral-900 font-semibold" 
+                              : isCurrent ? "text-white/30 line-through" : "text-neutral-400 line-through opacity-60"
+                          )}>
+                            {v ? (
+                              <Check className={cn("h-3.5 w-3.5 shrink-0", isCurrent ? "text-emerald-400" : "text-emerald-600")} />
+                            ) : (
+                              <X className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
+                            )}
+                            <span className="capitalize">
+                              {k === "facturacion_fiscal" 
+                                ? "Comprobantes Fiscales e-CF" 
+                                : k === "multisucursal"
+                                  ? "Gestión Multi-Sucursal"
+                                  : k.replace(/_/g, " ")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Botón de Acción */}
+                    <div>
+                      {isCurrent ? (
+                        <div className="w-full rounded-2xl bg-white/10 text-white font-bold py-3 text-center text-xs border border-white/15">
+                          ✓ Plan Actualmente Activo
                         </div>
-                      ))}
+                      ) : (
+                        <Button 
+                          className={cn(
+                            "w-full rounded-2xl h-11 font-bold cursor-pointer transition-all duration-150 active:scale-[0.98] border-none text-xs",
+                            isPopular 
+                              ? "bg-neutral-900 text-white hover:bg-neutral-800 shadow-md" 
+                              : "bg-neutral-100 text-neutral-900 hover:bg-neutral-200"
+                          )}
+                          onClick={() => {
+                            const url = p.polar_product_monthly_url;
+                            if (url && (url.startsWith("http://") || url.startsWith("https://"))) {
+                              window.open(url, "_blank");
+                            } else {
+                              window.open(`https://wa.me/18299681720?text=Hola ServiTracks, me interesa contratar el ${p.nombre} para mi taller ${taller.name}.`, "_blank");
+                            }
+                          }}
+                        >
+                          Elegir {p.nombre}
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  <div className="mt-6 pt-4 border-t border-neutral-100">
-                    <Button 
-                      className="w-full rounded-xl font-bold cursor-pointer bg-black text-white hover:bg-neutral-800"
-                      onClick={() => {
-                        const url = p.polar_product_monthly_url;
-                        if (url) {
-                          window.open(url, "_blank");
-                        } else {
-                          window.open(`https://wa.me/18299681720?text=Hola ServiTracks, me interesa contratar el plan ${p.nombre} para mi taller ${taller.name}.`, "_blank");
-                        }
-                      }}
-                    >
-                      Contratar {p.nombre}
-                    </Button>
-                  </div>
-                </Card>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
+
+          </div>
+        </main>
+      </div>
 
       {/* ── INVITE USER DIALOG ── */}
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>

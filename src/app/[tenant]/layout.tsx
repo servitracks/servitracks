@@ -192,7 +192,7 @@ export default function DashboardLayout() {
       "/movimientos": ['owner', 'warehouse', 'superadmin'],
       "/services": ['owner', 'superadmin'],
       "/proveedores": ['owner', 'warehouse', 'superadmin'],
-      "/mis-comisiones": ['mechanic', 'owner', 'superadmin'],
+      "/mis-comisiones": ['mechanic', 'owner', 'cashier', 'superadmin'],
       "/nomina": ['owner', 'superadmin'],
       "/reports": ['owner', 'superadmin'],
       "/activity": ['owner', 'superadmin'],

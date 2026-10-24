@@ -265,3 +265,54 @@
 .driver-popover .driver-popover-close-btn:hover {
   color: #0a0a0a !important;
 }
+
+
+/* Settings panel enter (emil-design-eng: ease-out, <300ms, opacity+translate only) */
+@keyframes settings-panel-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.settings-panel-enter {
+  animation: settings-panel-in 220ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel-enter { animation: none; }
+}
+
+/* Global modal close button: black circle with white X */
+.dialog-close-btn {
+  width: 2rem !important;
+  height: 2rem !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 9999px !important;
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18) !important;
+  opacity: 1 !important;
+  cursor: pointer;
+  z-index: 20;
+  transition: background-color 150ms ease, transform 150ms cubic-bezier(0.23, 1, 0.32, 1) !important;
+}
+.dialog-close-btn svg {
+  width: 1rem !important;
+  height: 1rem !important;
+  color: #ffffff !important;
+  stroke-width: 2.5;
+}
+@media (hover: hover) and (pointer: fine) {
+  .dialog-close-btn:hover {
+    background-color: #262626 !important;
+    color: #ffffff !important;
+  }
+}
+.dialog-close-btn:active {
+  transform: scale(0.92);
+}
+.dialog-close-btn:focus-visible {
+  outline: 2px solid #0a0a0a;
+  outline-offset: 2px;
+}

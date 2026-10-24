@@ -44,3 +44,11 @@ next-env.d.ts
 importar_tenants.sql
 raw_tenants.txt
 scratch/
+
+# agent & skills
+.agent
+.agents
+.codex
+.kiro
+skills-lock.json
+

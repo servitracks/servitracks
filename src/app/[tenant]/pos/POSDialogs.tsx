@@ -77,8 +77,11 @@ export interface CheckoutConfirmData {
   referencia?: string;
   desgloseMixto?: {
     efectivo: number;
+    efectivoRecibido?: number;
+    cambioEfectivo?: number;
     tarjeta: number;
     transferencia: number;
+    tarjetaRef?: string;
     transferenciaRef?: string;
   };
 }
@@ -130,13 +133,18 @@ export function CheckoutDialog({
   const [referencia, setReferencia] = useState<string>("");
 
   // Desglose Mixto
-  const [pagoEfectivoStr, setPagoEfectivoStr] = useState<string>(() => formatAmountInput(String(Math.round(total / 2))));
+  const [modoMixto, setModoMixto] = useState<"EF_TAR" | "EF_TRANS" | "TAR_TRANS" | "TRIPLE">("EF_TAR");
+  const lastEditedMixtoRef = useRef<"efectivo" | "tarjeta" | "transferencia" | null>(null);
+  const userEditedMixtoRef = useRef<Set<"efectivo" | "tarjeta" | "transferencia">>(new Set());
+  const wasOpenRef = useRef(false);
+  const [pagoEfectivoStr, setPagoEfectivoStr] = useState<string>(() => formatAmountInput(String(Math.floor(total / 2))));
   const pagoEfectivo = parseAmount(pagoEfectivoStr);
-  const [pagoTarjetaStr, setPagoTarjetaStr] = useState<string>(() => formatAmountInput(String(Math.max(0, total - Math.round(total / 2)))));
+  const [pagoTarjetaStr, setPagoTarjetaStr] = useState<string>(() => formatAmountInput(String(Math.max(0, +(total - Math.floor(total / 2)).toFixed(2)))));
   const pagoTarjeta = parseAmount(pagoTarjetaStr);
   const [pagoTransferenciaStr, setPagoTransferenciaStr] = useState<string>("0");
   const pagoTransferencia = parseAmount(pagoTransferenciaStr);
   const [pagoTransferenciaRef, setPagoTransferenciaRef] = useState<string>("");
+  const [pagoTarjetaRef, setPagoTarjetaRef] = useState<string>("");
 
   // Facturación Electrónica DGII (Activada / Desactivada con Switch)
   const [isFiscalEnabled, setIsFiscalEnabled] = useState<boolean>(defaultFiscalActive);
@@ -145,30 +153,111 @@ export function CheckoutDialog({
   const [companyName, setCompanyName] = useState("");
   const [isSearchingRnc, setIsSearchingRnc] = useState(false);
 
-  // Sincronizar estado inicial al abrir
-  useEffect(() => {
-    if (open) {
-      setMontoRecibidoStr(formatAmountInput(String(total)));
-      setAnticipoMontoStr(formatAmountInput(String(Math.round(total / 2))));
-      setAbonoCredito(0);
-      setPagoEfectivoStr(formatAmountInput(String(Math.round(total / 2))));
-      setPagoTarjetaStr(formatAmountInput(String(Math.max(0, total - Math.round(total / 2)))));
-      setPagoTransferenciaStr("0");
-      setPagoTransferenciaRef("");
-      setReferencia("");
-      setIsFiscalEnabled(defaultFiscalActive);
+  const applyMixtoPreset = (
+    mode: "EF_TAR" | "EF_TRANS" | "TAR_TRANS" | "TRIPLE",
+    targetAmt: number,
+    preserveEdited = false
+  ) => {
+    setModoMixto(mode);
+    if (!preserveEdited) {
+      lastEditedMixtoRef.current = null;
+      userEditedMixtoRef.current.clear();
+    }
+    const edited = userEditedMixtoRef.current;
+    const half = Math.floor(targetAmt / 2);
+    const rest = Math.max(0, +(targetAmt - half).toFixed(2));
 
-      if (initialCustomerData) {
-        if (initialCustomerData.type) {
-          const t = initialCustomerData.type;
-          if (t === "consumo" || t === "consumidor_final" || t === "E32") setInvoiceType("consumidor_final");
-          else if (t === "credito_fiscal" || t === "E31") setInvoiceType("credito_fiscal");
-          else if (t === "gubernamental" || t === "E45") setInvoiceType("gubernamental");
-          else if (t === "regimen_especial" || t === "E44") setInvoiceType("regimen_especial");
-        }
-        if (initialCustomerData.rnc) setRnc(initialCustomerData.rnc);
-        if (initialCustomerData.name) setCompanyName(initialCustomerData.name);
+    if (mode === "EF_TAR") {
+      if (preserveEdited && edited.has("efectivo") && pagoEfectivo > 0 && pagoEfectivo <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoEfectivo).toFixed(2));
+        setPagoTarjetaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+        setPagoTransferenciaStr("0");
+      } else if (preserveEdited && edited.has("tarjeta") && pagoTarjeta > 0 && pagoTarjeta <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoTarjeta).toFixed(2));
+        setPagoEfectivoStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+        setPagoTransferenciaStr("0");
+      } else {
+        setPagoEfectivoStr(formatAmountInput(String(half)));
+        setPagoTarjetaStr(formatAmountInput(String(rest)));
+        setPagoTransferenciaStr("0");
       }
+    } else if (mode === "EF_TRANS") {
+      if (preserveEdited && edited.has("efectivo") && pagoEfectivo > 0 && pagoEfectivo <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoEfectivo).toFixed(2));
+        setPagoTarjetaStr("0");
+        setPagoTransferenciaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+      } else if (preserveEdited && edited.has("transferencia") && pagoTransferencia > 0 && pagoTransferencia <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoTransferencia).toFixed(2));
+        setPagoEfectivoStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+        setPagoTarjetaStr("0");
+      } else {
+        setPagoEfectivoStr(formatAmountInput(String(half)));
+        setPagoTarjetaStr("0");
+        setPagoTransferenciaStr(formatAmountInput(String(rest)));
+      }
+    } else if (mode === "TAR_TRANS") {
+      if (preserveEdited && edited.has("tarjeta") && pagoTarjeta > 0 && pagoTarjeta <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoTarjeta).toFixed(2));
+        setPagoEfectivoStr("0");
+        setPagoTransferenciaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+      } else if (preserveEdited && edited.has("transferencia") && pagoTransferencia > 0 && pagoTransferencia <= targetAmt) {
+        const rem = Math.max(0, +(targetAmt - pagoTransferencia).toFixed(2));
+        setPagoEfectivoStr("0");
+        setPagoTarjetaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+      } else {
+        setPagoEfectivoStr("0");
+        setPagoTarjetaStr(formatAmountInput(String(half)));
+        setPagoTransferenciaStr(formatAmountInput(String(rest)));
+      }
+    } else {
+      const third = Math.floor(targetAmt / 3);
+      const rem = Math.max(0, +(targetAmt - third * 2).toFixed(2));
+      setPagoEfectivoStr(formatAmountInput(String(third)));
+      setPagoTarjetaStr(formatAmountInput(String(third)));
+      setPagoTransferenciaStr(formatAmountInput(String(rem)));
+    }
+  };
+
+  // Sincronizar estado inicial ÚNICAMENTE al abrir el modal (evita borrar referencias cuando el padre re-renderiza)
+  useEffect(() => {
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
+    setCondicionCobro("COBRAR_AHORA");
+    setInstrumentoPago("EFECTIVO");
+    setMontoRecibidoStr(formatAmountInput(String(total)));
+    setAnticipoMontoStr(formatAmountInput(String(Math.round(total / 2))));
+    setAbonoCredito(0);
+    applyMixtoPreset("EF_TAR", total, false);
+    setPagoTransferenciaRef("");
+    setPagoTarjetaRef("");
+    setReferencia("");
+    setIsFiscalEnabled(defaultFiscalActive);
+
+    const initRnc = (initialCustomerData?.rnc || "").trim();
+    const initName = (initialCustomerData?.name || "").trim();
+    setRnc(initRnc);
+    setCompanyName(initName);
+
+    if (initialCustomerData?.type) {
+      const t = initialCustomerData.type;
+      if (t === "consumo" || t === "consumidor_final" || t === "E32") {
+        setInvoiceType("consumidor_final");
+      } else if ((t === "credito_fiscal" || t === "E31") && (!defaultFiscalActive || initRnc.length >= 9)) {
+        setInvoiceType("credito_fiscal");
+      } else if ((t === "gubernamental" || t === "E45") && (!defaultFiscalActive || initRnc.length >= 9)) {
+        setInvoiceType("gubernamental");
+      } else if ((t === "regimen_especial" || t === "E44") && (!defaultFiscalActive || initRnc.length >= 9)) {
+        setInvoiceType("regimen_especial");
+      } else {
+        setInvoiceType("consumidor_final");
+      }
+    } else {
+      setInvoiceType("consumidor_final");
     }
   }, [open, total, defaultFiscalActive, initialCustomerData]);
 
@@ -195,9 +284,19 @@ export function CheckoutDialog({
   const cambio = Math.max(0, efectivoNum - targetMonto);
   const faltante = Math.max(0, targetMonto - efectivoNum);
 
-  // Cálculos para mixto
-  const asignadoMixto = (pagoEfectivo || 0) + (pagoTarjeta || 0) + (pagoTransferencia || 0);
-  const cuadreMixtoExacto = Math.abs(targetMonto - asignadoMixto) < 0.01;
+  // Cálculos para mixto (incluyendo soporte de cambio/devuelta cuando el cliente entrega más efectivo)
+  const noEfectivoMixto = +((pagoTarjeta || 0) + (pagoTransferencia || 0)).toFixed(2);
+  const efectivoRequeridoMixto = Math.max(0, +(targetMonto - noEfectivoMixto).toFixed(2));
+  const asignadoMixto = +((pagoEfectivo || 0) + noEfectivoMixto).toFixed(2);
+  const cuadreMixtoExacto = Math.abs(targetMonto - asignadoMixto) < 0.05;
+  const tieneCambioMixto =
+    noEfectivoMixto <= targetMonto + 0.05 &&
+    (pagoEfectivo || 0) > efectivoRequeridoMixto + 0.05;
+  const cambioMixto = tieneCambioMixto
+    ? Math.max(0, +((pagoEfectivo || 0) - efectivoRequeridoMixto).toFixed(2))
+    : 0;
+  const efectivoAplicadoMixto = tieneCambioMixto ? efectivoRequeridoMixto : (pagoEfectivo || 0);
+  const cuadreMixtoValido = cuadreMixtoExacto || tieneCambioMixto;
 
   // Validación de cliente para crédito
   const isAnonymousClient = !customer || customer.id === "walk-in" || (customer.name ? customer.name.toLowerCase().includes("consumidor final") : true);
@@ -212,9 +311,10 @@ export function CheckoutDialog({
 
     if (condicionCobro === "COBRAR_AHORA") {
       if (instrumentoPago === "EFECTIVO") return efectivoNum >= (total - 0.05);
+      if (instrumentoPago === "TARJETA") return true;
       if (instrumentoPago === "TRANSFERENCIA") return true;
       if (instrumentoPago === "MIXTO") {
-        return Math.abs(total - asignadoMixto) < 0.1;
+        return cuadreMixtoValido;
       }
       return true;
     }
@@ -222,9 +322,10 @@ export function CheckoutDialog({
     if (condicionCobro === "ANTICIPO") {
       if (anticipoMonto <= 0 || anticipoMonto >= total) return false;
       if (instrumentoPago === "EFECTIVO") return efectivoNum >= (anticipoMonto - 0.05);
+      if (instrumentoPago === "TARJETA") return true;
       if (instrumentoPago === "TRANSFERENCIA") return true;
       if (instrumentoPago === "MIXTO") {
-        return Math.abs(anticipoMonto - asignadoMixto) < 0.1;
+        return cuadreMixtoValido;
       }
       return true;
     }
@@ -242,7 +343,7 @@ export function CheckoutDialog({
     instrumentoPago,
     total,
     efectivoNum,
-    asignadoMixto,
+    cuadreMixtoValido,
     anticipoMonto,
     isAnonymousClient,
     abonoCredito,
@@ -250,8 +351,21 @@ export function CheckoutDialog({
 
   const handleConfirm = () => {
     if (!isConfirmEnabled) return;
-    const finalRef = referencia.trim() || (instrumentoPago === "TRANSFERENCIA" ? `TRF-${Date.now().toString().slice(-6)}` : undefined);
-    const finalTransfRef = pagoTransferenciaRef.trim() || (pagoTransferencia > 0 ? `TRF-${Date.now().toString().slice(-6)}` : undefined);
+    const autoSuffix = Date.now().toString().slice(-6);
+    const finalTarjetaMixtoRef =
+      pagoTarjeta > 0 ? (pagoTarjetaRef.trim() || `TAR-${autoSuffix}`) : undefined;
+    const finalTransfMixtoRef =
+      pagoTransferencia > 0 ? (pagoTransferenciaRef.trim() || `TRF-${autoSuffix}`) : undefined;
+
+    let finalRef: string | undefined = referencia.trim() || undefined;
+    if (!finalRef) {
+      if (instrumentoPago === "TARJETA") finalRef = `TAR-${autoSuffix}`;
+      else if (instrumentoPago === "TRANSFERENCIA") finalRef = `TRF-${autoSuffix}`;
+      else if (instrumentoPago === "MIXTO") {
+        const refs = [finalTarjetaMixtoRef, finalTransfMixtoRef].filter(Boolean);
+        if (refs.length > 0) finalRef = refs.join(" / ");
+      }
+    }
 
     onConfirm({
       type: invoiceType,
@@ -262,33 +376,42 @@ export function CheckoutDialog({
       instrumentoPago,
       paidAmount,
       pendingAmount,
-      cashReceived: efectivoNum,
-      change: cambio,
+      cashReceived:
+        instrumentoPago === "MIXTO"
+          ? asignadoMixto
+          : instrumentoPago === "EFECTIVO"
+          ? efectivoNum
+          : paidAmount,
+      change: instrumentoPago === "MIXTO" ? cambioMixto : instrumentoPago === "EFECTIVO" ? cambio : 0,
       creditDays: condicionCobro === "CREDITO" ? limiteDiasSel : undefined,
       referencia: finalRef,
       desgloseMixto:
         instrumentoPago === "MIXTO"
           ? {
-              efectivo: pagoEfectivo,
-              tarjeta: pagoTarjeta,
-              transferencia: pagoTransferencia,
-              transferenciaRef: finalTransfRef,
-            }
+               efectivo: efectivoAplicadoMixto,
+               efectivoRecibido: pagoEfectivo,
+               cambioEfectivo: cambioMixto,
+               tarjeta: pagoTarjeta,
+               transferencia: pagoTransferencia,
+               tarjetaRef: finalTarjetaMixtoRef,
+               transferenciaRef: finalTransfMixtoRef,
+             }
           : undefined,
     });
   };
 
-  // Atajo de teclado: Barra espaciadora para confirmar
+  // Atajo de teclado: Barra espaciadora o Enter para confirmar
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
-        const target = e.target as HTMLElement;
-        const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-        if (!isInput && isConfirmEnabled) {
-          e.preventDefault();
-          handleConfirm();
-        }
+      const target = e.target as HTMLElement;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (e.code === "Space" && !isInput && isConfirmEnabled) {
+        e.preventDefault();
+        handleConfirm();
+      } else if (e.key === "Enter" && isConfirmEnabled) {
+        e.preventDefault();
+        handleConfirm();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -378,10 +501,16 @@ export function CheckoutDialog({
                     setCondicionCobro(m.id);
                     if (m.id === "COBRAR_AHORA") {
                       setMontoRecibidoStr(formatAmountInput(String(total)));
+                      if (instrumentoPago === "MIXTO") {
+                        applyMixtoPreset(modoMixto, total, false);
+                      }
                     } else if (m.id === "ANTICIPO") {
                       const half = +Math.round(total / 2);
                       setAnticipoMontoStr(formatAmountInput(String(half)));
                       setMontoRecibidoStr(formatAmountInput(String(half)));
+                      if (instrumentoPago === "MIXTO") {
+                        applyMixtoPreset(modoMixto, half, false);
+                      }
                     } else if (m.id === "CREDITO") {
                       setAbonoCredito(0);
                       setMontoRecibidoStr("0");
@@ -443,9 +572,7 @@ export function CheckoutDialog({
                         setInstrumentoPago(inst.id);
                         if (inst.id === "MIXTO") {
                           const target = condicionCobro === "ANTICIPO" ? anticipoMonto : total;
-                          setPagoEfectivoStr(formatAmountInput(String(Math.round(target / 2))));
-                          setPagoTarjetaStr(formatAmountInput(String(Math.max(0, target - Math.round(target / 2)))));
-                          setPagoTransferenciaStr("0");
+                          applyMixtoPreset(modoMixto, target);
                         }
                       }}
                       className={cn(
@@ -493,6 +620,9 @@ export function CheckoutDialog({
                           const str = formatAmountInput(e.target.value);
                           setAnticipoMontoStr(str);
                           setMontoRecibidoStr(str);
+                          if (instrumentoPago === "MIXTO") {
+                            applyMixtoPreset(modoMixto, parseAmount(str));
+                          }
                         }}
                         placeholder="0.00"
                       />
@@ -508,6 +638,9 @@ export function CheckoutDialog({
                             const valStr = formatAmountInput(String(val));
                             setAnticipoMontoStr(valStr);
                             setMontoRecibidoStr(valStr);
+                            if (instrumentoPago === "MIXTO") {
+                              applyMixtoPreset(modoMixto, val);
+                            }
                           }}
                           className="px-2 h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[10px] font-black text-slate-600 dark:text-slate-300 hover:border-[#1B4B73] hover:text-[#1B4B73] transition-all cursor-pointer"
                         >
@@ -599,126 +732,435 @@ export function CheckoutDialog({
 
               {/* TARJETA */}
               {instrumentoPago === "TARJETA" && (
-                <div className="space-y-0.5 animate-in fade-in duration-200">
-                  <Label className="text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300 block">
-                    REFERENCIA DE TARJETA (OPCIONAL)
-                  </Label>
+                <div className="space-y-1 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[9px] font-black uppercase tracking-wider text-[#1B4B73] dark:text-sky-200 block">
+                      NO. DE REFERENCIA / VOUCHER TARJETA
+                    </Label>
+                    <div className="flex items-center gap-1.5">
+                      {!referencia.trim() && (
+                        <span className="text-[9px] text-emerald-600 font-bold">Se genera automático si queda vacío</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setReferencia(`TAR-${Date.now().toString().slice(-6)}`)}
+                        className="text-[9px] font-bold text-[#1B4B73] bg-sky-50 hover:bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded cursor-pointer"
+                      >
+                        Generar Ref.
+                      </button>
+                    </div>
+                  </div>
                   <Input
-                    placeholder="Número de aprobación / Auth #..."
+                    placeholder="Escriba los últimos dígitos o No. de aprobación (o deje vacío)..."
                     value={referencia}
                     onChange={(e) => setReferencia(e.target.value)}
-                    className="h-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/30 rounded-lg font-medium text-xs px-2.5 shadow-2xs"
+                    className="h-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/30 rounded-lg font-mono font-bold text-xs px-2.5 shadow-2xs"
                   />
                 </div>
               )}
 
               {/* TRANSFERENCIA */}
               {instrumentoPago === "TRANSFERENCIA" && (
-                <div className="space-y-0.5 animate-in fade-in duration-200">
+                <div className="space-y-1 animate-in fade-in duration-200">
                   <div className="flex items-center justify-between">
                     <Label className="text-[9px] font-black uppercase tracking-wider text-[#1B4B73] dark:text-sky-200 block">
-                      NO. DE TRANSFERENCIA (OPCIONAL)
+                      NO. DE REFERENCIA DE TRANSFERENCIA
                     </Label>
-                    {!referencia.trim() && (
-                      <span className="text-[9px] text-slate-400 font-medium">Auto-genera si queda vacío</span>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {!referencia.trim() && (
+                        <span className="text-[9px] text-emerald-600 font-bold">Se genera automático si queda vacío</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setReferencia(`TRF-${Date.now().toString().slice(-6)}`)}
+                        className="text-[9px] font-bold text-[#1B4B73] bg-sky-50 hover:bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded cursor-pointer"
+                      >
+                        Generar Ref.
+                      </button>
+                    </div>
                   </div>
                   <Input
-                    placeholder="Número de confirmación bancaria (opcional)..."
+                    placeholder="Escriba el número de confirmación bancaria (o deje vacío)..."
                     value={referencia}
                     onChange={(e) => setReferencia(e.target.value)}
-                    className="h-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/40 rounded-lg font-medium text-xs px-2.5 shadow-2xs"
+                    className="h-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus-visible:ring-[#1B4B73]/40 rounded-lg font-mono font-bold text-xs px-2.5 shadow-2xs"
                   />
                 </div>
               )}
 
               {/* MIXTO */}
               {instrumentoPago === "MIXTO" && (
-                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#1B4B73]/20 space-y-1.5 shadow-2xs animate-in fade-in duration-200">
+                <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#1B4B73]/20 space-y-2 shadow-2xs animate-in fade-in duration-200">
                   <div className="flex items-center justify-between pb-1 border-b border-border/60 text-[11px]">
                     <span className="font-black uppercase tracking-wider text-[#1B4B73] flex items-center gap-1">
                       <Split className="h-3.5 w-3.5" /> Desglose Multi-método
                     </span>
                     <span className="text-muted-foreground text-[10px]">
-                      Total: <b>{formatRD(targetMonto)}</b>
+                      Total a cubrir: <b>{formatRD(targetMonto)}</b>
                     </span>
                   </div>
 
+                  {/* Selector rápido de combinación de pago mixto */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                    {[
+                      { id: "EF_TAR" as const, label: "Efectivo + Tarjeta" },
+                      { id: "EF_TRANS" as const, label: "Efectivo + Transf." },
+                      { id: "TAR_TRANS" as const, label: "Tarjeta + Transf." },
+                      { id: "TRIPLE" as const, label: "Los 3 métodos" },
+                    ].map((opt) => {
+                      const active = modoMixto === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => applyMixtoPreset(opt.id, targetMonto, true)}
+                          className={cn(
+                            "py-1 px-1.5 rounded-lg border text-[10px] font-bold transition-all cursor-pointer truncate",
+                            active
+                              ? "bg-[#1B4B73] text-white border-[#1B4B73] shadow-2xs"
+                              : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-[#1B4B73]/40"
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-                    <div className="p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20 space-y-0.5">
-                      <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                        <Banknote className="h-3 w-3" /> Efectivo
+                    {/* EFECTIVO */}
+                    <div className={cn(
+                      "p-1.5 rounded-lg border space-y-0.5 transition-all",
+                      modoMixto === "TAR_TRANS" && pagoEfectivo === 0
+                        ? "border-slate-200 bg-slate-50/50 opacity-75"
+                        : "border-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20"
+                    )}>
+                      <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-300 flex items-center justify-between gap-1">
+                        <span className="flex items-center gap-1"><Banknote className="h-3 w-3" /> Efectivo</span>
+                        {pagoEfectivo > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              userEditedMixtoRef.current.delete("efectivo");
+                              setPagoEfectivoStr("0");
+                              if (modoMixto === "EF_TAR") {
+                                setPagoTarjetaStr(formatAmountInput(String(targetMonto)));
+                              } else if (modoMixto === "EF_TRANS") {
+                                setPagoTransferenciaStr(formatAmountInput(String(targetMonto)));
+                              }
+                            }}
+                            className="text-[9px] text-slate-400 hover:text-rose-500 cursor-pointer font-bold px-1"
+                            title="Poner Efectivo en 0"
+                          >
+                            0
+                          </button>
+                        )}
                       </span>
                       <Input
                         type="text"
                         inputMode="decimal"
                         className="h-7 text-right font-black text-xs bg-white dark:bg-slate-900 border border-slate-200 rounded px-1.5 font-mono"
                         value={pagoEfectivoStr}
-                        onChange={(e) => setPagoEfectivoStr(formatAmountInput(e.target.value))}
+                        onFocus={(e) => {
+                          const edited = userEditedMixtoRef.current;
+                          if (pagoEfectivo === 0) {
+                            if (edited.has("transferencia") && !edited.has("tarjeta") && pagoTransferencia > 0 && pagoTransferencia < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoTransferencia).toFixed(2));
+                              setModoMixto("EF_TRANS");
+                              setPagoTarjetaStr("0");
+                              setPagoEfectivoStr(formatAmountInput(String(rem)));
+                            } else if (edited.has("tarjeta") && !edited.has("transferencia") && pagoTarjeta > 0 && pagoTarjeta < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoTarjeta).toFixed(2));
+                              setModoMixto("EF_TAR");
+                              setPagoTransferenciaStr("0");
+                              setPagoEfectivoStr(formatAmountInput(String(rem)));
+                            }
+                          }
+                          setTimeout(() => e.target.select(), 10);
+                        }}
+                        onChange={(e) => {
+                          const formatted = formatAmountInput(e.target.value);
+                          const val = parseAmount(formatted);
+                          setPagoEfectivoStr(formatted);
+                          userEditedMixtoRef.current.add("efectivo");
+                          const edited = userEditedMixtoRef.current;
+
+                          let currentMode = modoMixto;
+                          if (currentMode === "TAR_TRANS") {
+                            if (edited.has("transferencia") && !edited.has("tarjeta")) {
+                              currentMode = "EF_TRANS";
+                            } else if (edited.has("tarjeta") && !edited.has("transferencia")) {
+                              currentMode = "EF_TAR";
+                            } else {
+                              currentMode = lastEditedMixtoRef.current === "transferencia" ? "EF_TRANS" : "EF_TAR";
+                            }
+                            setModoMixto(currentMode);
+                          }
+                          lastEditedMixtoRef.current = "efectivo";
+
+                          if (currentMode === "EF_TAR") {
+                            setPagoTransferenciaStr("0");
+                            if (!edited.has("tarjeta")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoTarjetaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          } else if (currentMode === "EF_TRANS") {
+                            setPagoTarjetaStr("0");
+                            if (!edited.has("transferencia")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoTransferenciaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          }
+                        }}
                         placeholder="0.00"
                       />
                     </div>
 
-                    <div className="p-1.5 rounded-lg border border-indigo-500/30 bg-indigo-50/20 dark:bg-indigo-950/20 space-y-0.5">
-                      <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
-                        <CreditCard className="h-3 w-3" /> Tarjeta
+                    {/* TARJETA */}
+                    <div className={cn(
+                      "p-1.5 rounded-lg border space-y-0.5 transition-all",
+                      modoMixto === "EF_TRANS" && pagoTarjeta === 0
+                        ? "border-slate-200 bg-slate-50/50 opacity-75"
+                        : "border-indigo-500/30 bg-indigo-50/20 dark:bg-indigo-950/20"
+                    )}>
+                      <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 flex items-center justify-between gap-1">
+                        <span className="flex items-center gap-1"><CreditCard className="h-3 w-3" /> Tarjeta</span>
+                        {pagoTarjeta > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              userEditedMixtoRef.current.delete("tarjeta");
+                              setPagoTarjetaStr("0");
+                              if (modoMixto === "EF_TAR") {
+                                setPagoEfectivoStr(formatAmountInput(String(targetMonto)));
+                              } else if (modoMixto === "TAR_TRANS") {
+                                setPagoTransferenciaStr(formatAmountInput(String(targetMonto)));
+                              }
+                            }}
+                            className="text-[9px] text-slate-400 hover:text-rose-500 cursor-pointer font-bold px-1"
+                            title="Poner Tarjeta en 0"
+                          >
+                            0
+                          </button>
+                        )}
                       </span>
                       <Input
                         type="text"
                         inputMode="decimal"
                         className="h-7 text-right font-black text-xs bg-white dark:bg-slate-900 border border-slate-200 rounded px-1.5 font-mono"
                         value={pagoTarjetaStr}
-                        onChange={(e) => setPagoTarjetaStr(formatAmountInput(e.target.value))}
+                        onFocus={(e) => {
+                          const edited = userEditedMixtoRef.current;
+                          if (pagoTarjeta === 0) {
+                            if (edited.has("transferencia") && !edited.has("efectivo") && pagoTransferencia > 0 && pagoTransferencia < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoTransferencia).toFixed(2));
+                              setModoMixto("TAR_TRANS");
+                              setPagoEfectivoStr("0");
+                              setPagoTarjetaStr(formatAmountInput(String(rem)));
+                            } else if (edited.has("efectivo") && !edited.has("transferencia") && pagoEfectivo > 0 && pagoEfectivo < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoEfectivo).toFixed(2));
+                              setModoMixto("EF_TAR");
+                              setPagoTransferenciaStr("0");
+                              setPagoTarjetaStr(formatAmountInput(String(rem)));
+                            }
+                          }
+                          setTimeout(() => e.target.select(), 10);
+                        }}
+                        onChange={(e) => {
+                          const formatted = formatAmountInput(e.target.value);
+                          const val = parseAmount(formatted);
+                          setPagoTarjetaStr(formatted);
+                          userEditedMixtoRef.current.add("tarjeta");
+                          const edited = userEditedMixtoRef.current;
+
+                          let currentMode = modoMixto;
+                          if (currentMode === "EF_TRANS") {
+                            if (edited.has("transferencia") && !edited.has("efectivo")) {
+                              currentMode = "TAR_TRANS";
+                            } else if (edited.has("efectivo") && !edited.has("transferencia")) {
+                              currentMode = "EF_TAR";
+                            } else {
+                              currentMode = lastEditedMixtoRef.current === "transferencia" ? "TAR_TRANS" : "EF_TAR";
+                            }
+                            setModoMixto(currentMode);
+                          }
+                          lastEditedMixtoRef.current = "tarjeta";
+
+                          if (currentMode === "EF_TAR") {
+                            setPagoTransferenciaStr("0");
+                            if (!edited.has("efectivo")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoEfectivoStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          } else if (currentMode === "TAR_TRANS") {
+                            setPagoEfectivoStr("0");
+                            if (!edited.has("transferencia")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoTransferenciaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          }
+                        }}
                         placeholder="0.00"
                       />
                     </div>
 
-                    <div className="p-1.5 rounded-lg border border-sky-500/30 bg-sky-50/20 dark:bg-sky-950/20 space-y-0.5">
-                      <span className="text-[10px] font-black text-sky-700 dark:text-sky-300 flex items-center gap-1">
-                        <Building2 className="h-3 w-3" /> Transferencia
+                    {/* TRANSFERENCIA */}
+                    <div className={cn(
+                      "p-1.5 rounded-lg border space-y-0.5 transition-all",
+                      modoMixto === "EF_TAR" && pagoTransferencia === 0
+                        ? "border-slate-200 bg-slate-50/50 opacity-75"
+                        : "border-sky-500/30 bg-sky-50/20 dark:bg-sky-950/20"
+                    )}>
+                      <span className="text-[10px] font-black text-sky-700 dark:text-sky-300 flex items-center justify-between gap-1">
+                        <span className="flex items-center gap-1"><Building2 className="h-3 w-3" /> Transferencia</span>
+                        {pagoTransferencia > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              userEditedMixtoRef.current.delete("transferencia");
+                              setPagoTransferenciaStr("0");
+                              if (modoMixto === "EF_TRANS") {
+                                setPagoEfectivoStr(formatAmountInput(String(targetMonto)));
+                              } else if (modoMixto === "TAR_TRANS") {
+                                setPagoTarjetaStr(formatAmountInput(String(targetMonto)));
+                              }
+                            }}
+                            className="text-[9px] text-slate-400 hover:text-rose-500 cursor-pointer font-bold px-1"
+                            title="Poner Transferencia en 0"
+                          >
+                            0
+                          </button>
+                        )}
                       </span>
                       <Input
                         type="text"
                         inputMode="decimal"
                         className="h-7 text-right font-black text-xs bg-white dark:bg-slate-900 border border-slate-200 rounded px-1.5 font-mono"
                         value={pagoTransferenciaStr}
-                        onChange={(e) => setPagoTransferenciaStr(formatAmountInput(e.target.value))}
+                        onFocus={(e) => {
+                          const edited = userEditedMixtoRef.current;
+                          if (pagoTransferencia === 0) {
+                            if (edited.has("efectivo") && !edited.has("tarjeta") && pagoEfectivo > 0 && pagoEfectivo < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoEfectivo).toFixed(2));
+                              setModoMixto("EF_TRANS");
+                              setPagoTarjetaStr("0");
+                              setPagoTransferenciaStr(formatAmountInput(String(rem)));
+                            } else if (edited.has("tarjeta") && !edited.has("efectivo") && pagoTarjeta > 0 && pagoTarjeta < targetMonto) {
+                              const rem = Math.max(0, +(targetMonto - pagoTarjeta).toFixed(2));
+                              setModoMixto("TAR_TRANS");
+                              setPagoEfectivoStr("0");
+                              setPagoTransferenciaStr(formatAmountInput(String(rem)));
+                            }
+                          }
+                          setTimeout(() => e.target.select(), 10);
+                        }}
+                        onChange={(e) => {
+                          const formatted = formatAmountInput(e.target.value);
+                          const val = parseAmount(formatted);
+                          setPagoTransferenciaStr(formatted);
+                          userEditedMixtoRef.current.add("transferencia");
+                          const edited = userEditedMixtoRef.current;
+
+                          let currentMode = modoMixto;
+                          if (currentMode === "EF_TAR") {
+                            if (edited.has("tarjeta") && !edited.has("efectivo")) {
+                              currentMode = "TAR_TRANS";
+                            } else if (edited.has("efectivo") && !edited.has("tarjeta")) {
+                              currentMode = "EF_TRANS";
+                            } else {
+                              currentMode = lastEditedMixtoRef.current === "tarjeta" ? "TAR_TRANS" : "EF_TRANS";
+                            }
+                            setModoMixto(currentMode);
+                          }
+                          lastEditedMixtoRef.current = "transferencia";
+
+                          if (currentMode === "EF_TRANS") {
+                            setPagoTarjetaStr("0");
+                            if (!edited.has("efectivo")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoEfectivoStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          } else if (currentMode === "TAR_TRANS") {
+                            setPagoEfectivoStr("0");
+                            if (!edited.has("tarjeta")) {
+                              const rem = Math.max(0, +(targetMonto - val).toFixed(2));
+                              setPagoTarjetaStr(rem > 0 ? formatAmountInput(String(rem)) : "0");
+                            }
+                          }
+                        }}
                         placeholder="0.00"
                       />
                     </div>
                   </div>
 
-                  {pagoTransferencia > 0 && (
-                    <Input
-                      placeholder="Referencia de transferencia (opcional)..."
-                      value={pagoTransferenciaRef}
-                      onChange={(e) => setPagoTransferenciaRef(e.target.value)}
-                      className="h-7 text-xs rounded border border-slate-200 px-2"
-                    />
+                  {/* Referencias opcionales para Tarjeta y Transferencia en modo Mixto */}
+                  {(pagoTarjeta > 0 || pagoTransferencia > 0) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {pagoTarjeta > 0 && (
+                        <Input
+                          placeholder="Ref. Tarjeta (opcional / auto)..."
+                          value={pagoTarjetaRef}
+                          onChange={(e) => setPagoTarjetaRef(e.target.value)}
+                          className="h-7 text-xs rounded border border-slate-200 px-2 font-mono"
+                        />
+                      )}
+                      {pagoTransferencia > 0 && (
+                        <Input
+                          placeholder="Ref. Transferencia (opcional / auto)..."
+                          value={pagoTransferenciaRef}
+                          onChange={(e) => setPagoTransferenciaRef(e.target.value)}
+                          className="h-7 text-xs rounded border border-slate-200 px-2 font-mono"
+                        />
+                      )}
+                    </div>
                   )}
 
-                  <div className="flex items-center justify-between pt-0.5 border-t border-border/60 text-[10px]">
+                  <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5 border-t border-border/60 text-[10px]">
                     <div>
                       <span className="text-muted-foreground">Asignado: </span>
                       <span className="font-black text-foreground">{formatRD(asignadoMixto)}</span>
                     </div>
                     <div>
-                      {!cuadreMixtoExacto ? (
-                        <div className="flex items-center gap-1.5">
+                      {!cuadreMixtoValido ? (
+                        <div className="flex flex-wrap items-center gap-1">
                           <span className="text-rose-500 font-black">
                             {targetMonto > asignadoMixto ? `Falta: ${formatRD(targetMonto - asignadoMixto)}` : `Sobra: ${formatRD(asignadoMixto - targetMonto)}`}
                           </span>
                           <button
                             type="button"
                             onClick={() => {
-                              const remaining = Math.max(0, targetMonto - (pagoEfectivo || 0) - (pagoTransferencia || 0));
-                              setPagoTarjetaStr(formatAmountInput(String(remaining)));
+                              const remaining = Math.max(0, +(targetMonto - (pagoTarjeta || 0) - (pagoTransferencia || 0)).toFixed(2));
+                              setPagoEfectivoStr(remaining > 0 ? formatAmountInput(String(remaining)) : "0");
+                            }}
+                            className="text-[9px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 font-bold px-1.5 py-0.5 rounded border border-emerald-200 transition-colors cursor-pointer"
+                          >
+                            Ajustar Efectivo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const remaining = Math.max(0, +(targetMonto - (pagoEfectivo || 0) - (pagoTransferencia || 0)).toFixed(2));
+                              setPagoTarjetaStr(remaining > 0 ? formatAmountInput(String(remaining)) : "0");
                             }}
                             className="text-[9px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-bold px-1.5 py-0.5 rounded border border-indigo-200 transition-colors cursor-pointer"
                           >
                             Ajustar Tarjeta
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const remaining = Math.max(0, +(targetMonto - (pagoEfectivo || 0) - (pagoTarjeta || 0)).toFixed(2));
+                              setPagoTransferenciaStr(remaining > 0 ? formatAmountInput(String(remaining)) : "0");
+                            }}
+                            className="text-[9px] bg-sky-50 hover:bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300 font-bold px-1.5 py-0.5 rounded border border-sky-200 transition-colors cursor-pointer"
+                          >
+                            Ajustar Transf.
+                          </button>
                         </div>
+                      ) : tieneCambioMixto ? (
+                        <span className="text-emerald-600 font-black flex items-center gap-1">
+                          <Check className="h-3 w-3" /> Efectivo aplicado: {formatRD(efectivoAplicadoMixto)} · Cambio: {formatRD(cambioMixto)}
+                        </span>
                       ) : (
                         <span className="text-emerald-600 font-black flex items-center gap-0.5">
                           <Check className="h-3 w-3" /> Cuadre exacto
@@ -958,6 +1400,7 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
   const techName = mechanicId ? (technicians.find(t => t.id === mechanicId)?.name ?? undefined) : undefined;
 
   const componentRef = useRef<HTMLDivElement>(null);
+  const autoPrintedInvoiceIdRef = useRef<string | null>(null);
   
   const handlePrint = () => {
     const printElement = componentRef.current;
@@ -969,6 +1412,17 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
       paperSize: (printSettings.paperSize as any) || "80mm",
     });
   };
+
+  // Generar / lanzar impresión del ticket automáticamente al completar el cobro
+  useEffect(() => {
+    if (!open || !lastInvoice?.id) return;
+    if (autoPrintedInvoiceIdRef.current === lastInvoice.id) return;
+    autoPrintedInvoiceIdRef.current = lastInvoice.id;
+    const timer = setTimeout(() => {
+      handlePrint();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [open, lastInvoice?.id]);
 
   const modalWidth = printSettings.paperSize === "A4" ? "sm:max-w-3xl" : "sm:max-w-md";
 
@@ -1012,6 +1466,7 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
               payMethod={payMethod}
               cashReceived={cashNum}
               mechanicName={techName}
+              notes={lastInvoice?.notes}
               warrantyText={warrantyText}
               discount={lastInvoice?.discount}
               formato={printSettings.paperSize as any}
@@ -1032,6 +1487,7 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
                     return lastInvoice.paymentMethod;
                   }
                 })() : lastInvoice.paymentMethod) || payMethod,
+                notas: lastInvoice.notes,
                 items: lastInvoice.items || [],
                 ncf: lastInvoice.ncf,
                 ecf_qr: lastInvoice.qrUrl,
@@ -1348,7 +1804,7 @@ interface LinkOrderProps {
 }
 
 export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps) {
-  const { orders, customers, vehicles, invoices } = useStore();
+  const { orders, customers, vehicles, invoices, openTabs } = useStore();
   const [search, setSearch] = useState("");
 
   const getCustomerName = (id: string) => customers.find((c) => c.id === id)?.name || "Cliente Genérico";
@@ -1358,6 +1814,7 @@ export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps
   };
 
   const alreadyInvoicedOrderIds = new Set(invoices.map(inv => inv.orderId).filter(Boolean));
+  const parkedOrderIds = new Set(openTabs.map(t => t.orderId).filter(Boolean));
 
   // Show finished, delivered, invoiced orders that are NOT yet invoiced.
   // We also show other statuses (pending, repairing) if the search term is active, 
@@ -1439,6 +1896,11 @@ export function LinkOrderDialog({ open, onOpenChange, onSelect }: LinkOrderProps
                     <Badge className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold", statusColors[order.status] || "bg-neutral-100")}>
                       {statusLabels[order.status] || order.status}
                     </Badge>
+                    {parkedOrderIds.has(order.id) && (
+                      <Badge className="rounded-full border border-amber-300 bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-bold">
+                        En Espera
+                      </Badge>
+                    )}
                     <span className="text-xs text-neutral-400 font-mono">#{order.id.slice(-6).toUpperCase()}</span>
                   </div>
                   <h4 className="font-bold text-sm text-neutral-900 truncate leading-snug">{order.description}</h4>
@@ -1485,11 +1947,60 @@ export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: Open
   const { openTabs, deleteOpenTab, updateProduct, addMovement, tenants, products, technicians, customers } = useStore();
   const currentTenant = tenants.find(t => t.id === tenantId);
   const currentTenantConfig = currentTenant?.config;
-  const tabs = openTabs.filter(t => (
+  const rawTabs = openTabs.filter(t => (
     t.tenantId === tenantId ||
     (currentTenant?.slug && t.tenantId === currentTenant.slug) ||
     !t.tenantId
   ));
+
+  // Deduplicar cuentas en espera repetidas por orden o por cliente registrado (conservando la más reciente)
+  const { tabs, duplicateIds } = (() => {
+    const sorted = [...rawTabs].sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime() -
+        new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
+    const seenIds = new Set<string>();
+    const seenOrders = new Set<string>();
+    const seenCustomers = new Set<string>();
+    const seenNames = new Set<string>();
+    const unique: OpenTab[] = [];
+    const dups: string[] = [];
+
+    for (const t of sorted) {
+      if (!t.id || seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+
+      const orderKey = t.orderId?.trim();
+      const custKey = t.customerId && t.customerId !== "walk-in" && t.customerId !== "none" ? t.customerId.trim() : "";
+      const customerObj = custKey ? customers.find(c => c.id === custKey) : null;
+      const resolvedName = (customerObj?.name || t.tabName || "").trim().toLowerCase();
+      const nameKey = resolvedName && resolvedName !== "consumidor final" ? resolvedName : "";
+
+      if (
+        (orderKey && seenOrders.has(orderKey)) ||
+        (custKey && seenCustomers.has(custKey)) ||
+        (nameKey && seenNames.has(nameKey))
+      ) {
+        dups.push(t.id);
+        continue;
+      }
+
+      if (orderKey) seenOrders.add(orderKey);
+      if (custKey) seenCustomers.add(custKey);
+      if (nameKey) seenNames.add(nameKey);
+      unique.push(t);
+    }
+
+    return { tabs: unique, duplicateIds: dups };
+  })();
+
+  // Limpiar automáticamente de la base de datos y del store cualquier duplicado residual al abrir el modal
+  useEffect(() => {
+    if (open && duplicateIds.length > 0) {
+      duplicateIds.forEach((id) => deleteOpenTab(id));
+    }
+  }, [open, duplicateIds.length]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

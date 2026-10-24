@@ -145,7 +145,13 @@ export default function POSPage() {
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
-  const activeCaja = cajas?.find(c => c.tenant_id === tenantId && c.estado === 'ABIERTA');
+  const activeCaja = useMemo(() => {
+    const tenantCajas = (cajas || [])
+      .filter(c => c.tenant_id === tenantId)
+      .sort((a, b) => new Date(b.abierta_en).getTime() - new Date(a.abierta_en).getTime());
+    return tenantCajas[0]?.estado === 'ABIERTA' ? tenantCajas[0] : undefined;
+  }, [cajas, tenantId]);
+  const isProcessingCheckoutRef = useRef(false);
 
   // Filtrar por tenantId para garantizar el aislamiento de datos multi-tenant
   const tenantProducts = tenantId ? products.filter((p) => p.tenantId === tenantId) : [];
@@ -154,28 +160,59 @@ export default function POSPage() {
   const tenantTechnicians = tenantId ? technicians.filter((t) => t.tenantId === tenantId) : [];
 
   const tenantOpenTabs = useMemo(() => {
-    return openTabs.filter((t) => {
+    const raw = openTabs.filter((t) => {
       if (!t) return false;
       if (tenantId && t.tenantId === tenantId) return true;
       if (currentTenant?.slug && t.tenantId === currentTenant.slug) return true;
       if (!t.tenantId) return true;
       return false;
     });
+
+    const sorted = [...raw].sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt || 0).getTime() -
+        new Date(a.updatedAt || a.createdAt || 0).getTime()
+    );
+    const seenIds = new Set<string>();
+    const seenOrders = new Set<string>();
+    const seenCustomers = new Set<string>();
+    const seenNames = new Set<string>();
+    const unique: typeof raw = [];
+
+    for (const t of sorted) {
+      if (!t.id || seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+
+      const orderKey = t.orderId?.trim();
+      const custKey = t.customerId && t.customerId !== "walk-in" && t.customerId !== "none" ? t.customerId.trim() : "";
+      const nameKey = t.tabName && t.tabName.trim().toLowerCase() !== "consumidor final" ? t.tabName.trim().toLowerCase() : "";
+
+      if (
+        (orderKey && seenOrders.has(orderKey)) ||
+        (custKey && seenCustomers.has(custKey)) ||
+        (nameKey && seenNames.has(nameKey))
+      ) {
+        continue;
+      }
+
+      if (orderKey) seenOrders.add(orderKey);
+      if (custKey) seenCustomers.add(custKey);
+      if (nameKey) seenNames.add(nameKey);
+      unique.push(t);
+    }
+
+    return unique;
   }, [openTabs, tenantId, currentTenant?.slug]);
 
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [allowExtraInventory, setAllowExtraInventory] = useState(false);
+  const [isItbisEnabled, setIsItbisEnabled] = useState<boolean>(true);
   const mountTimeRef = useRef<number>(Date.now());
+  const isPausingRef = useRef(false);
 
   useEffect(() => {
     mountTimeRef.current = Date.now();
-  }, [orderId]);
-
-  useEffect(() => {
-    if (orderId) {
-      setActiveOrderId(orderId);
-    }
   }, [orderId]);
 
   const currentOrder = activeOrderId ? tenantOrders.find(o => o.id === activeOrderId) : null;
@@ -194,6 +231,7 @@ export default function POSPage() {
     category: "Servicios",
     costPrice: 0,
     salePrice: s.price,
+    laborPrice: s.laborPrice,
     stock: 9999,
     minStock: 0,
     tax: (typeof s.tax === 'number' && s.tax >= 0 && s.tax <= 30) ? s.tax : 0,
@@ -206,22 +244,13 @@ export default function POSPage() {
   const [activeServiceIds, setActiveServiceIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (currentOrder && currentOrder.mechanicId) {
-      setPosMechanicId(currentOrder.mechanicId);
-    }
-    if (currentOrder && currentOrder.customerId) {
-      setPosCustomerId(currentOrder.customerId);
-    }
-  }, [currentOrder]);
-
-  useEffect(() => {
     if (currentOrder && currentOrder.serviceIds && currentOrder.serviceIds.length > 0) {
       // Store the active service IDs to filter inventory
       setActiveServiceIds(currentOrder.serviceIds);
     } else if (!currentOrder) {
       setActiveServiceIds([]);
     }
-  }, [currentOrder]);
+  }, [currentOrder?.id]);
 
   const [isCheckout, setIsCheckout]   = useState(false);
   const [isPrint, setIsPrint]         = useState(false);
@@ -287,26 +316,30 @@ export default function POSPage() {
     return matchCat && matchSearch;
   });
 
-  const rawTotal       = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
-  const discountAmount = discountType === "percent" 
-    ? (rawTotal * (discount || 0)) / 100 
-    : Math.min(rawTotal, Math.max(0, discount || 0));
-  const total          = Math.max(0, rawTotal - discountAmount);
   // ITBIS: En Rep. Dominicana la tasa es porcentual (0% o 18%).
   // La mano de obra y los servicios exentos van a 0% ITBIS (monto sólido).
   const getItemTaxRate = (item: CartItem) => {
-    if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name.toLowerCase() === "mano de obra" || item.tax === 0) {
-      return 0;
+    if (typeof item.tax === "number" && item.tax >= 0 && item.tax <= 30) {
+      return item.tax;
     }
-    const t = item.tax;
-    if (typeof t === 'number' && t > 0 && t <= 30) {
-      return t;
+    if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name.toLowerCase() === "mano de obra") {
+      return 0;
     }
     return 18;
   };
-  const rawSubtotal    = cart.reduce((acc, i) => acc + (i.salePrice / (1 + getItemTaxRate(i) / 100)) * i.quantity, 0);
-  const subtotal       = rawTotal > 0 ? (rawSubtotal * (total / rawTotal)) : 0;
-  const itbis          = Math.max(0, total - subtotal);
+  const rawSubtotal    = cart.reduce((acc, i) => acc + i.salePrice * i.quantity, 0);
+  const discountAmount = discountType === "percent" 
+    ? (rawSubtotal * (discount || 0)) / 100 
+    : Math.min(rawSubtotal, Math.max(0, discount || 0));
+  const subtotal       = Math.max(0, Math.round((rawSubtotal - discountAmount) * 100) / 100);
+  const discountRatio  = rawSubtotal > 0 ? subtotal / rawSubtotal : 0;
+  const rawItbis       = cart.reduce((acc, i) => acc + (i.salePrice * i.quantity * (getItemTaxRate(i) / 100)), 0);
+  const itbis          = isItbisEnabled
+    ? (currentOrder && currentOrder.applyItbis
+        ? Math.max(0, Math.round((subtotal * 0.18) * 100) / 100)
+        : Math.max(0, Math.round((rawItbis * discountRatio) * 100) / 100))
+    : 0;
+  const total          = Math.round((subtotal + itbis) * 100) / 100;
   const cashNum        = parseFloat(cashReceived.replace(/,/g, "")) || 0;
   const change         = Math.max(0, cashNum - total);
 
@@ -376,7 +409,7 @@ export default function POSPage() {
         }
         return prev.map((i) => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
       }
-      return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice, tax: (typeof product.tax === 'number' && product.tax > 0 && product.tax <= 30) ? product.tax : 18 }];
+      return [...prev, { ...product, quantity: 1, laborPrice: calculatedLaborPrice, tax: (typeof product.tax === 'number' && product.tax >= 0 && product.tax <= 30) ? product.tax : (isService ? 0 : 18) }];
     });
   };
 
@@ -443,14 +476,21 @@ export default function POSPage() {
   };
 
   const handleSelectOrder = (order: WorkOrder) => {
+    // Si esta orden ya estaba en Cuentas en Espera, reutilizar su ID de cuenta en espera para no duplicarla
+    const existingTabForOrder = tenantOpenTabs.find(
+      (t) => t.orderId === order.id || (order.customerId && order.customerId !== "walk-in" && t.customerId === order.customerId)
+    );
+    if (existingTabForOrder) {
+      setActiveTabId(existingTabForOrder.id);
+    } else {
+      setActiveTabId(null);
+    }
+
     setActiveOrderId(order.id);
     setAllowExtraInventory(false);
-    if (order.mechanicId) {
-      setPosMechanicId(order.mechanicId);
-    }
-    if (order.customerId) {
-      setPosCustomerId(order.customerId);
-    }
+    setIsItbisEnabled(order.applyItbis !== false);
+    setPosMechanicId(order.mechanicId || "");
+    setPosCustomerId(order.customerId || "");
     setDiscount(0);
     setDiscountType("fixed");
     
@@ -494,21 +534,32 @@ export default function POSPage() {
         return true;
       });
 
-      const newCart: CartItem[] = itemsToLoad.map((it: any) => {
-        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : 18;
-        const grossPrice = it.unitPrice ? it.unitPrice * (1 + taxRate / 100) : (it.price || it.salePrice || 0);
+      let newCart: CartItem[] = itemsToLoad.map((it: any) => {
+        const isService = Boolean(
+          it.serviceId || 
+          it.name?.toLowerCase().includes("mano de obra") || 
+          it.name?.toLowerCase().includes("servicio") ||
+          it.name?.toLowerCase().includes("diagnostico") ||
+          it.name?.toLowerCase().includes("diagnóstico")
+        );
+        const taxRate = order.applyItbis === false
+          ? 0
+          : (typeof it.taxPercentage === "number" ? it.taxPercentage : (typeof it.tax === "number" ? it.tax : (isService ? 0 : 18)));
+        const basePrice = Number(it.unitPrice ?? it.price ?? it.salePrice ?? 0);
 
         const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
         const existingService = it.serviceId ? tenantServices.find((s) => s.id === it.serviceId) : null;
-        const isPartDispatched = Boolean(it.alreadyDeducted || (it.productId && order.parts?.some((pt: any) => pt.productId === it.productId)));
+        const matchedOrderPart = it.productId ? order.parts?.find((pt: any) => pt.productId === it.productId) : null;
+        const isPartDispatched = Boolean(it.alreadyDeducted || matchedOrderPart);
+        const finalQty = matchedOrderPart ? Math.max(it.quantity || 1, matchedOrderPart.quantity || 1) : (it.quantity || 1);
 
         if (existingProduct) {
           return {
             ...existingProduct,
             name: it.name || existingProduct.name,
-            salePrice: grossPrice,
+            salePrice: basePrice || existingProduct.salePrice,
             tax: taxRate,
-            quantity: it.quantity || 1,
+            quantity: finalQty,
             alreadyDeducted: isPartDispatched,
           } as any;
         }
@@ -517,19 +568,11 @@ export default function POSPage() {
           return {
             ...serviceToProduct(existingService),
             name: it.name || existingService.name,
-            salePrice: grossPrice,
-            tax: (typeof existingService.tax === 'number' && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0,
+            salePrice: basePrice || existingService.price,
+            tax: order.applyItbis === false ? 0 : (typeof it.taxPercentage === "number" ? it.taxPercentage : ((typeof existingService.tax === "number" && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0)),
             quantity: it.quantity || 1,
           };
         }
-
-        const isService = Boolean(
-          it.serviceId || 
-          it.name?.toLowerCase().includes("mano de obra") || 
-          it.name?.toLowerCase().includes("servicio") ||
-          it.name?.toLowerCase().includes("diagnostico") ||
-          it.name?.toLowerCase().includes("diagnóstico")
-        );
 
         return {
           id: it.productId || it.serviceId || it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -538,14 +581,34 @@ export default function POSPage() {
           sku: isService ? "MANO-OBRA" : "REPUESTO",
           category: isService ? "Servicios" : "Repuestos",
           costPrice: 0,
-          salePrice: grossPrice,
-          laborPrice: isService ? grossPrice : undefined,
+          salePrice: basePrice,
+          laborPrice: isService ? basePrice : undefined,
           stock: 9999,
           minStock: 0,
-          tax: isService ? 0 : taxRate,
-          quantity: it.quantity || 1,
+          tax: taxRate,
+          quantity: finalQty,
         };
       });
+
+      // Si además se despacharon piezas adicionales en almacén que no estaban en order.items, incluirlas
+      if (order.parts && order.parts.length > 0) {
+        order.parts.forEach((part) => {
+          if (!part || !part.productId) return;
+          const alreadyInCart = newCart.some((c) => c.id === part.productId);
+          if (!alreadyInCart) {
+            const product = allPosItems.find((p) => p && p.id === part.productId);
+            if (product) {
+              newCart.push({
+                ...product,
+                salePrice: (part as any).price || product.salePrice,
+                tax: typeof (part as any).tax === "number" ? (part as any).tax : (typeof product.tax === "number" ? product.tax : 18),
+                quantity: part.quantity || 1,
+                alreadyDeducted: true,
+              });
+            }
+          }
+        });
+      }
 
       setCart(newCart);
       toast.success(`Orden vinculada — ${newCart.length} ítems agregados al carrito`);
@@ -627,7 +690,7 @@ export default function POSPage() {
               laborPrice: csPrice,
               stock: 9999,
               minStock: 0,
-              tax: (typeof cs.tax === 'number' && cs.tax > 0) ? cs.tax : 18,
+              tax: typeof cs.tax === "number" ? cs.tax : 0,
               quantity: 1,
             });
           });
@@ -665,6 +728,10 @@ export default function POSPage() {
   const handleLoadFromQuote = (targetQuote: any, linkedOrderId?: string) => {
     if (linkedOrderId) {
       setActiveOrderId(linkedOrderId);
+      const linkedOrd = orders.find((o) => o.id === linkedOrderId) || tenantOrders.find((o) => o.id === linkedOrderId);
+      if (linkedOrd?.mechanicId && linkedOrd.mechanicId !== "none") {
+        setPosMechanicId(linkedOrd.mechanicId);
+      }
     }
     setAllowExtraInventory(false);
     if (targetQuote.customerId) {
@@ -712,9 +779,15 @@ export default function POSPage() {
     });
     if (itemsToLoad.length > 0) {
       const newCart: CartItem[] = itemsToLoad.map((it: any) => {
-        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : 18;
-        // In Quote, unitPrice is net. In POS Cart, salePrice is gross (net * (1 + taxRate/100))
-        const grossPrice = it.unitPrice ? it.unitPrice * (1 + taxRate / 100) : (it.salePrice || 0);
+        const isService = Boolean(
+          it.serviceId || 
+          it.name?.toLowerCase().includes("mano de obra") || 
+          it.name?.toLowerCase().includes("servicio") ||
+          it.name?.toLowerCase().includes("diagnostico") ||
+          it.name?.toLowerCase().includes("diagnóstico")
+        );
+        const taxRate = typeof it.taxPercentage === "number" ? it.taxPercentage : (typeof it.tax === "number" ? it.tax : (isService ? 0 : 18));
+        const basePrice = Number(it.unitPrice ?? it.price ?? it.salePrice ?? 0);
 
         const existingProduct = it.productId ? allPosItems.find((p) => p.id === it.productId) : null;
         const existingService = it.serviceId ? tenantServices.find((s) => s.id === it.serviceId) : null;
@@ -723,7 +796,7 @@ export default function POSPage() {
           return {
             ...existingProduct,
             name: it.name || existingProduct.name,
-            salePrice: grossPrice,
+            salePrice: basePrice || existingProduct.salePrice,
             tax: taxRate,
             quantity: it.quantity || 1,
             alreadyDeducted: false,
@@ -734,19 +807,11 @@ export default function POSPage() {
           return {
             ...serviceToProduct(existingService),
             name: it.name || existingService.name,
-            salePrice: grossPrice,
-            tax: (typeof existingService.tax === 'number' && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0,
+            salePrice: basePrice || existingService.price,
+            tax: typeof it.taxPercentage === "number" ? it.taxPercentage : ((typeof existingService.tax === "number" && existingService.tax >= 0 && existingService.tax <= 30) ? existingService.tax : 0),
             quantity: it.quantity || 1,
           };
         }
-
-        const isService = Boolean(
-          it.serviceId || 
-          it.name?.toLowerCase().includes("mano de obra") || 
-          it.name?.toLowerCase().includes("servicio") ||
-          it.name?.toLowerCase().includes("diagnostico") ||
-          it.name?.toLowerCase().includes("diagnóstico")
-        );
 
         return {
           id: it.productId || it.serviceId || it.id || `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -755,11 +820,11 @@ export default function POSPage() {
           sku: isService ? "MANO-OBRA" : "REPUESTO",
           category: isService ? "Servicios" : "Repuestos",
           costPrice: 0,
-          salePrice: grossPrice,
-          laborPrice: isService ? grossPrice : undefined,
+          salePrice: basePrice,
+          laborPrice: isService ? basePrice : undefined,
           stock: 9999,
           minStock: 0,
-          tax: isService ? 0 : taxRate,
+          tax: taxRate,
           quantity: it.quantity || 1,
         };
       });
@@ -800,323 +865,388 @@ export default function POSPage() {
   }, [orderId, quoteId, orders, quotes, tenantOrders]);
 
   const handleCheckout = async (checkoutData: CheckoutConfirmData) => {
-    const hasServices = cart.some(i => isServiceItem(i, tenantServices));
-    let finalMechanicId = (posMechanicId && posMechanicId !== "none") ? posMechanicId : undefined;
-    
-    // Si hay servicios y no se seleccionó mecánico, asignar el primer técnico activo para no bloquear el cobro
-    if (hasServices && !finalMechanicId) {
-      const activeTech = tenantTechnicians.find(t => t.status === "active") || tenantTechnicians[0];
-      if (activeTech) {
-        finalMechanicId = activeTech.id;
-      }
-    }
-
-    const {
-      type: customerFiscalType,
-      rnc: customerRnc,
-      name: customerName,
-      isFiscalEnabled,
-      condicionCobro,
-      instrumentoPago,
-      paidAmount,
-      pendingAmount,
-      cashReceived: receivedCash,
-      change: cashChange,
-      creditDays,
-      referencia,
-      desgloseMixto,
-    } = checkoutData;
-
-    const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
-    const ecfConfig = currentTenantConfig?.ecfConfig;
-    const isEcfEnabled = Boolean(isFiscalEnabled && (ecfConfig?.token || ecfConfig?.rnc));
-    
-    // Determinar tipo de comprobante e-CF según orden o selección de checkout
-    const orderNcfType = currentOrder?.ncfType;
-    let invoiceType = "32";
-    if (customerFiscalType === 'credito_fiscal' || orderNcfType === "E31" || currentOrder?.customerType === 'credito_fiscal') {
-      invoiceType = "31";
-    } else if (customerFiscalType === 'gubernamental' || orderNcfType === "E45" || currentOrder?.customerType === 'gubernamental') {
-      invoiceType = "45";
-    } else if (customerFiscalType === 'regimen_especial' || orderNcfType === "E44" || currentOrder?.customerType === 'regimen_especial') {
-      invoiceType = "44";
-    } else if (orderNcfType) {
-      invoiceType = orderNcfType.replace(/\D/g, "");
-    }
-
-    let finalNcf: string | undefined = undefined;
-    let securityCode: string | undefined = undefined;
-    let qrUrl: string | undefined = undefined;
-    let signatureDate: string | undefined = undefined;
-    
-    // Lógica para asignar e-NCF según tipo de cliente vía EF2 SOLO SI LA FACTURACIÓN FISCAL ESTÁ ACTIVADA
-    if (isFiscalEnabled) {
-      if (isEcfEnabled) {
-        try {
-          toast.info("Emitiendo Comprobante Fiscal Electrónico con EF2...", { id: "ecf-submit" });
-          
-          const activeToken = ecfConfig?.token?.trim() || EF2_DEFAULT_TEST_TOKEN;
-          const buyerRnc = customerRnc || currentOrder?.customerRnc;
-          const buyerName = customerName || currentOrder?.customerBusinessName;
-
-          const docPayload = buildEf2InvoicePayload({
-            invoiceType,
-            items: cart.map(i => ({
-              name: i.name,
-              quantity: i.quantity,
-              salePrice: i.salePrice,
-              tax: (i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.name.toLowerCase() === "mano de obra" || i.tax === 0) ? 0 : (typeof i.tax === 'number' && i.tax > 0 && i.tax < 1 ? i.tax : (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30 ? i.tax / 100 : 0.18)),
-              category: i.category,
-            })),
-            subtotal,
-            itbis,
-            total,
-            payMethod: instrumentoPago === 'EFECTIVO' ? 'cash' : instrumentoPago === 'TARJETA' ? 'card' : 'transfer',
-            issuer: {
-              rnc: ecfConfig?.rnc || taller.rnc,
-              businessName: ecfConfig?.businessName || taller.name,
-              address: taller.address,
-              phone: taller.phone,
-            },
-            buyer: (buyerRnc || buyerName) ? {
-              rnc: buyerRnc,
-              name: buyerName,
-            } : undefined,
-          });
-
-          const result = await submitInvoiceToEf2(activeToken, docPayload);
-          
-          if (result && result.ncf) {
-             finalNcf = result.ncf;
-             securityCode = result.codigo_seguridad;
-             qrUrl = result.qr_link;
-             signatureDate = result.fecha_firma ? new Date(result.fecha_firma).toISOString() : new Date().toISOString();
-             toast.success(`Factura Electrónica e-CF emitida exitosamente (${finalNcf})`, { id: "ecf-submit" });
-          } else {
-             throw new Error(result?.message || result?.error || "EF2 no devolvió un e-NCF válido");
-          }
-        } catch (err: any) {
-          console.error("Error EF2 / DGII:", err);
-          finalNcf = invoiceType === "31" ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
-          toast.error(`Error al emitir con EF2: ${err.message || "Conexión fallida"}. Se generó comprobante NCF tradicional.`, { id: "ecf-submit", duration: 6000 });
+    if (isProcessingCheckoutRef.current) return;
+    isProcessingCheckoutRef.current = true;
+    try {
+      const hasServices = cart.some(i => isServiceItem(i, tenantServices));
+      let finalMechanicId =
+        posMechanicId && posMechanicId !== "none"
+          ? posMechanicId
+          : currentOrder?.mechanicId && currentOrder.mechanicId !== "none"
+          ? currentOrder.mechanicId
+          : undefined;
+      
+      // Si hay servicios y no se seleccionó mecánico, asignar el primer técnico activo para no bloquear el cobro
+      if (hasServices && !finalMechanicId) {
+        const activeTech = tenantTechnicians.find(t => t.status === "active") || tenantTechnicians[0];
+        if (activeTech) {
+          finalMechanicId = activeTech.id;
         }
-      } else {
-        const isCreditFiscal = customerFiscalType === 'credito_fiscal' || (posCustomerId && posCustomerId !== "walk-in" && customers.find(c => c.id === posCustomerId)?.rnc);
-        finalNcf = invoiceType === "31" || isCreditFiscal
-          ? `B01-${String(Date.now()).slice(-8)}`
-          : invoiceType === "45"
-          ? `B15-${String(Date.now()).slice(-8)}`
-          : invoiceType === "44"
-          ? `B14-${String(Date.now()).slice(-8)}`
-          : `B02-${String(Date.now()).slice(-8)}`;
       }
-    }
 
-    const rawCustomerId = currentOrder?.customerId || posCustomerId;
-    const isValidUuid = (val?: string | null) =>
-      Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
-
-    const finalCustomerId = (rawCustomerId && rawCustomerId !== "walk-in" && rawCustomerId !== "none" && isValidUuid(rawCustomerId))
-      ? rawCustomerId
-      : undefined;
-
-    const finalCustomerName = customerName || 
-      (finalCustomerId ? customers.find(c => c.id === finalCustomerId)?.name : undefined) ||
-      currentOrder?.customerBusinessName ||
-      (posCustomerSearch ? posCustomerSearch.trim() : undefined) ||
-      "Consumidor Final";
-
-    const selectedTech = finalMechanicId ? technicians.find(t => t.id === finalMechanicId) : null;
-
-    const finalPayMethod: 'cash' | 'card' | 'transfer' | 'credit' = 
-      condicionCobro === 'CREDITO' ? 'credit' :
-      instrumentoPago === 'EFECTIVO' ? 'cash' :
-      instrumentoPago === 'TARJETA' ? 'card' :
-      instrumentoPago === 'TRANSFERENCIA' ? 'transfer' : 'card';
-
-    setPayMethod(finalPayMethod === 'credit' ? 'card' : finalPayMethod);
-    setCashReceived(String(receivedCash));
-
-    const inv = {
-      id: `inv-${Date.now()}`,
-      tenantId: tenantId,
-      customerId: finalCustomerId,
-      customerName: finalCustomerName,
-      customerRnc: customerRnc || undefined,
-      vehicleId: currentOrder?.vehicleId || undefined,
-      orderId: activeOrderId || undefined,
-      mechanicId: finalMechanicId || undefined,
-      items: cart.map((i) => {
-        const itemIsService = isServiceItem(i, tenantServices);
-        let itemCommission = 0;
-        if (selectedTech && selectedTech.pagoNomina && itemIsService) {
-          if (selectedTech.tipoPago === "fijo") {
-            itemCommission = selectedTech.pagoNomina;
-          } else {
-            itemCommission = (i.salePrice * selectedTech.pagoNomina) / 100;
-          }
-        } else if (itemIsService && (i.id.startsWith("labor-") || i.sku === "MANO-OBRA")) {
-          itemCommission = i.laborPrice ?? i.salePrice;
-        }
-
-        const itemTaxRate = (itemIsService && (i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.name.toLowerCase() === "mano de obra")) || i.tax === 0
-          ? 0
-          : (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30 ? i.tax : 18);
-
-        return { 
-          id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          productId: itemIsService ? undefined : i.id, 
-          serviceId: itemIsService ? ((i as any).serviceId || i.id) : undefined,
-          name: i.name, 
-          quantity: i.quantity, 
-          unitPrice: itemTaxRate === 0 ? i.salePrice : (i.salePrice / (1 + itemTaxRate / 100)), 
-          tax: itemTaxRate === 0 ? 0 : ((i.salePrice * i.quantity) - ((i.salePrice / (1 + itemTaxRate / 100)) * i.quantity)),
-          laborPrice: itemCommission,
-          alreadyDeducted: Boolean((i as any).alreadyDeducted),
-        };
-      }),
-      subtotal, tax: itbis, total, discount: discountAmount,
-      paidAmount,
-      pendingAmount,
-      condicionCobro,
-      paymentMethod: finalPayMethod,
-      status: pendingAmount > 0 ? "pending" as const : "paid" as const,
-      ncf: finalNcf,
-      securityCode: securityCode || undefined,
-      qrUrl: qrUrl || undefined,
-      signatureDate: signatureDate || undefined,
-      notes: JSON.stringify({
+      const {
+        type: customerFiscalType,
+        rnc: customerRnc,
+        name: customerName,
+        isFiscalEnabled,
         condicionCobro,
         instrumentoPago,
         paidAmount,
         pendingAmount,
+        cashReceived: receivedCash,
+        change: cashChange,
         creditDays,
-        referencia: referencia || (instrumentoPago === 'TRANSFERENCIA' ? `TRF-${Date.now().toString().slice(-6)}` : undefined),
+        referencia,
         desgloseMixto,
-      }),
-      createdAt: new Date().toISOString(),
-    };
-    addInvoice(inv);
+      } = checkoutData;
 
-    if (activeCaja && paidAmount > 0) {
-      let laborTotal = 0;
-      cart.forEach(item => {
-        if (item.id.startsWith("labor-") || item.name.toLowerCase() === "mano de obra") {
-          laborTotal += ((item.laborPrice ?? item.salePrice) || 0) * item.quantity;
-        } else {
-          laborTotal += (item.laborPrice || 0) * item.quantity;
-        }
-      });
-      const monto_mano_obra = laborTotal;
-
-      const conceptoLabel = 
-        condicionCobro === 'ANTICIPO' ? `Anticipo POS (${Math.round((paidAmount / total) * 100)}%) - Factura` :
-        condicionCobro === 'CREDITO' ? `Abono Crédito POS - Factura` :
-        `Venta POS - Factura`;
-
-      const safeEmpleadoId = activeCaja.empleado_id?.trim() || "cajero";
-
-      if (instrumentoPago === 'MIXTO' && desgloseMixto) {
+      const dominantMixedPayMethod: 'cash' | 'card' | 'transfer' = (() => {
+        if (!desgloseMixto) return 'cash';
         const ef = Number(desgloseMixto.efectivo || 0);
         const tj = Number(desgloseMixto.tarjeta || 0);
         const tr = Number(desgloseMixto.transferencia || 0);
+        if (ef >= tj && ef >= tr && ef > 0) return 'cash';
+        if (tj >= ef && tj >= tr && tj > 0) return 'card';
+        if (tr > 0) return 'transfer';
+        return 'cash';
+      })();
 
-        if (ef > 0) {
-          addCajaMovement({
-            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            tenant_id: tenantId,
-            caja_id: activeCaja.id,
-            empleado_id: safeEmpleadoId,
-            tecnico_id: finalMechanicId || undefined,
-            tipo: 'VENTA',
-            concepto: `${conceptoLabel} (Mixto - Efectivo) ${inv.ncf || inv.id}`,
-            monto: ef,
-            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (ef / total)) : undefined,
-            metodo: 'EFECTIVO',
-            creado_en: new Date().toISOString(),
-          });
-        }
-        if (tj > 0) {
-          addCajaMovement({
-            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            tenant_id: tenantId,
-            caja_id: activeCaja.id,
-            empleado_id: safeEmpleadoId,
-            tecnico_id: finalMechanicId || undefined,
-            tipo: 'VENTA',
-            concepto: `${conceptoLabel} (Mixto - Tarjeta) ${inv.ncf || inv.id}`,
-            monto: tj,
-            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tj / total)) : undefined,
-            metodo: 'TARJETA',
-            creado_en: new Date().toISOString(),
-          });
-        }
-        if (tr > 0) {
-          addCajaMovement({
-            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            tenant_id: tenantId,
-            caja_id: activeCaja.id,
-            empleado_id: safeEmpleadoId,
-            tecnico_id: finalMechanicId || undefined,
-            tipo: 'VENTA',
-            concepto: `${conceptoLabel} (Mixto - Transf.) ${inv.ncf || inv.id}`,
-            monto: tr,
-            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tr / total)) : undefined,
-            metodo: 'TRANSFERENCIA',
-            creado_en: new Date().toISOString(),
-          });
-        }
-      } else {
-        const cajaMetodo = 
-          instrumentoPago === 'EFECTIVO' ? 'EFECTIVO' :
-          instrumentoPago === 'TARJETA' ? 'TARJETA' :
-          instrumentoPago === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'EFECTIVO';
-
-        addCajaMovement({
-          id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          tenant_id: tenantId,
-          caja_id: activeCaja.id,
-          empleado_id: safeEmpleadoId,
-          tecnico_id: finalMechanicId || undefined,
-          tipo: 'VENTA',
-          concepto: `${conceptoLabel} ${inv.ncf || inv.id}`,
-          monto: paidAmount,
-          monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (paidAmount / total)) : undefined,
-          metodo: cajaMetodo,
-          creado_en: new Date().toISOString(),
-        });
+      const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+      const ecfConfig = currentTenantConfig?.ecfConfig;
+      const isEcfEnabled = Boolean(isFiscalEnabled && (ecfConfig?.token || ecfConfig?.rnc));
+      
+      // Determinar tipo de comprobante e-CF según orden o selección de checkout
+      const orderNcfType = currentOrder?.ncfType;
+      let invoiceType = "32";
+      if (customerFiscalType === 'credito_fiscal' || orderNcfType === "E31" || currentOrder?.customerType === 'credito_fiscal') {
+        invoiceType = "31";
+      } else if (customerFiscalType === 'gubernamental' || orderNcfType === "E45" || currentOrder?.customerType === 'gubernamental') {
+        invoiceType = "45";
+      } else if (customerFiscalType === 'regimen_especial' || orderNcfType === "E44" || currentOrder?.customerType === 'regimen_especial') {
+        invoiceType = "44";
+      } else if (orderNcfType) {
+        invoiceType = orderNcfType.replace(/\D/g, "");
       }
+
+      let finalNcf: string | undefined = undefined;
+      let securityCode: string | undefined = undefined;
+      let qrUrl: string | undefined = undefined;
+      let signatureDate: string | undefined = undefined;
+      
+      // Lógica para asignar e-NCF según tipo de cliente vía EF2 SOLO SI LA FACTURACIÓN FISCAL ESTÁ ACTIVADA
+      if (isFiscalEnabled) {
+        if (isEcfEnabled) {
+          try {
+            toast.info("Emitiendo Comprobante Fiscal Electrónico con EF2...", { id: "ecf-submit" });
+            
+            const activeToken = ecfConfig?.token?.trim() || EF2_DEFAULT_TEST_TOKEN;
+            const buyerRnc = customerRnc || currentOrder?.customerRnc;
+            const buyerName = customerName || currentOrder?.customerBusinessName;
+
+            const docPayload = buildEf2InvoicePayload({
+              invoiceType,
+              items: cart.map(i => {
+                const rate = getItemTaxRate(i);
+                return {
+                  name: i.name,
+                  quantity: i.quantity,
+                  salePrice: i.salePrice,
+                  tax: rate > 0 ? rate / 100 : 0,
+                  is_exento: rate === 0,
+                  category: i.category,
+                };
+              }),
+              subtotal,
+              itbis,
+              total,
+              payMethod:
+                instrumentoPago === 'EFECTIVO'
+                  ? 'cash'
+                  : instrumentoPago === 'TARJETA'
+                  ? 'card'
+                  : instrumentoPago === 'TRANSFERENCIA'
+                  ? 'transfer'
+                  : dominantMixedPayMethod,
+              issuer: {
+                rnc: ecfConfig?.rnc || taller.rnc,
+                businessName: ecfConfig?.businessName || taller.name,
+                address: taller.address,
+                phone: taller.phone,
+              },
+              buyer: (buyerRnc || buyerName) ? {
+                rnc: buyerRnc,
+                name: buyerName,
+              } : undefined,
+            });
+
+            const result = await submitInvoiceToEf2(activeToken, docPayload);
+            
+            if (result && result.ncf) {
+               finalNcf = result.ncf;
+               securityCode = result.codigo_seguridad;
+               qrUrl = result.qr_link;
+               signatureDate = result.fecha_firma ? new Date(result.fecha_firma).toISOString() : new Date().toISOString();
+               toast.success(`Factura Electrónica e-CF emitida exitosamente (${finalNcf})`, { id: "ecf-submit" });
+            } else {
+               throw new Error(result?.message || result?.error || "EF2 no devolvió un e-NCF válido");
+            }
+          } catch (err: any) {
+            console.error("Error EF2 / DGII:", err);
+            finalNcf = invoiceType === "31" ? `B01-${String(Date.now()).slice(-8)}` : `B02-${String(Date.now()).slice(-8)}`;
+            toast.error(`Error al emitir con EF2: ${err.message || "Conexión fallida"}. Se generó comprobante NCF tradicional.`, { id: "ecf-submit", duration: 6000 });
+          }
+        } else {
+          const isCreditFiscal = customerFiscalType === 'credito_fiscal' || (posCustomerId && posCustomerId !== "walk-in" && customers.find(c => c.id === posCustomerId)?.rnc);
+          finalNcf = invoiceType === "31" || isCreditFiscal
+            ? `B01-${String(Date.now()).slice(-8)}`
+            : invoiceType === "45"
+            ? `B15-${String(Date.now()).slice(-8)}`
+            : invoiceType === "44"
+            ? `B14-${String(Date.now()).slice(-8)}`
+            : `B02-${String(Date.now()).slice(-8)}`;
+        }
+      }
+
+      const rawCustomerId = currentOrder?.customerId || posCustomerId;
+      const isValidUuid = (val?: string | null) =>
+        Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+      const finalCustomerId = (rawCustomerId && rawCustomerId !== "walk-in" && rawCustomerId !== "none" && isValidUuid(rawCustomerId))
+        ? rawCustomerId
+        : undefined;
+
+      const finalCustomerName = customerName || 
+        (finalCustomerId ? customers.find(c => c.id === finalCustomerId)?.name : undefined) ||
+        currentOrder?.customerBusinessName ||
+        (posCustomerSearch ? posCustomerSearch.trim() : undefined) ||
+        "Consumidor Final";
+
+      const selectedTech = finalMechanicId ? technicians.find(t => t.id === finalMechanicId) : null;
+
+      const finalPayMethod: 'cash' | 'card' | 'transfer' | 'credit' = 
+        condicionCobro === 'CREDITO' ? 'credit' :
+        instrumentoPago === 'EFECTIVO' ? 'cash' :
+        instrumentoPago === 'TARJETA' ? 'card' :
+        instrumentoPago === 'TRANSFERENCIA' ? 'transfer' :
+        dominantMixedPayMethod;
+
+      setPayMethod(finalPayMethod === 'credit' ? 'card' : finalPayMethod);
+      setCashReceived(String(receivedCash));
+
+      const inv = {
+        id: `inv-${Date.now()}`,
+        tenantId: tenantId,
+        customerId: finalCustomerId,
+        customerName: finalCustomerName,
+        customerRnc: customerRnc || undefined,
+        vehicleId: currentOrder?.vehicleId || undefined,
+        orderId: activeOrderId || undefined,
+        mechanicId: finalMechanicId || undefined,
+        items: cart.map((i) => {
+          const itemIsService = isServiceItem(i, tenantServices);
+          let itemCommission = 0;
+          if (itemIsService) {
+            if (selectedTech && selectedTech.pagoNomina && selectedTech.pagoNomina > 0) {
+              if (selectedTech.tipoPago === "fijo") {
+                itemCommission = Math.round(selectedTech.pagoNomina * 100) / 100;
+              } else {
+                itemCommission = Math.round(((i.salePrice * selectedTech.pagoNomina) / 100) * 100) / 100;
+              }
+            } else if (i.id.startsWith("labor-") || i.sku === "MANO-OBRA" || i.name?.toLowerCase().includes("mano de obra")) {
+              itemCommission = i.laborPrice ?? i.salePrice;
+            } else if (i.laborPrice && i.laborPrice > 0) {
+              itemCommission = i.laborPrice;
+            }
+          }
+
+          const itemTaxRate = getItemTaxRate(i);
+          const lineNet = i.salePrice * i.quantity * discountRatio;
+          const lineTax = Math.round((lineNet * (itemTaxRate / 100)) * 100) / 100;
+
+          return { 
+            id: `ii-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            productId: itemIsService ? undefined : i.id, 
+            serviceId: itemIsService ? ((i as any).serviceId || i.id) : undefined,
+            name: i.name, 
+            quantity: i.quantity, 
+            unitPrice: i.salePrice, 
+            tax: lineTax,
+            laborPrice: itemCommission,
+            alreadyDeducted: Boolean((i as any).alreadyDeducted),
+          };
+        }),
+        subtotal, tax: itbis, total, discount: discountAmount,
+        paidAmount,
+        pendingAmount,
+        condicionCobro,
+        paymentMethod: finalPayMethod,
+        status: pendingAmount > 0 ? "pending" as const : "paid" as const,
+        ncf: finalNcf,
+        securityCode: securityCode || undefined,
+        qrUrl: qrUrl || undefined,
+        signatureDate: signatureDate || undefined,
+        notes: JSON.stringify({
+          condicionCobro,
+          instrumentoPago,
+          paidAmount,
+          pendingAmount,
+          creditDays,
+          referencia:
+            referencia?.trim() ||
+            (instrumentoPago === 'TRANSFERENCIA'
+              ? `TRF-${Date.now().toString().slice(-6)}`
+              : instrumentoPago === 'TARJETA'
+              ? `TAR-${Date.now().toString().slice(-6)}`
+              : undefined),
+          desgloseMixto,
+        }),
+        createdAt: new Date().toISOString(),
+      };
+      addInvoice(inv);
+
+      if (activeCaja && paidAmount > 0) {
+        const laborTotal = inv.items.reduce(
+          (sum, item) => sum + ((item.laborPrice || 0) * (item.quantity || 1)),
+          0
+        );
+        const monto_mano_obra = Math.round(laborTotal * 100) / 100;
+
+        const conceptoLabel = 
+          condicionCobro === 'ANTICIPO' ? `Anticipo POS (${Math.round((paidAmount / total) * 100)}%) - Factura` :
+          condicionCobro === 'CREDITO' ? `Abono Crédito POS - Factura` :
+          `Venta POS - Factura`;
+
+        const safeEmpleadoId = activeCaja.empleado_id?.trim() || "cajero";
+        const effectiveRef =
+          referencia?.trim() ||
+          (instrumentoPago === 'TRANSFERENCIA'
+            ? `TRF-${Date.now().toString().slice(-6)}`
+            : instrumentoPago === 'TARJETA'
+            ? `TAR-${Date.now().toString().slice(-6)}`
+            : undefined);
+
+        if (instrumentoPago === 'MIXTO' && desgloseMixto) {
+          const ef = Number(desgloseMixto.efectivo || 0);
+          const tj = Number(desgloseMixto.tarjeta || 0);
+          const tr = Number(desgloseMixto.transferencia || 0);
+          const tjRef = (desgloseMixto as any).tarjetaRef || `TAR-${Date.now().toString().slice(-6)}`;
+          const trRef = (desgloseMixto as any).transferenciaRef || `TRF-${Date.now().toString().slice(-6)}`;
+
+          if (ef > 0) {
+            addCajaMovement({
+              id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              tenant_id: tenantId,
+              caja_id: activeCaja.id,
+              empleado_id: safeEmpleadoId,
+              tecnico_id: finalMechanicId || undefined,
+              tipo: 'VENTA',
+              concepto: `${conceptoLabel} (Mixto - Efectivo) ${inv.ncf || inv.id}`,
+              monto: ef,
+              monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (ef / total)) : undefined,
+              metodo: 'EFECTIVO',
+              creado_en: new Date().toISOString(),
+            });
+          }
+          if (tj > 0) {
+            addCajaMovement({
+              id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              tenant_id: tenantId,
+              caja_id: activeCaja.id,
+              empleado_id: safeEmpleadoId,
+              tecnico_id: finalMechanicId || undefined,
+              tipo: 'VENTA',
+              concepto: `${conceptoLabel} (Mixto - Tarjeta) ${inv.ncf || inv.id} [Ref: ${tjRef}]`,
+              monto: tj,
+              monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tj / total)) : undefined,
+              metodo: 'TARJETA',
+              creado_en: new Date().toISOString(),
+            });
+          }
+          if (tr > 0) {
+            addCajaMovement({
+              id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              tenant_id: tenantId,
+              caja_id: activeCaja.id,
+              empleado_id: safeEmpleadoId,
+              tecnico_id: finalMechanicId || undefined,
+              tipo: 'VENTA',
+              concepto: `${conceptoLabel} (Mixto - Transf.) ${inv.ncf || inv.id} [Ref: ${trRef}]`,
+              monto: tr,
+              monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (tr / total)) : undefined,
+              metodo: 'TRANSFERENCIA',
+              creado_en: new Date().toISOString(),
+            });
+          }
+        } else {
+          const cajaMetodo = 
+            instrumentoPago === 'EFECTIVO' ? 'EFECTIVO' :
+            instrumentoPago === 'TARJETA' ? 'TARJETA' :
+            instrumentoPago === 'TRANSFERENCIA' ? 'TRANSFERENCIA' : 'EFECTIVO';
+
+          addCajaMovement({
+            id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            tenant_id: tenantId,
+            caja_id: activeCaja.id,
+            empleado_id: safeEmpleadoId,
+            tecnico_id: finalMechanicId || undefined,
+            tipo: 'VENTA',
+            concepto: `${conceptoLabel} ${inv.ncf || inv.id}${effectiveRef ? ` [Ref: ${effectiveRef}]` : ""}`,
+            monto: paidAmount,
+            monto_mano_obra: monto_mano_obra > 0 ? (monto_mano_obra * (paidAmount / total)) : undefined,
+            metodo: cajaMetodo,
+            creado_en: new Date().toISOString(),
+          });
+        }
+      }
+      if (activeOrderId) {
+        updateOrder(activeOrderId, { status: "invoiced" });
+      }
+      if (quoteId) {
+        updateQuote(quoteId, { status: "accepted" });
+      }
+      // Si la venta provenía de una cuenta en espera (tab), o si existía una cuenta en espera para esta orden/cliente, eliminarla definitivamente
+      const matchingTabsToRemove = tenantOpenTabs.filter(
+        (t) =>
+          (activeTabId && t.id === activeTabId) ||
+          (activeOrderId && t.orderId === activeOrderId) ||
+          (finalCustomerId && t.customerId === finalCustomerId) ||
+          cart.some((i: any) => i._fromTabId && i._fromTabId === t.id)
+      );
+      if (matchingTabsToRemove.length > 0) {
+        matchingTabsToRemove.forEach((t) => deleteOpenTab(t.id));
+        setActiveTabId(null);
+      } else {
+        const tabSourceId = activeTabId || cart.find((i: any) => i._fromTabId)?._fromTabId;
+        if (tabSourceId) {
+          deleteOpenTab(tabSourceId);
+          setActiveTabId(null);
+        }
+      }
+      setLastInvoice(inv);
+      setIsCheckout(false);
+      setIsPrint(true);
+      toast.success("¡Venta registrada!");
+    } finally {
+      isProcessingCheckoutRef.current = false;
     }
-    if (activeOrderId) {
-      updateOrder(activeOrderId, { status: "invoiced" });
-    }
-    if (quoteId) {
-      updateQuote(quoteId, { status: "accepted" });
-    }
-    // Si la venta provenía de una cuenta en espera (tab), eliminarla definitivamente para evitar duplicados
-    const tabSourceId = activeTabId || cart.find((i: any) => i._fromTabId)?._fromTabId;
-    if (tabSourceId) {
-      deleteOpenTab(tabSourceId);
-      setActiveTabId(null);
-    }
-    setLastInvoice(inv);
-    setIsCheckout(false);
-    setIsPrint(true);
-    toast.success("¡Venta registrada!");
   };
 
-  const clearSale = () => {
+  const clearSale = (preserveUrl = false) => {
     setCart([]); setIsPrint(false); setLastInvoice(null);
     setCashReceived(""); setPayMethod("cash");
     setDiscount(0); setDiscountType("fixed");
     setActiveOrderId(null);
     setActiveTabId(null);
     setActiveServiceIds([]);
+    setAllowExtraInventory(false);
     setPosCustomerId("");
     setPosMechanicId("");
     setPosCustomerSearch("");
     setCategory("Todos");
     setShowMobileCart(false);
+    if (!preserveUrl && (orderId || quoteId)) {
+      router.replace(`/${tenant}/pos`);
+    }
     searchRef.current?.focus();
   };
 
@@ -1158,7 +1288,7 @@ export default function POSPage() {
                 >
                   {allowExtraInventory ? "Bloquear catálogo" : "+ Permitir agregar extras"}
                 </Button>
-                <Button variant="ghost" size="sm" className="h-7 text-amber-800 hover:bg-amber-100 text-xs font-bold" onClick={() => { setActiveOrderId(null); setCart([]); setActiveServiceIds([]); setCategory("Todos"); setAllowExtraInventory(false); window.history.replaceState({}, '', window.location.pathname); }}>
+                <Button variant="ghost" size="sm" className="h-7 text-amber-800 hover:bg-amber-100 text-xs font-bold" onClick={() => { clearSale(); }}>
                   <X className="h-3 w-3 mr-1" /> Quitar vínculo
                 </Button>
               </div>
@@ -1443,14 +1573,10 @@ export default function POSPage() {
                 <span className="font-bold text-lg">Venta</span>
               </div>
               <div className="flex items-center gap-3">
-                {(cart.length > 0 || posCustomerId || posMechanicId || discount > 0) && (
+                {(cart.length > 0 || posCustomerId || posMechanicId || discount > 0 || activeOrderId) && (
                   <button 
                     onClick={() => { 
-                      setCart([]); 
-                      setPosCustomerId(""); 
-                      setPosMechanicId(""); 
-                      setDiscount(0); 
-                      setDiscountType("fixed");
+                      clearSale();
                       toast.info("Venta reiniciada");
                     }} 
                     className="text-xs font-bold text-neutral-400 hover:text-rose-500 transition-colors cursor-pointer"
@@ -1681,7 +1807,7 @@ export default function POSPage() {
                       <p className="text-sm font-semibold text-neutral-900 truncate">{item.name}</p>
                       <p className="text-xs text-neutral-400">
                         RD$ {item.salePrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/u
-                        {(item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.name.toLowerCase() === "mano de obra" || item.tax === 0) ? " (Sin ITBIS)" : " (Inc. ITBIS)"}
+                        {getItemTaxRate(item) === 0 ? " (Sin ITBIS)" : ` (+${getItemTaxRate(item)}% ITBIS)`}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -1728,8 +1854,16 @@ export default function POSPage() {
                   <span>- RD$ {discountAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               )}
-              <div className="flex justify-between text-xs sm:text-sm text-neutral-500">
-                <span className="font-medium">ITBIS (18%)</span>
+              <div className="flex justify-between text-xs sm:text-sm text-neutral-500 items-center">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isItbisEnabled}
+                    onChange={(e) => setIsItbisEnabled(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-neutral-300 text-black focus:ring-black"
+                  />
+                  <span className="font-medium text-neutral-700">ITBIS (18%)</span>
+                </label>
                 <span className="font-semibold text-neutral-800">RD$ {itbis.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
               <div className="pt-2.5 border-t border-neutral-100 flex items-baseline justify-between">
@@ -1749,48 +1883,91 @@ export default function POSPage() {
               <button
                 disabled={cart.length === 0}
                 onClick={() => {
-                  if (cart.length === 0) return;
-                  
-                  const customerObj = tenantCustomers.find(c => c.id === posCustomerId);
-                  const tabName = customerObj ? customerObj.name : "Consumidor Final";
-                  
-                  // Descontar inventario inmediatamente
-                  const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
-                  if (currentTenantConfig?.autoDeductInventory) {
-                    cart.forEach(item => {
-                      if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
-                      if ((item as any).alreadyDeducted) return; // Evitar descontar stock doblemente si fue recuperado de espera
-                      updateProduct(item.id, { stock: Math.max(0, item.stock - item.quantity) });
-                      addMovement({
-                        id: `m-pos-tab-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                        tenantId,
-                        productId: item.id,
-                        productName: item.name,
-                        type: "out",
-                        quantity: item.quantity,
-                        reason: `Cuenta en Espera - Cliente: ${tabName}`,
-                        date: new Date().toISOString(),
-                      });
-                    });
-                  }
+                  if (cart.length === 0 || isPausingRef.current) return;
+                  isPausingRef.current = true;
+                  try {
+                    const effectiveCustomerId = posCustomerId || currentOrder?.customerId || "";
+                    const effectiveMechanicId = posMechanicId || currentOrder?.mechanicId || "";
+                    const customerObj = tenantCustomers.find(c => c.id === effectiveCustomerId);
+                    const tabName =
+                      customerObj?.name ||
+                      currentOrder?.customerBusinessName ||
+                      "Consumidor Final";
 
-                  const tabIdToUse = activeTabId || cart.find((i: any) => i._fromTabId)?._fromTabId || `tab-${Date.now()}`;
-                  const newTab = {
-                    id: tabIdToUse,
-                    tenantId: tenantId || currentTenant?.id || currentTenant?.slug || "general",
-                    tabName,
-                    customerId: posCustomerId || "walk-in",
-                    mechanicId: posMechanicId || "none",
-                    orderId: activeOrderId || null,
-                    discount: discount > 0 ? discount : 0,
-                    discountType: discount > 0 ? discountType : "fixed",
-                    items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity, alreadyDeducted: true })),
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  };
-                  addOpenTab(newTab);
-                  toast.success("Cuenta guardada en espera. Inventario descontado.");
-                  clearSale();
+                    // Buscar si esta orden o este cliente registrado ya tiene una cuenta en espera abierta para actualizarla en vez de duplicarla
+                    const existingMatchingTab = tenantOpenTabs.find((t) => {
+                      if (activeTabId && t.id === activeTabId) return true;
+                      if (activeOrderId && t.orderId && t.orderId === activeOrderId) return true;
+                      if (
+                        effectiveCustomerId &&
+                        effectiveCustomerId !== "walk-in" &&
+                        effectiveCustomerId !== "none" &&
+                        t.customerId === effectiveCustomerId
+                      ) {
+                        return true;
+                      }
+                      if (
+                        tabName &&
+                        tabName.trim().toLowerCase() !== "consumidor final" &&
+                        t.tabName &&
+                        t.tabName.trim().toLowerCase() === tabName.trim().toLowerCase()
+                      ) {
+                        return true;
+                      }
+                      return false;
+                    });
+
+                    // Descontar inventario inmediatamente solo para ítems que no hayan sido descontados antes
+                    const currentTenantConfig = tenants.find(t => t.id === tenantId)?.config;
+                    if (currentTenantConfig?.autoDeductInventory && !existingMatchingTab) {
+                      cart.forEach(item => {
+                        if (item.id.startsWith("labor-") || item.sku === "MANO-OBRA" || item.category === "Servicios") return;
+                        if ((item as any).alreadyDeducted) return; // Evitar descontar stock doblemente si fue recuperado de espera
+                        updateProduct(item.id, { stock: Math.max(0, item.stock - item.quantity) });
+                        addMovement({
+                          id: `m-pos-tab-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                          tenantId,
+                          productId: item.id,
+                          productName: item.name,
+                          type: "out",
+                          quantity: item.quantity,
+                          reason: `Cuenta en Espera - Cliente: ${tabName}`,
+                          date: new Date().toISOString(),
+                        });
+                      });
+                    }
+
+                    const tabIdToUse =
+                      existingMatchingTab?.id ||
+                      activeTabId ||
+                      cart.find((i: any) => i._fromTabId)?._fromTabId ||
+                      `tab-${Date.now()}`;
+
+                    const newTab = {
+                      id: tabIdToUse,
+                      tenantId: tenantId || currentTenant?.id || currentTenant?.slug || "general",
+                      tabName,
+                      customerId: effectiveCustomerId || "walk-in",
+                      mechanicId: effectiveMechanicId || "none",
+                      orderId: activeOrderId || existingMatchingTab?.orderId || null,
+                      discount: discount > 0 ? discount : 0,
+                      discountType: discount > 0 ? discountType : "fixed",
+                      items: cart.map(i => ({ ...i, productId: i.id, deductedQuantity: i.quantity, alreadyDeducted: true })),
+                      createdAt: existingMatchingTab?.createdAt || new Date().toISOString(),
+                      updatedAt: new Date().toISOString(),
+                    };
+                    addOpenTab(newTab);
+                    toast.success(
+                      existingMatchingTab
+                        ? `Cuenta en espera de ${tabName} actualizada.`
+                        : "Cuenta guardada en espera. Inventario descontado."
+                    );
+                    clearSale();
+                  } finally {
+                    setTimeout(() => {
+                      isPausingRef.current = false;
+                    }, 400);
+                  }
                 }}
                 className={cn(
                   "h-12 rounded-xl text-xs font-black transition-all uppercase flex items-center justify-center gap-1.5",
@@ -1856,8 +2033,8 @@ export default function POSPage() {
               setActiveTabId(tab.id);
               setCart(tab.items.map(i => ({
                 ...i,
-                // Asegurar que tax siempre tenga un valor válido (18% ITBIS por defecto)
-                tax: (typeof i.tax === 'number' && i.tax > 0 && i.tax <= 30) ? i.tax : 18,
+                // Preservar tax (0% para mano de obra/exentos, 18% por defecto para productos)
+                tax: (typeof i.tax === 'number' && i.tax >= 0 && i.tax <= 30) ? i.tax : ((i.id?.startsWith?.("labor-") || i.sku === "MANO-OBRA") ? 0 : 18),
                 // El item ya fue descontado por su cantidad original al pausar.
                 alreadyDeducted: true,
                 _fromTabId: tab.id, 

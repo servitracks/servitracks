@@ -147,10 +147,10 @@ export default function QuotationCreateDialog({
     });
 
     return {
-      subtotal,
-      tax,
-      discount,
-      total: subtotal - discount + tax,
+      subtotal: Math.round(subtotal * 100) / 100,
+      tax: Math.round(tax * 100) / 100,
+      discount: Math.round(discount * 100) / 100,
+      total: Math.round((subtotal - discount + tax) * 100) / 100,
     };
   }, [items]);
 
@@ -215,15 +215,16 @@ export default function QuotationCreateDialog({
       setItems(newItems);
       toast.success(`Incrementado "${item.name}"`);
     } else {
-      // Add new item
-      const taxRate = isProduct ? (item as Product).tax : ((item as Service).tax || 0);
+      // Add new item (unitPrice es el precio base antes de ITBIS)
+      const taxRate = isProduct
+        ? (typeof (item as Product).tax === "number" ? (item as Product).tax : 18)
+        : (typeof (item as Service).tax === "number" ? (item as Service).tax! : 0);
+      const basePrice = isProduct ? (item as Product).salePrice : (item as Service).price;
       const newItem: QuoteItem = {
         id: `qi-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         name: item.name,
         quantity: 1,
-        unitPrice: isProduct 
-          ? ((item as Product).salePrice / (1 + taxRate / 100)) 
-          : ((item as Service).price / (1 + taxRate / 100)),
+        unitPrice: Math.round(basePrice * 100) / 100,
         taxPercentage: taxRate,
         discountPercentage: 0,
         total: 0,
@@ -248,7 +249,7 @@ export default function QuotationCreateDialog({
       name,
       quantity: 1,
       unitPrice: 0,
-      taxPercentage: 18,
+      taxPercentage: 0,
       discountPercentage: 0,
       total: 0,
       serviceId: `custom-${Date.now()}`,
@@ -280,7 +281,7 @@ export default function QuotationCreateDialog({
     const sub = item.quantity * item.unitPrice;
     const disc = sub * ((item.discountPercentage || 0) / 100);
     const tax = (sub - disc) * (item.taxPercentage / 100);
-    return sub - disc + tax;
+    return Math.round((sub - disc + tax) * 100) / 100;
   };
 
   const handleUpdateItem = (itemId: string, updates: Partial<QuoteItem>) => {

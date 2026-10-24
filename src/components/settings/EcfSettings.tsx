@@ -338,7 +338,7 @@ export function EcfSettings({ tenant }: { tenant: any }) {
                         : "bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50"
                     )}
                   >
-                    {envOption === "TesteCF" ? "🧪 Pruebas" : envOption === "CerteCF" ? "📋 Certificación" : "🚀 Producción"}
+                    {envOption === "TesteCF" ? "Pruebas" : envOption === "CerteCF" ? "Certificación" : "Producción"}
                   </button>
                 ))}
               </div>

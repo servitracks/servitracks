@@ -8,14 +8,31 @@ import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Produ
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
 function dbToCustomer(row: any): Customer {
+  let notes: string | undefined = row.notes || undefined;
+  let meta: any = {};
+
+  if (notes && notes.includes("[META]:")) {
+    const [cleanNotes, rawMeta] = notes.split("[META]:");
+    notes = cleanNotes.trim() || undefined;
+    try {
+      meta = JSON.parse(rawMeta.trim());
+    } catch {
+      meta = {};
+    }
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
     name: row.name,
     phone: row.phone || "",
     email: row.email || undefined,
+    rnc: row.rnc || meta.rnc || undefined,
+    type: row.type || meta.type || undefined,
+    taxReceiptType: row.tax_receipt_type || meta.taxReceiptType || undefined,
+    businessName: row.business_name || meta.businessName || undefined,
     address: row.address || undefined,
-    notes: row.notes || undefined,
+    notes,
     tags: row.tags || [],
     birthday: row.birthday || undefined,
     createdAt: row.created_at,
@@ -23,6 +40,18 @@ function dbToCustomer(row: any): Customer {
 }
 
 function customerToDb(c: Customer) {
+  let cleanNotes = (c.notes || "").split("[META]:")[0].trim();
+  const meta: Record<string, any> = {};
+  if (c.rnc) meta.rnc = c.rnc;
+  if (c.type) meta.type = c.type;
+  if (c.taxReceiptType) meta.taxReceiptType = c.taxReceiptType;
+  if (c.businessName) meta.businessName = c.businessName;
+
+  const hasMeta = Object.keys(meta).length > 0;
+  const serializedNotes = hasMeta
+    ? `${cleanNotes ? `${cleanNotes}\n` : ""}[META]:${JSON.stringify(meta)}`
+    : cleanNotes || null;
+
   return {
     id: c.id,
     tenant_id: c.tenantId,
@@ -30,7 +59,7 @@ function customerToDb(c: Customer) {
     phone: c.phone,
     email: c.email || null,
     address: c.address || null,
-    notes: c.notes || null,
+    notes: serializedNotes,
     tags: c.tags || [],
     birthday: c.birthday || null,
   };
@@ -290,7 +319,7 @@ export async function loadInvoicesFromSupabase(tenantId: string): Promise<Invoic
 }
 
 export async function loadCajasFromSupabase(tenantId: string): Promise<Caja[]> {
-  return fetchAllRowsPaginated(
+  const rows = await fetchAllRowsPaginated(
     (from, to) =>
       supabaseAdmin
         .from("cajas")
@@ -301,6 +330,31 @@ export async function loadCajasFromSupabase(tenantId: string): Promise<Caja[]> {
         .range(from, to),
     dbToCaja
   );
+
+  // Sanear turnos antiguos que quedaron huérfanos con estado ABIERTA detrás de un turno más reciente
+  const sorted = [...rows].sort(
+    (a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime()
+  );
+  const zombieToClose: Caja[] = [];
+  const cleaned = sorted.map((c, idx) => {
+    if (idx > 0 && c.estado === "ABIERTA") {
+      const fixed: Caja = {
+        ...c,
+        estado: "CERRADA",
+        cerrada_en: c.cerrada_en || sorted[idx - 1]?.abierta_en || new Date().toISOString(),
+        notas_cierre: c.notas_cierre || "Cierre automático de turno anterior",
+      };
+      zombieToClose.push(fixed);
+      return fixed;
+    }
+    return c;
+  });
+
+  if (zombieToClose.length > 0) {
+    upsertCajas(zombieToClose).catch(() => {});
+  }
+
+  return cleaned;
 }
 
 export async function loadMovimientosCajaFromSupabase(tenantId: string): Promise<MovimientoCaja[]> {
@@ -497,12 +551,13 @@ export async function loadUsersFromSupabase(tenantId: string) {
 }
 
 export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTab[]> {
-  return fetchAllRowsPaginated(
+  const rows = await fetchAllRowsPaginated(
     (from, to) =>
       supabaseAdmin
         .from("open_tabs")
         .select("*")
         .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
         .order("id", { ascending: true })
         .range(from, to),
     (row: any) => ({
@@ -514,11 +569,67 @@ export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTa
       orderId: row.order_id,
       discount: row.discount || undefined,
       discountType: row.discount_type || undefined,
-      items: row.items,
+      items: row.items || [],
       createdAt: row.created_at,
       updatedAt: row.updated_at
     })
   );
+
+  // Ordenar de más reciente a más antigua para conservar siempre la versión más actual y eliminar duplicadas
+  const sorted = [...rows].sort(
+    (a, b) =>
+      new Date(b.updatedAt || b.createdAt || 0).getTime() -
+      new Date(a.updatedAt || a.createdAt || 0).getTime()
+  );
+
+  const seenIds = new Set<string>();
+  const seenOrderIds = new Set<string>();
+  const seenCustomerIds = new Set<string>();
+  const seenCustomerNames = new Set<string>();
+  const deduped: OpenTab[] = [];
+  const duplicateIdsToDelete: string[] = [];
+
+  for (const tab of sorted) {
+    if (!tab.id || seenIds.has(tab.id)) continue;
+    seenIds.add(tab.id);
+
+    const orderKey = tab.orderId?.trim();
+    const custIdKey =
+      tab.customerId && tab.customerId !== "walk-in" && tab.customerId !== "none"
+        ? tab.customerId.trim()
+        : "";
+    const custNameKey =
+      tab.tabName && tab.tabName.trim().toLowerCase() !== "consumidor final"
+        ? tab.tabName.trim().toLowerCase()
+        : "";
+
+    let isDuplicate = false;
+    if (orderKey && seenOrderIds.has(orderKey)) {
+      isDuplicate = true;
+    } else if (custIdKey && seenCustomerIds.has(custIdKey)) {
+      isDuplicate = true;
+    } else if (custNameKey && seenCustomerNames.has(custNameKey)) {
+      isDuplicate = true;
+    }
+
+    if (isDuplicate) {
+      duplicateIdsToDelete.push(tab.id);
+      continue;
+    }
+
+    if (orderKey) seenOrderIds.add(orderKey);
+    if (custIdKey) seenCustomerIds.add(custIdKey);
+    if (custNameKey) seenCustomerNames.add(custNameKey);
+    deduped.push(tab);
+  }
+
+  if (duplicateIdsToDelete.length > 0) {
+    duplicateIdsToDelete.forEach((dupId) => {
+      deleteRecordFromSupabase("open_tabs", dupId).catch(() => {});
+    });
+  }
+
+  return deduped;
 }
 
 export async function loadInventorySessionsFromSupabase(tenantId: string): Promise<InventorySession[]> {
@@ -611,10 +722,28 @@ function movimientoCajaToDb(m: MovimientoCaja) {
 }
 
 function dbToTechnician(row: any): Technician {
-  return { id: row.id, tenantId: row.tenant_id, name: row.name, phone: row.phone, status: row.status, pagoNomina: row.pago_nomina, tipoPago: row.tipo_pago, createdAt: row.created_at };
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    name: row.name,
+    phone: row.phone || undefined,
+    status: row.status === "inactive" ? "inactive" : "active",
+    pagoNomina: row.pago_nomina != null ? Number(row.pago_nomina) || 0 : 0,
+    tipoPago: row.tipo_pago === "fijo" ? "fijo" : "porcentaje",
+    createdAt: row.created_at || new Date().toISOString(),
+  };
 }
 function technicianToDb(t: Technician) {
-  return { id: t.id, tenant_id: t.tenantId, name: t.name, phone: t.phone, status: t.status, pago_nomina: t.pagoNomina, tipo_pago: t.tipoPago, created_at: t.createdAt };
+  return {
+    id: t.id,
+    tenant_id: t.tenantId,
+    name: t.name,
+    phone: t.phone || null,
+    status: t.status || "active",
+    pago_nomina: Number(t.pagoNomina || 0),
+    tipo_pago: t.tipoPago === "fijo" ? "fijo" : "porcentaje",
+    created_at: t.createdAt || new Date().toISOString(),
+  };
 }
 
 function dbToInventoryMovement(row: any): InventoryMovement {
@@ -852,22 +981,46 @@ function productToDb(p: Product) {
 }
 
 function dbToWorkOrder(row: any): WorkOrder {
+  let notes: string | undefined = row.notes || undefined;
+  let meta: any = {};
+
+  if (notes && notes.includes("[META]:")) {
+    const [cleanNotes, rawMeta] = notes.split("[META]:");
+    notes = cleanNotes.trim() || undefined;
+    try {
+      meta = JSON.parse(rawMeta.trim());
+    } catch {
+      meta = {};
+    }
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    customerId: row.customer_id,
-    vehicleId: row.vehicle_id,
+    customerId: row.customer_id || meta.rawCustomerId || "",
+    vehicleId: row.vehicle_id || meta.rawVehicleId || "",
     mechanicId: row.mechanic_id || undefined,
     km: row.km || undefined,
     kmUnit: row.km_unit || undefined,
     status: row.status,
     description: row.description,
     serviceIds: row.service_ids || undefined,
+    customServices: row.custom_services || meta.customServices || undefined,
     parts: row.parts || undefined,
+    customParts: row.custom_parts || meta.customParts || undefined,
     estimatedTime: row.estimated_time || undefined,
-    notes: row.notes || undefined,
+    notes,
     checklist: row.checklist || undefined,
-    total: row.total,
+    customerType: row.customer_type || meta.customerType || undefined,
+    ncfType: row.ncf_type || meta.ncfType || undefined,
+    customerRnc: row.customer_rnc || meta.customerRnc || undefined,
+    customerBusinessName: row.customer_business_name || meta.customerBusinessName || undefined,
+    quoteId: row.quote_id || meta.quoteId || undefined,
+    items: row.items || meta.items || undefined,
+    subtotal: row.subtotal != null ? Number(row.subtotal) : (meta.subtotal != null ? Number(meta.subtotal) : undefined),
+    tax: row.tax != null ? Number(row.tax) : (meta.tax != null ? Number(meta.tax) : undefined),
+    applyItbis: typeof row.apply_itbis === "boolean" ? row.apply_itbis : (typeof meta.applyItbis === "boolean" ? meta.applyItbis : undefined),
+    total: Number(row.total) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -876,6 +1029,27 @@ function dbToWorkOrder(row: any): WorkOrder {
 function workOrderToDb(o: WorkOrder) {
   const isValidUuid = (val?: string | null) =>
     Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  let cleanNotes = (o.notes || "").split("[META]:")[0].trim();
+  const meta: Record<string, any> = {};
+  if (o.customerType) meta.customerType = o.customerType;
+  if (o.ncfType) meta.ncfType = o.ncfType;
+  if (o.customerRnc) meta.customerRnc = o.customerRnc;
+  if (o.customerBusinessName) meta.customerBusinessName = o.customerBusinessName;
+  if (o.customServices && o.customServices.length > 0) meta.customServices = o.customServices;
+  if (o.customParts && o.customParts.length > 0) meta.customParts = o.customParts;
+  if (o.quoteId) meta.quoteId = o.quoteId;
+  if (o.items && o.items.length > 0) meta.items = o.items;
+  if (typeof o.applyItbis === "boolean") meta.applyItbis = o.applyItbis;
+  if (typeof o.subtotal === "number") meta.subtotal = o.subtotal;
+  if (typeof o.tax === "number") meta.tax = o.tax;
+  if (o.customerId && !isValidUuid(o.customerId)) meta.rawCustomerId = o.customerId;
+  if (o.vehicleId && !isValidUuid(o.vehicleId)) meta.rawVehicleId = o.vehicleId;
+
+  const hasMeta = Object.keys(meta).length > 0;
+  const serializedNotes = hasMeta
+    ? `${cleanNotes ? `${cleanNotes}\n` : ""}[META]:${JSON.stringify(meta)}`
+    : cleanNotes || null;
 
   return {
     id: o.id,
@@ -890,7 +1064,7 @@ function workOrderToDb(o: WorkOrder) {
     service_ids: o.serviceIds || [],
     parts: o.parts || [],
     estimated_time: o.estimatedTime || null,
-    notes: o.notes || null,
+    notes: serializedNotes,
     checklist: o.checklist || [],
     total: o.total || 0,
     created_at: o.createdAt,
@@ -901,6 +1075,17 @@ function workOrderToDb(o: WorkOrder) {
 function dbToQuote(row: any): Quote {
   let notes: string | undefined = row.notes || undefined;
   let observation: string | undefined = undefined;
+  let meta: any = {};
+
+  if (notes && notes.includes("[META]:")) {
+    const [beforeMeta, rawMeta] = notes.split("[META]:");
+    notes = beforeMeta.trim() || undefined;
+    try {
+      meta = JSON.parse(rawMeta.trim());
+    } catch {
+      meta = {};
+    }
+  }
 
   if (notes && notes.includes("[OBS]:")) {
     const parts = notes.split("[OBS]:");
@@ -911,15 +1096,15 @@ function dbToQuote(row: any): Quote {
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    customerId: row.customer_id || "",
-    vehicleId: row.vehicle_id || "",
+    customerId: row.customer_id || meta.rawCustomerId || "",
+    vehicleId: row.vehicle_id || meta.rawVehicleId || "",
     quoteNumber: row.quote_number,
     status: row.status,
     validUntil: row.valid_until || undefined,
-    subtotal: row.subtotal,
-    tax: row.tax,
-    discount: row.discount || undefined,
-    total: row.total,
+    subtotal: Number(row.subtotal) || 0,
+    tax: Number(row.tax) || 0,
+    discount: row.discount ? Number(row.discount) : undefined,
+    total: Number(row.total) || 0,
     notes,
     observation,
     items: row.items || [],
@@ -932,9 +1117,18 @@ function quoteToDb(q: Quote) {
   const isValidUuid = (val?: string | null) =>
     Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
-  let combinedNotes = q.notes || "";
+  let cleanNotes = (q.notes || "").split("[META]:")[0].split("[OBS]:")[0].trim();
+  let combinedNotes = cleanNotes;
   if (q.observation) {
     combinedNotes = combinedNotes ? `${combinedNotes}\n[OBS]: ${q.observation}` : `[OBS]: ${q.observation}`;
+  }
+
+  const meta: Record<string, any> = {};
+  if (q.customerId && !isValidUuid(q.customerId)) meta.rawCustomerId = q.customerId;
+  if (q.vehicleId && !isValidUuid(q.vehicleId)) meta.rawVehicleId = q.vehicleId;
+
+  if (Object.keys(meta).length > 0) {
+    combinedNotes = combinedNotes ? `${combinedNotes}\n[META]:${JSON.stringify(meta)}` : `[META]:${JSON.stringify(meta)}`;
   }
 
   return {
@@ -1175,6 +1369,8 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     mechanic_id: t.mechanicId,
     order_id: t.orderId || null,
     items: t.items,
+    discount: t.discount || 0,
+    discount_type: t.discountType || "fixed",
     created_at: t.createdAt,
     updated_at: t.updatedAt
   }));

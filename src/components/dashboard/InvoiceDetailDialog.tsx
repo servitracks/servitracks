@@ -1,15 +1,16 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useStore, Invoice } from "@/store/useStore";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Printer, FileText } from "lucide-react";
+import { Printer, FileText, Receipt, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Ticket, translatePaymentMethod } from "@/components/pos/Ticket";
 import { useParams } from "@/lib/next-compat";
 import { printThermalDocument } from "@/lib/thermalPrint";
+import { toast } from "sonner";
 
 interface InvoiceDetailDialogProps {
   open: boolean;
@@ -20,21 +21,34 @@ interface InvoiceDetailDialogProps {
 
 export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDialogProps) {
   const { tenant } = useParams();
-  const { customers, tenants, printSettings } = useStore();
+  const { customers, tenants, printSettings, vehicles } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const printRef = useRef<HTMLDivElement>(null);
 
+  const [paperFormat, setPaperFormat] = useState<"80mm" | "A4">(() =>
+    printSettings?.paperSize === "A4" ? "A4" : "80mm"
+  );
+
+  useEffect(() => {
+    if (printSettings?.paperSize === "A4") {
+      setPaperFormat("A4");
+    } else {
+      setPaperFormat("80mm");
+    }
+  }, [printSettings?.paperSize]);
+
   if (!invoice) return null;
 
   const customer = customers.find((c) => c.id === invoice.customerId);
+  const vehicle = vehicles.find((v) => v.id === (invoice as any).vehicleId);
 
   const handlePrint = () => {
     if (!printRef.current) return;
     printThermalDocument({
       element: printRef.current,
       title: `Factura_${invoice.id}`,
-      paperSize: (printSettings.paperSize as any) || "80mm",
+      paperSize: paperFormat,
     });
   };
 
@@ -43,170 +57,345 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
     invoice.status === "pending" ? "PENDIENTE" : "ANULADA";
 
   const statusBadgeClass =
-    invoice.status === "paid" ? "bg-emerald-100 text-emerald-800" :
-    invoice.status === "pending" ? "bg-amber-100 text-amber-800" :
-    "bg-rose-100 text-rose-800";
+    invoice.status === "paid" ? "bg-emerald-50 text-emerald-700 border-emerald-200/80" :
+    invoice.status === "pending" ? "bg-amber-50 text-amber-700 border-amber-200/80" :
+    "bg-rose-50 text-rose-700 border-rose-200/80";
+
+  let parsedMeta: {
+    condicionCobro?: string;
+    instrumentoPago?: string;
+    referencia?: string;
+    desgloseMixto?: {
+      efectivo?: number;
+      efectivoRecibido?: number;
+      cambioEfectivo?: number;
+      tarjeta?: number;
+      transferencia?: number;
+      tarjetaRef?: string;
+      transferenciaRef?: string;
+    };
+  } | null = null;
+  let cleanNotesText: string | null = invoice.notes || null;
+
+  if (invoice.notes && invoice.notes.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(invoice.notes);
+      if (parsed && typeof parsed === "object" && ("condicionCobro" in parsed || "instrumentoPago" in parsed)) {
+        parsedMeta = parsed;
+        cleanNotesText = null;
+      }
+    } catch {
+      // Conservar texto plano
+    }
+  }
+
+  const methodLabel =
+    parsedMeta?.instrumentoPago === "MIXTO"
+      ? "PAGO MIXTO"
+      : translatePaymentMethod(parsedMeta?.instrumentoPago || invoice.paymentMethod);
+
+  // WhatsApp share
+  const handleShareWhatsApp = () => {
+    const phone = customer?.phone;
+    if (!phone) {
+      toast.error("El cliente no tiene un número de teléfono registrado");
+      return;
+    }
+
+    let itemsText = "";
+    (invoice.items || []).forEach((item) => {
+      const lineTotal = (item as any).total || (item.unitPrice || 0) * (item.quantity || 1);
+      itemsText += `• ${item.quantity || 1}x ${item.name} - RD$ ${Number(lineTotal).toLocaleString("es-DO")}\n`;
+    });
+
+    const ncfText = invoice.ncf ? `*NCF:* ${invoice.ncf}\n` : "";
+
+    const message =
+      `*${taller.name || "ServiTracks"} - Comprobante de Pago*\n\n` +
+      `Estimado(a) *${customer?.name || "Cliente"}*,\n` +
+      `Le compartimos el comprobante de su factura *#${invoice.id.slice(-6).toUpperCase()}*.\n\n` +
+      ncfText +
+      `*Detalles del servicio/compra:*\n` +
+      `${itemsText}\n` +
+      `*Subtotal:* RD$ ${(invoice.subtotal || 0).toLocaleString("es-DO")}\n` +
+      (invoice.tax ? `*ITBIS:* RD$ ${invoice.tax.toLocaleString("es-DO")}\n` : "") +
+      (invoice.discount ? `*Descuento:* - RD$ ${invoice.discount.toLocaleString("es-DO")}\n` : "") +
+      `*Total:* RD$ ${(invoice.total || 0).toLocaleString("es-DO")}\n\n` +
+      `*Método de pago:* ${methodLabel}\n` +
+      `¡Gracias por preferir nuestros servicios!`;
+
+    const encodedText = encodeURIComponent(message);
+    const cleanPhone = phone.replace(/\D/g, "");
+    const formattedPhone = cleanPhone.length === 10 ? `1${cleanPhone}` : cleanPhone;
+    window.open(`https://wa.me/${formattedPhone}?text=${encodedText}`, "_blank");
+  };
+
+  const modalWidth = paperFormat === "A4" ? "sm:max-w-4xl" : "sm:max-w-[460px]";
 
   return (
     <>
-      {/* Contenedor de impresión oculto para Ticket Térmico con altura auto-ajustable */}
-      <div ref={printRef} style={{ display: "none" }} aria-hidden="true">
-        <Ticket 
-           invoiceId={invoice.id}
-           ncf={invoice.ncf}
-           qrUrl={invoice.qrUrl}
-           securityCode={invoice.securityCode}
-           signatureDate={invoice.signatureDate}
-           createdAt={invoice.createdAt}
-           tenant={taller}
-           customer={customer}
-           items={invoice.items || []}
-           subtotal={invoice.subtotal}
-           itbis={invoice.tax}
-           total={invoice.total}
-           payMethod={invoice.paymentMethod}
-           notes={invoice.notes}
-        />
-      </div>
+      <style>{`
+        .receipt-scroll-container::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-track {
+          background: #f1f5f9;
+          border-radius: 9999px;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 9999px;
+          border: 2px solid #f1f5f9;
+        }
+        .receipt-scroll-container::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+      `}</style>
 
-      {/* Modal de Consulta y Detalle de Factura (SOLO LECTURA) */}
       <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-        <DialogContent className="sm:max-w-md rounded-2xl border border-neutral-200 shadow-2xl p-5 sm:p-6 flex flex-col max-h-[calc(100dvh-4rem)] overflow-hidden bg-white">
-          <DialogHeader className="pb-3 border-b border-neutral-100 flex flex-row items-center justify-between shrink-0">
-            <DialogTitle className="flex items-center gap-2.5 text-base sm:text-lg font-bold tracking-tight text-neutral-900">
-              <div className="h-8 w-8 rounded-xl bg-neutral-950 text-white flex items-center justify-center shrink-0">
-                <FileText className="h-4 w-4" />
+        <DialogContent
+          className={cn(
+            modalWidth,
+            "w-[96vw] sm:w-full rounded-3xl p-0 bg-white overflow-hidden h-[86vh] max-h-[88vh] flex flex-col shadow-2xl transition-all duration-200 border border-neutral-200/80"
+          )}
+        >
+          {/* 1. Header Bar: Compacto y limpio (sin colisiones con el botón de cerrar) */}
+          <div className="bg-neutral-50/90 px-5 py-3 border-b border-neutral-100 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0 pr-10">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-neutral-900 text-white font-mono text-xs font-bold shrink-0">
+                <Receipt className="h-4 w-4" />
               </div>
-              <span>Detalle de Factura</span>
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-3 overflow-y-auto flex-1 pr-1">
-            {/* Visual Receipt Card */}
-            <div className="bg-neutral-50 rounded-2xl border border-neutral-200/80 p-4 font-mono text-xs leading-relaxed space-y-2 relative overflow-hidden">
-              <div className="absolute right-3.5 top-3.5">
-                <Badge className={cn("border-none text-[10px] uppercase font-black tracking-wider px-2.5 py-0.5 rounded-full shadow-2xs", statusBadgeClass)}>
-                  {statusLabel}
-                </Badge>
-              </div>
-
-              <div className="text-center space-y-0.5 mb-2 mt-2">
-                {taller.logo && (
-                  <div className="flex justify-center mb-1.5">
-                    <img src={taller.logo} alt="Logo" className="h-10 w-auto max-w-[120px] object-contain filter grayscale contrast-125" />
-                  </div>
-                )}
-                <div className="font-bold text-sm text-neutral-900 uppercase tracking-tight">{taller.name}</div>
-                {taller.address && <div className="text-[10px] text-neutral-500">{taller.address}</div>}
-                {taller.phone && <div className="text-[10px] text-neutral-500">Tel: {taller.phone}</div>}
-                {taller.rnc && <div className="text-[10px] text-neutral-500 font-semibold">RNC: {taller.rnc}</div>}
-              </div>
-
-              <div className="border-t border-dashed border-neutral-200 my-2.5" />
-
-              <div className="flex justify-between">
-                <span className="text-neutral-500">Factura:</span>
-                <span className="font-bold text-neutral-800 font-mono">#{invoice.id.slice(-6).toUpperCase()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-500">Cliente:</span>
-                <span className="font-bold text-neutral-800">{customer?.name || invoice.customerName || "Cliente General"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-500">Fecha:</span>
-                <span className="text-neutral-700">
-                  {new Date(invoice.createdAt).toLocaleDateString("es-DO")} {new Date(invoice.createdAt).toLocaleTimeString("es-DO", { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-              {invoice.ncf && (
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">NCF:</span>
-                  <span className="font-bold text-neutral-900 font-mono">{invoice.ncf}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-neutral-900 tracking-tight text-sm">
+                    {invoice.ncf || `#${invoice.id.slice(-6).toUpperCase()}`}
+                  </span>
+                  <span
+                    className={cn(
+                      "text-[10px] font-bold border rounded-full px-2 py-0.5",
+                      statusBadgeClass
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
                 </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-neutral-500">Método de pago:</span>
-                <span className="font-bold text-neutral-900 uppercase">{translatePaymentMethod(invoice.paymentMethod)}</span>
-              </div>
-
-              <div className="border-t border-dashed border-neutral-200 my-2.5" />
-
-              {/* Items List (READ-ONLY) */}
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {(invoice.items || []).map((item, idx) => {
-                  const qty = item.quantity || 1;
-                  const price = item.unitPrice || (item as any).salePrice || 0;
-                  const itemTotal = qty * price;
-                  return (
-                    <div key={item.id || idx} className="grid grid-cols-[28px_1fr_auto_minmax(55px,auto)] gap-1 text-[11px] items-center py-0.5 border-b border-neutral-100 last:border-none">
-                      <span className="text-neutral-500 font-medium">{qty}x</span>
-                      <span className="text-neutral-800 font-semibold truncate pr-2">{item.name}</span>
-                      <span className="text-neutral-400 text-right font-medium">RD$</span>
-                      <span className="font-bold text-neutral-900 text-right">
-                        {itemTotal.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="border-t border-dashed border-neutral-200 my-2.5" />
-
-              {/* Totales */}
-              <div className="space-y-1 text-[11px]">
-                <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 text-neutral-600 items-center">
-                  <span>Subtotal</span>
-                  <span className="text-neutral-400 text-right">RD$</span>
-                  <span className="text-right font-medium">{(invoice.subtotal || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                {(invoice.tax || 0) > 0 && (
-                  <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 text-neutral-600 items-center">
-                    <span>ITBIS (18%)</span>
-                    <span className="text-neutral-400 text-right">RD$</span>
-                    <span className="text-right font-medium">{(invoice.tax || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
+                {customer?.name && (
+                  <p className="text-[11px] text-neutral-500 truncate mt-0.5" title={customer.name}>
+                    {customer.name}
+                  </p>
                 )}
-                {(invoice.discount || 0) > 0 && (
-                  <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 text-emerald-700 items-center font-bold">
-                    <span>Descuento</span>
-                    <span className="text-neutral-400 text-right">RD$</span>
-                    <span className="text-right">-{(invoice.discount || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="grid grid-cols-[1fr_auto_minmax(55px,auto)] gap-1 font-black text-sm text-neutral-900 border-t border-dashed border-neutral-200 pt-2.5 mt-2.5 items-center">
-                <span className="tracking-tight uppercase">Total Pagado</span>
-                <span className="text-neutral-400 text-xs font-bold text-right">RD$</span>
-                <span className="text-right text-base">{(invoice.total || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               </div>
             </div>
-
-            {invoice.notes && (
-              <div className="text-xs text-neutral-600 bg-neutral-50 p-2.5 rounded-xl border border-neutral-200/60">
-                <span className="font-bold text-neutral-700 block text-[10px] uppercase tracking-wider mb-0.5">Notas:</span>
-                <p className="italic text-neutral-600">{invoice.notes}</p>
-              </div>
-            )}
           </div>
 
-          <DialogFooter className="gap-2 border-t border-neutral-100 pt-3 mt-1 shrink-0 flex flex-row">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handlePrint}
-              className="rounded-xl flex-1 h-10 font-bold text-neutral-800 border-neutral-200 hover:bg-neutral-50 gap-2 text-xs cursor-pointer shadow-2xs"
+          {/* 2. Área Central: Visualización Centrada y Nítida del Ticket */}
+          <div
+            className="receipt-scroll-container bg-neutral-100/90 p-3 sm:p-5 overflow-y-auto flex-1 min-h-0 flex justify-center items-start scroll-smooth"
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "#cbd5e1 #f1f5f9",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
+            <div
+              ref={printRef}
+              className={cn(
+                "print-container bg-white shadow-xl rounded-xl transition-all duration-200 my-1 pb-4 self-start",
+                paperFormat === "A4" ? "w-full max-w-[850px] p-4 sm:p-6" : "w-auto"
+              )}
             >
-              <Printer className="h-4 w-4" /> Imprimir Recibo
-            </Button>
-            <Button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl flex-1 h-10 font-bold bg-neutral-950 text-white hover:bg-neutral-800 text-xs cursor-pointer shadow-2xs"
-            >
-              Cerrar
-            </Button>
-          </DialogFooter>
+              <Ticket
+                invoiceId={invoice.id}
+                ncf={invoice.ncf}
+                qrUrl={invoice.qrUrl}
+                securityCode={invoice.securityCode}
+                signatureDate={invoice.signatureDate}
+                createdAt={invoice.createdAt}
+                tenant={{
+                  nombre: taller.name,
+                  name: taller.name,
+                  logo: taller.logo,
+                  logo_url: taller.logo,
+                  direccion: taller.address,
+                  address: taller.address,
+                  telefono: taller.phone,
+                  phone: taller.phone,
+                  rnc: taller.rnc,
+                }}
+                customer={
+                  customer
+                    ? {
+                        nombre: customer.name,
+                        name: customer.name,
+                        telefono: customer.phone,
+                        phone: customer.phone,
+                        rnc: customer.rnc,
+                        cedula: customer.rnc,
+                        direccion: customer.address,
+                        address: customer.address,
+                      }
+                    : invoice.customerName
+                    ? {
+                        nombre: invoice.customerName,
+                        name: invoice.customerName,
+                        rnc: invoice.customerRnc,
+                        cedula: invoice.customerRnc,
+                      }
+                    : undefined
+                }
+                cliente={
+                  customer
+                    ? {
+                        nombre: customer.name,
+                        telefono: customer.phone,
+                        phone: customer.phone,
+                        rnc: customer.rnc,
+                        cedula: customer.rnc,
+                        direccion: customer.address,
+                      }
+                    : undefined
+                }
+                vehicle={
+                  vehicle
+                    ? {
+                        brand: vehicle.brand,
+                        model: vehicle.model,
+                        year: vehicle.year,
+                        plate: vehicle.plate,
+                        color: vehicle.color,
+                        km: vehicle.km,
+                      }
+                    : undefined
+                }
+                items={(invoice.items || []).map((i) => {
+                  const qty = i.quantity || 1;
+                  const price = i.unitPrice || (i as any).salePrice || 0;
+                  const lineTax = i.tax || 0;
+                  return {
+                    id: i.id,
+                    name: i.name,
+                    descripcion: i.name,
+                    quantity: qty,
+                    cantidad: qty,
+                    unitPrice: price,
+                    precio_unitario: price,
+                    salePrice: price,
+                    tax: lineTax,
+                    is_exento: lineTax === 0,
+                    total: (i as any).total || qty * price,
+                  };
+                })}
+                subtotal={invoice.subtotal}
+                itbis={invoice.tax}
+                discount={invoice.discount}
+                total={invoice.total}
+                payMethod={invoice.paymentMethod}
+                notes={cleanNotesText || undefined}
+                formato={paperFormat}
+                orden={{
+                  numero: invoice.ncf || invoice.id,
+                  creado_en: invoice.createdAt,
+                  subtotal: invoice.subtotal,
+                  itbis: invoice.tax,
+                  descuento: invoice.discount || 0,
+                  total: invoice.total,
+                  saldo: 0,
+                  pagado: invoice.total,
+                  metodo_pago: invoice.paymentMethod,
+                  pago_referencia: parsedMeta?.referencia,
+                  notas: cleanNotesText || undefined,
+                  items: (invoice.items || []).map((i) => {
+                    const qty = i.quantity || 1;
+                    const price = i.unitPrice || (i as any).salePrice || 0;
+                    const lineTax = i.tax || 0;
+                    return {
+                      id: i.id,
+                      name: i.name,
+                      descripcion: i.name,
+                      quantity: qty,
+                      cantidad: qty,
+                      unitPrice: price,
+                      precio_unitario: price,
+                      salePrice: price,
+                      tax: lineTax,
+                      is_exento: lineTax === 0,
+                      total: (i as any).total || qty * price,
+                    };
+                  }),
+                }}
+              />
+            </div>
+          </div>
+
+          {/* 3. Footer de Controles CENTRADOS y Compactos */}
+          <div className="bg-white p-3 sm:px-5 border-t border-neutral-100 flex flex-col items-center justify-center gap-2.5 shrink-0">
+            {/* Selector de formato CENTRADO */}
+            <div className="flex items-center justify-center p-0.5 bg-neutral-100/90 rounded-xl border border-neutral-200/80">
+              <button
+                type="button"
+                onClick={() => setPaperFormat("80mm")}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                  paperFormat === "80mm"
+                    ? "bg-white text-neutral-900 shadow-xs"
+                    : "text-neutral-500 hover:text-neutral-900"
+                )}
+              >
+                <Receipt className="h-3.5 w-3.5" />
+                <span>Ticket 80mm</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaperFormat("A4")}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                  paperFormat === "A4"
+                    ? "bg-white text-neutral-900 shadow-xs"
+                    : "text-neutral-500 hover:text-neutral-900"
+                )}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                <span>Hoja A4</span>
+              </button>
+            </div>
+
+            {/* Botones de Acción CENTRADOS con Fondos de Color */}
+            <div className="flex items-center justify-center gap-2 w-full">
+              {customer?.phone && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleShareWhatsApp}
+                  className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300 cursor-pointer h-9 px-3.5 text-xs font-semibold gap-1.5 shadow-2xs transition-all"
+                  title="Compartir por WhatsApp"
+                >
+                  <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>WhatsApp</span>
+                </Button>
+              )}
+
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handlePrint}
+                className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 font-semibold cursor-pointer h-9 px-4 text-xs gap-1.5 shadow-xs active:scale-[0.98] transition-all"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Imprimir ({paperFormat === "A4" ? "A4" : "80mm"})</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                className="rounded-xl border border-neutral-200 bg-neutral-100 text-neutral-700 hover:bg-neutral-200 cursor-pointer h-9 px-3.5 text-xs font-semibold shadow-2xs transition-all"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </>

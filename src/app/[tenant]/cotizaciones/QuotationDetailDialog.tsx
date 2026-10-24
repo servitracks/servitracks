@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useRef, useEffect } from "react";
 import { useStore, Customer, Vehicle, Product, Service } from "@/store/useStore";
-import { X, Send, Printer, FileText, Check, Ban, ShoppingCart, RefreshCw, MessageSquare, Archive } from "lucide-react";
+import { X, Send, Printer, FileText, Check, Ban, ShoppingCart, RefreshCw, MessageSquare, Archive, Receipt } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -102,7 +102,7 @@ export default function QuotationDetailDialog({
   // Convert Quote to Work Order
   const handleConvertToOrder = (shouldRedirectToPos = false) => {
     try {
-      const orderId = `o-cot-${Date.now()}`;
+      const orderId = crypto.randomUUID();
       
       // Separate service IDs and products
       const serviceIds = quote.items
@@ -113,7 +113,7 @@ export default function QuotationDetailDialog({
         .filter((i) => i.serviceId && i.serviceId.startsWith('custom-'))
         .map((i) => ({ 
           name: i.name, 
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 0) / 100), 
+          price: i.unitPrice, 
           tax: i.taxPercentage ?? 0 
         }));
 
@@ -121,7 +121,7 @@ export default function QuotationDetailDialog({
         .filter((i) => !i.productId && (!i.serviceId || !i.serviceId.startsWith('custom-')))
         .map((i) => ({ 
           name: i.name, 
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100), 
+          price: i.unitPrice, 
           quantity: i.quantity, 
           tax: i.taxPercentage ?? 18 
         }));
@@ -131,7 +131,7 @@ export default function QuotationDetailDialog({
         .map((i) => ({
           productId: i.productId!.trim(),
           name: i.name,
-          price: i.unitPrice * (1 + (i.taxPercentage ?? 18) / 100),
+          price: i.unitPrice,
           quantity: i.quantity,
           tax: i.taxPercentage ?? 18,
         }));
@@ -159,6 +159,9 @@ export default function QuotationDetailDialog({
         customServices: customServices.length > 0 ? customServices : undefined,
         customParts: customParts.length > 0 ? customParts : undefined,
         parts: parts,
+        subtotal: quote.subtotal,
+        tax: quote.tax,
+        applyItbis: (quote.tax || 0) > 0,
         total: quote.total,
         notes: quote.notes ? `Notas de cotización: ${quote.notes}` : undefined,
         checklist: [],
@@ -241,155 +244,88 @@ export default function QuotationDetailDialog({
     });
   };
 
-  const modalWidth = paperFormat === "A4" ? "sm:max-w-4xl" : "sm:max-w-2xl";
+  const modalWidth = paperFormat === "A4" ? "sm:max-w-4xl" : "sm:max-w-[500px]";
 
   return (
     <>
       <style>{`
         .receipt-scroll-container::-webkit-scrollbar {
-          width: 8px;
-          height: 8px;
+          width: 6px;
+          height: 6px;
         }
         .receipt-scroll-container::-webkit-scrollbar-track {
           background: #f1f5f9;
           border-radius: 9999px;
         }
         .receipt-scroll-container::-webkit-scrollbar-thumb {
-          background: #94a3b8;
+          background: #cbd5e1;
           border-radius: 9999px;
           border: 2px solid #f1f5f9;
         }
         .receipt-scroll-container::-webkit-scrollbar-thumb:hover {
-          background: #64748b;
+          background: #94a3b8;
         }
       `}</style>
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-        <DialogContent className={cn(modalWidth, "w-[96vw] sm:w-full rounded-2xl p-0 bg-white overflow-hidden h-[92vh] max-h-[92vh] flex flex-col shadow-2xl transition-all duration-200")}>
+        <DialogContent className={cn(modalWidth, "w-[96vw] sm:w-full rounded-3xl p-0 bg-white overflow-hidden h-[86vh] max-h-[88vh] flex flex-col shadow-2xl transition-all duration-200 border border-neutral-200/80")}>
           
           {/* Actions Header bar */}
-          <div className="bg-neutral-50 px-6 py-3.5 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="font-black text-neutral-900 tracking-tight">{quote.quoteNumber}</span>
-              <Badge className={cn("text-xs font-bold border rounded-full px-2.5 py-0.5", statusColors[quote.status])}>
-                {statusLabels[quote.status]}
-              </Badge>
-              {customer && (
-                <>
-                  <div className="h-4 w-px bg-neutral-200 mx-1 hidden sm:block" />
-                  <span className="text-sm font-semibold text-neutral-600 truncate max-w-[200px] hidden sm:inline" title={customer.name}>
-                    {customer.name}
+          <div className="bg-neutral-50/90 px-6 py-4 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-900 text-white font-mono text-xs font-bold shrink-0">
+                <FileText className="h-4.5 w-4.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-neutral-900 tracking-tight text-base sm:text-lg">
+                    {quote.quoteNumber}
                   </span>
-                </>
-              )}
+                  <Badge className={cn("text-[10px] font-bold border rounded-full px-2.5 py-0.5", statusColors[quote.status])}>
+                    {statusLabels[quote.status]}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-500 mt-0.5">
+                  <span className="font-medium text-neutral-700">
+                    {customer?.name || "Cliente General"}
+                  </span>
+                  {vehicle && (
+                    <>
+                      <span>·</span>
+                      <span className="font-semibold text-neutral-800">
+                        {vehicle.brand} {vehicle.model}
+                      </span>
+                      <div className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-md bg-neutral-100 border border-neutral-300 font-mono shadow-2xs text-[10px]">
+                        <span className="text-[8px] font-bold text-neutral-400">RD</span>
+                        <span className="font-black text-neutral-900">{vehicle.plate.toUpperCase()}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Selector de formato: 80mm vs A4 */}
-              <div className="flex items-center bg-neutral-200/70 p-0.5 rounded-lg text-xs font-bold">
-                <button
-                  type="button"
-                  onClick={() => setPaperFormat("80mm")}
-                  className={cn(
-                    "px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs",
-                    paperFormat === "80mm" 
-                      ? "bg-white text-neutral-900 shadow-xs font-black" 
-                      : "text-neutral-600 hover:text-neutral-900"
-                  )}
-                  title="Formato Ticket POS (80mm)"
-                >
-                  <span>🧾 Ticket 80mm</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaperFormat("A4")}
-                  className={cn(
-                    "px-2.5 py-1 rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-xs",
-                    paperFormat === "A4" 
-                      ? "bg-white text-neutral-900 shadow-xs font-black" 
-                      : "text-neutral-600 hover:text-neutral-900"
-                  )}
-                  title="Formato Hoja A4"
-                >
-                  <span>📄 Hoja A4</span>
-                </button>
-              </div>
-
-              <div className="h-4 w-px bg-neutral-200 mx-1 hidden sm:block" />
-
-              {quote.status === "draft" && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 font-bold cursor-pointer"
-                    onClick={() => handleUpdateStatus("rejected")}
-                  >
-                    <Ban className="h-3 w-3 mr-1" /> Rechazar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs text-emerald-600 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 font-bold cursor-pointer"
-                    onClick={() => handleUpdateStatus("accepted")}
-                  >
-                    <Check className="h-3 w-3 mr-1" /> Aprobar
-                  </Button>
-                </>
-              )}
-              {quote.status === "accepted" && (
+            <div className="mr-8 flex items-center gap-2 shrink-0">
+              {quote.status !== "archived" ? (
                 <Button
-                  variant="outline"
+                  type="button"
                   size="sm"
-                  className="h-8 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700 font-bold cursor-pointer"
-                  onClick={() => handleConvertToOrder(true)}
-                >
-                  <ShoppingCart className="h-3.5 w-3.5 mr-1" /> Facturar / Orden
-                </Button>
-              )}
-              {quote.status !== "archived" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs text-purple-700 border-purple-200 bg-purple-50 hover:bg-purple-100 font-bold cursor-pointer"
                   onClick={handleOpenArchiveModal}
+                  className="h-8 px-3 rounded-xl border border-purple-200/90 bg-purple-50 hover:bg-purple-100 text-purple-800 text-xs font-semibold gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
                 >
-                  <Archive className="h-3.5 w-3.5 mr-1" /> Archivar
+                  <Archive className="h-3.5 w-3.5 text-purple-600" />
+                  <span>Archivar</span>
                 </Button>
-              )}
-              {quote.status === "archived" && (
+              ) : (
                 <Button
-                  variant="outline"
+                  type="button"
                   size="sm"
-                  className="h-8 text-xs text-neutral-600 border-neutral-200 hover:bg-neutral-100 font-bold cursor-pointer"
                   onClick={() => handleUpdateStatus("draft")}
+                  className="h-8 px-3 rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-semibold gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
                 >
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Desarchivar
+                  <RefreshCw className="h-3.5 w-3.5 text-neutral-600" />
+                  <span>Desarchivar</span>
                 </Button>
               )}
-              
-              <div className="h-4 w-px bg-neutral-200 mx-1" />
-              
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 rounded-lg cursor-pointer"
-                onClick={handleShareWhatsApp}
-                title="Compartir por WhatsApp"
-              >
-                <MessageSquare className="h-4 w-4 text-emerald-600" />
-              </Button>
-              
-              <Button
-                variant="default"
-                size="sm"
-                className="h-8 rounded-lg bg-neutral-900 text-white hover:bg-black font-bold cursor-pointer gap-1.5"
-                onClick={handlePrint}
-                title="Imprimir presupuesto"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Imprimir</span>
-              </Button>
-
             </div>
           </div>
 
@@ -455,17 +391,23 @@ export default function QuotationDetailDialog({
                   color: vehicle.color,
                   km: vehicle.km,
                 } : undefined}
-                items={quote.items.map((i) => ({
-                  id: i.id,
-                  name: i.name,
-                  descripcion: i.name,
-                  quantity: i.quantity,
-                  cantidad: i.quantity,
-                  unitPrice: i.unitPrice,
-                  precio_unitario: i.unitPrice,
-                  salePrice: i.unitPrice,
-                  total: i.total,
-                }))}
+                items={quote.items.map((i) => {
+                  const lineNet = (i.quantity || 1) * (i.unitPrice || 0) * (1 - (i.discountPercentage || 0) / 100);
+                  const lineTax = Math.round((lineNet * ((i.taxPercentage ?? 0) / 100)) * 100) / 100;
+                  return {
+                    id: i.id,
+                    name: i.name,
+                    descripcion: i.name,
+                    quantity: i.quantity,
+                    cantidad: i.quantity,
+                    unitPrice: i.unitPrice,
+                    precio_unitario: i.unitPrice,
+                    salePrice: i.unitPrice,
+                    tax: lineTax,
+                    is_exento: (i.taxPercentage ?? 0) === 0,
+                    total: i.total,
+                  };
+                })}
                 subtotal={quote.subtotal}
                 itbis={quote.tax}
                 discount={quote.discount}
@@ -482,17 +424,23 @@ export default function QuotationDetailDialog({
                   pagado: 0,
                   metodo_pago: "Cotización",
                   notas: quote.notes,
-                  items: quote.items.map((i) => ({
-                    id: i.id,
-                    name: i.name,
-                    descripcion: i.name,
-                    quantity: i.quantity,
-                    cantidad: i.quantity,
-                    unitPrice: i.unitPrice,
-                    precio_unitario: i.unitPrice,
-                    salePrice: i.unitPrice,
-                    total: i.total,
-                  })),
+                  items: quote.items.map((i) => {
+                    const lineNet = (i.quantity || 1) * (i.unitPrice || 0) * (1 - (i.discountPercentage || 0) / 100);
+                    const lineTax = Math.round((lineNet * ((i.taxPercentage ?? 0) / 100)) * 100) / 100;
+                    return {
+                      id: i.id,
+                      name: i.name,
+                      descripcion: i.name,
+                      quantity: i.quantity,
+                      cantidad: i.quantity,
+                      unitPrice: i.unitPrice,
+                      precio_unitario: i.unitPrice,
+                      salePrice: i.unitPrice,
+                      tax: lineTax,
+                      is_exento: (i.taxPercentage ?? 0) === 0,
+                      total: i.total,
+                    };
+                  }),
                   vehicle: vehicle ? {
                     brand: vehicle.brand,
                     model: vehicle.model,
@@ -506,46 +454,162 @@ export default function QuotationDetailDialog({
             </div>
           </div>
 
-          {/* Actions Footer */}
-          <DialogFooter className="gap-2 shrink-0 border-t border-neutral-100 p-4 bg-neutral-50/50 flex flex-col sm:flex-row justify-between items-center print:hidden">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handlePrint}
-                className="w-full sm:w-auto rounded-xl h-10 px-4 font-bold text-neutral-800 border-neutral-300 hover:bg-neutral-100 gap-2 cursor-pointer"
-              >
-                <Printer className="h-4 w-4" /> Imprimir ({paperFormat === "A4" ? "Hoja A4" : "Ticket 80mm"})
-              </Button>
-            </div>
-            
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onClose}
-                className="rounded-xl h-10 px-4 font-bold text-neutral-700 hover:bg-neutral-150 cursor-pointer"
-              >
-                Cerrar
-              </Button>
-              
-              <Button
-                type="button"
-                onClick={() => handleConvertToOrder(false)}
-                className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 gap-2 h-10 px-4 font-bold cursor-pointer"
-              >
-                <FileText className="h-4 w-4" /> Crear Orden
-              </Button>
+          {/* Actions Footer - Compacto, estructurado y con fondos de color */}
+          <div className="bg-white p-3 sm:px-5 border-t border-neutral-100 flex flex-col gap-2 shrink-0 print:hidden">
+            {/* Fila 1: Selector de Formato + Utilidades (WhatsApp, Imprimir, Cerrar) */}
+            <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+              {/* Selector de tamaño */}
+              <div className="flex items-center p-0.5 bg-neutral-100/90 rounded-xl border border-neutral-200/80">
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("80mm")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                    paperFormat === "80mm"
+                      ? "bg-white text-neutral-900 shadow-xs"
+                      : "text-neutral-500 hover:text-neutral-900"
+                  )}
+                >
+                  <Receipt className="h-3.5 w-3.5" />
+                  <span>Ticket 80mm</span>
+                </button>
 
-              <Button
-                type="button"
-                onClick={() => handleConvertToOrder(true)}
-                className="rounded-xl bg-black text-white hover:bg-neutral-850 gap-2 h-10 px-4 font-bold cursor-pointer"
-              >
-                <ShoppingCart className="h-4 w-4" /> Facturar POS
-              </Button>
+                <button
+                  type="button"
+                  onClick={() => setPaperFormat("A4")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                    paperFormat === "A4"
+                      ? "bg-white text-neutral-900 shadow-xs"
+                      : "text-neutral-500 hover:text-neutral-900"
+                  )}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Hoja A4</span>
+                </button>
+              </div>
+
+              {/* Botones de Utilidad con Fondo de Color */}
+              <div className="flex items-center gap-1.5">
+                {customer?.phone && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleShareWhatsApp}
+                    className="rounded-xl border border-emerald-200/90 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 hover:border-emerald-300 gap-1.5 h-8 px-2.5 text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+                    title="Compartir por WhatsApp"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>WhatsApp</span>
+                  </Button>
+                )}
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handlePrint}
+                  className="rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 gap-1.5 h-8 px-3 text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+                >
+                  <Printer className="h-3.5 w-3.5 text-neutral-600" />
+                  <span>Imprimir</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onClose}
+                  className="rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 h-8 px-3 text-xs font-semibold cursor-pointer shadow-2xs transition-all"
+                >
+                  Cerrar
+                </Button>
+              </div>
             </div>
-          </DialogFooter>
+
+            {/* Fila 2: Acciones Principales según el estado de la Cotización */}
+            {quote.status === "draft" && (
+              <div className="grid grid-cols-2 gap-2 w-full pt-0.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleUpdateStatus("rejected")}
+                  className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 h-9 px-3 text-xs font-bold cursor-pointer gap-1.5 shadow-2xs transition-all active:scale-[0.98]"
+                >
+                  <Ban className="h-3.5 w-3.5 text-rose-600" />
+                  <span>Rechazar</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleUpdateStatus("accepted")}
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3.5 text-xs font-bold cursor-pointer gap-1.5 shadow-xs transition-all active:scale-[0.98]"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Aprobar Cotización</span>
+                </Button>
+              </div>
+            )}
+
+            {quote.status === "sent" && (
+              <div className="grid grid-cols-2 gap-2 w-full pt-0.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleUpdateStatus("rejected")}
+                  className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 h-9 px-3 text-xs font-bold cursor-pointer gap-1.5 shadow-2xs transition-all active:scale-[0.98]"
+                >
+                  <Ban className="h-3.5 w-3.5 text-rose-600" />
+                  <span>Rechazar</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleUpdateStatus("accepted")}
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-3.5 text-xs font-bold cursor-pointer gap-1.5 shadow-xs transition-all active:scale-[0.98]"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  <span>Aprobar Cotización</span>
+                </Button>
+              </div>
+            )}
+
+            {quote.status === "accepted" && (
+              <div className="grid grid-cols-2 gap-2 w-full pt-0.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleConvertToOrder(false)}
+                  className="rounded-xl border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 hover:border-blue-300 gap-1.5 h-9 px-3 text-xs font-bold cursor-pointer shadow-2xs transition-all active:scale-[0.98]"
+                >
+                  <FileText className="h-3.5 w-3.5 text-blue-600" />
+                  <span>Crear Orden</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleConvertToOrder(true)}
+                  className="rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 gap-1.5 h-9 px-3.5 text-xs font-bold shadow-xs active:scale-[0.98] cursor-pointer transition-all"
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  <span>Facturar en POS</span>
+                </Button>
+              </div>
+            )}
+
+            {(quote.status === "rejected" || quote.status === "expired") && (
+              <div className="w-full pt-0.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleUpdateStatus("draft")}
+                  className="w-full rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 gap-1.5 h-9 px-3.5 text-xs font-bold shadow-xs active:scale-[0.98] cursor-pointer transition-all"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>Reactivar como Borrador</span>
+                </Button>
+              </div>
+            )}
+          </div>
           
         </DialogContent>
       </Dialog>
@@ -576,15 +640,17 @@ export default function QuotationDetailDialog({
             />
           </div>
 
-          <DialogFooter className="flex gap-2 sm:justify-end">
+          <DialogFooter className="flex gap-2 sm:justify-end pt-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() => setIsArchiveDialogOpen(false)}
-              className="rounded-xl h-10 px-4 font-bold text-xs cursor-pointer"
+              className="rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 h-9 px-4 font-semibold text-xs cursor-pointer shadow-2xs"
             >
               Cancelar
             </Button>
             <Button
+              type="button"
               onClick={() => {
                 if (quote) {
                   updateQuote(quote.id, {
@@ -595,7 +661,7 @@ export default function QuotationDetailDialog({
                   setIsArchiveDialogOpen(false);
                 }
               }}
-              className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold h-10 px-4 text-xs cursor-pointer"
+              className="rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold h-9 px-4 text-xs cursor-pointer shadow-xs"
             >
               Archivar Cotización
             </Button>

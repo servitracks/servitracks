@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useDeferredValue } from "react";
 import { useParams } from "@/lib/next-compat";
 import { useStore, Product } from "@/store/useStore";
 import { InventoryMovement } from "@/store/types";
@@ -29,6 +29,11 @@ import {
   ArrowLeftRight,
   Truck,
   Sparkles,
+  List,
+  LayoutGrid,
+  CheckCircle2,
+  DollarSign,
+  Car,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -511,6 +516,7 @@ export default function InventoryPage() {
 
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("products");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [kpiFilter, setKpiFilter] = useState<"all" | "low" | "out">("all");
   const [sortField, setSortField] = useState<"name" | "salePrice" | "stock" | "margin">("margin");
@@ -680,35 +686,44 @@ export default function InventoryPage() {
     }
   };
 
-  const filteredProducts = products.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase()) ||
-      (p.barcode || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.brand || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleMake || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
-    const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
-    const matchKpi =
-      kpiFilter === "all" ||
-      (kpiFilter === "low" && p.stock > 0 && p.stock <= p.minStock) ||
-      (kpiFilter === "out" && p.stock === 0);
-    return matchSearch && matchCat && matchKpi && !p.isCombo;
-  });
+  const deferredSearch = useDeferredValue(search);
+  const normalizedSearch = useMemo(() => deferredSearch.toLowerCase().trim(), [deferredSearch]);
 
-  const filteredCombos = products.filter((p) => {
-    const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase()) ||
-      (p.barcode || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.brand || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleMake || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleModel || "").toLowerCase().includes(search.toLowerCase()) ||
-      (p.vehicleYear || "").toLowerCase().includes(search.toLowerCase());
-    const matchCat = categoryFilter === "Todos" || (p.category || "").trim() === categoryFilter;
-    return matchSearch && matchCat && p.isCombo;
-  });
+  const filteredProducts = useMemo(() => {
+    return products.filter((p) => {
+      if (p.isCombo) return false;
+      if (categoryFilter !== "Todos" && (p.category || "").trim() !== categoryFilter) return false;
+      if (kpiFilter === "low" && !(p.stock > 0 && p.stock <= p.minStock)) return false;
+      if (kpiFilter === "out" && p.stock !== 0) return false;
+      if (!normalizedSearch) return true;
+      return (
+        p.name.toLowerCase().includes(normalizedSearch) ||
+        p.sku.toLowerCase().includes(normalizedSearch) ||
+        (p.barcode || "").toLowerCase().includes(normalizedSearch) ||
+        (p.brand || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleMake || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleModel || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleYear || "").toLowerCase().includes(normalizedSearch)
+      );
+    });
+  }, [products, normalizedSearch, categoryFilter, kpiFilter]);
+
+  const filteredCombos = useMemo(() => {
+    return products.filter((p) => {
+      if (!p.isCombo) return false;
+      if (categoryFilter !== "Todos" && (p.category || "").trim() !== categoryFilter) return false;
+      if (!normalizedSearch) return true;
+      return (
+        p.name.toLowerCase().includes(normalizedSearch) ||
+        p.sku.toLowerCase().includes(normalizedSearch) ||
+        (p.barcode || "").toLowerCase().includes(normalizedSearch) ||
+        (p.brand || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleMake || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleModel || "").toLowerCase().includes(normalizedSearch) ||
+        (p.vehicleYear || "").toLowerCase().includes(normalizedSearch)
+      );
+    });
+  }, [products, normalizedSearch, categoryFilter]);
 
   const sortedProducts = useMemo(() => {
     return [...filteredProducts].sort((a, b) => {
@@ -1221,64 +1236,127 @@ export default function InventoryPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      {/* Header Ejecutivo */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900">Inventario</h1>
-          <p className="text-neutral-500">Gestiona tus productos, repuestos y suministros.</p>
+          <div className="flex items-center gap-2">
+            <h1 className="font-heading text-2xl sm:text-3xl font-extrabold tracking-tight text-neutral-900">
+              Inventario & Almacén
+            </h1>
+            <Badge
+              variant="outline"
+              className="text-[11px] font-bold rounded-full bg-neutral-100 text-neutral-700 border-neutral-200"
+            >
+              {products.length} {products.length === 1 ? "Artículo" : "Artículos"}
+            </Badge>
+          </div>
+          <p className="text-xs sm:text-sm text-neutral-500 mt-1">
+            Control de stock, suministros, compatibilidad de vehículos y costos de repuestos.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Switch de Vista: Lista / Tarjetas */}
+          <div className="flex rounded-xl border border-neutral-200/90 overflow-hidden bg-white p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                viewMode === "list"
+                  ? "bg-neutral-900 text-white shadow-xs"
+                  : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+              )}
+              title="Vista de Lista"
+            >
+              <List className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Lista</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                viewMode === "grid"
+                  ? "bg-neutral-900 text-white shadow-xs"
+                  : "text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100"
+              )}
+              title="Vista de Tarjetas"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Tarjetas</span>
+            </button>
+          </div>
+
           {isOwner && (
             <Button 
               variant="outline" 
-              className="flex items-center gap-2 rounded-lg border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 font-bold text-xs h-9 cursor-pointer transition-colors shadow-2xs"
+              className="h-9 px-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 font-semibold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all"
               onClick={() => {
                 setConfirmDeleteText("");
                 setIsDeleteAllModalOpen(true);
               }}
               title="Eliminar todo el inventario de la base de datos"
             >
-              <Trash2 className="h-4 w-4 text-rose-500" />
-              <span className="hidden sm:inline">Vaciar Inventario</span>
+              <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+              <span>Vaciar</span>
             </Button>
           )}
 
-          <Button variant="outline" className="hidden rounded-lg md:flex gap-2" onClick={handleExportCSV}>
-            <Download className="h-4 w-4" /> Exportar CSV
+          <Button 
+            variant="outline" 
+            className="h-9 px-3.5 rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all"
+            onClick={handleExportCSV}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Exportar CSV</span>
           </Button>
-          <Button variant="outline" className="hidden rounded-lg md:flex gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
-            onClick={() => setIsImportOpen(true)}>
-            <Upload className="h-4 w-4" /> Importar
+
+          <Button 
+            variant="outline" 
+            className="h-9 px-3.5 rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all"
+            onClick={() => setIsImportOpen(true)}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Importar</span>
           </Button>
+
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 outline-none transition-colors">
-              <Plus className="h-4 w-4" /> Nuevo
+            <DropdownMenuTrigger className="h-9 px-4 rounded-xl bg-neutral-950 text-white hover:bg-neutral-800 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-[0.98]">
+              <Plus className="h-4 w-4" />
+              <span>Nuevo Artículo</span>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-48">
-              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}>
-                <Package className="h-4 w-4" /> Producto Individual
+            <DropdownMenuContent align="end" className="rounded-xl border-neutral-200 p-1.5 shadow-xl w-52">
+              <DropdownMenuItem 
+                className="rounded-lg py-2 cursor-pointer gap-2 text-xs font-semibold"
+                onClick={() => { setForm(emptyForm); setIsCreateOpen(true); }}
+              >
+                <Package className="h-4 w-4 text-neutral-700" />
+                <span>Producto Individual</span>
               </DropdownMenuItem>
-              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => setIsCreateComboOpen(true)}>
-                <Layers className="h-4 w-4" /> Combo / Paquete
+              <DropdownMenuItem 
+                className="rounded-lg py-2 cursor-pointer gap-2 text-xs font-semibold"
+                onClick={() => setIsCreateComboOpen(true)}
+              >
+                <Layers className="h-4 w-4 text-neutral-700" />
+                <span>Combo / Paquete</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
 
-      {/* KPI Cards — estilo SaaS compacto (Linear / Stripe) */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* 2. KPI Cards Métricas Operativas */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {([
           { 
-            label: "Total Productos",  
+            label: "Total Artículos",  
             value: products.length, 
             formattedValue: products.length.toString(),                         
             icon: Package,       
-            iconBg: "bg-slate-100 text-slate-700 border-slate-200/60",  
-            activeBorder: "border-blue-500/80 ring-1 ring-blue-500/20 bg-blue-50/10",
-            badgeBg: "bg-blue-50 text-blue-700 border-blue-200/80",
-            dotColor: "bg-blue-500",
+            iconBg: "bg-slate-100 text-slate-800 border-slate-200/80",  
             filterKey: "all" as const,  
+            subtext: "Catálogo completo",
             show: true 
           },
           { 
@@ -1286,35 +1364,29 @@ export default function InventoryPage() {
             value: lowStockCount, 
             formattedValue: lowStockCount.toString(),                            
             icon: AlertTriangle, 
-            iconBg: "bg-amber-50 text-amber-600 border-amber-200/60",   
-            activeBorder: "border-amber-500/80 ring-1 ring-amber-500/20 bg-amber-50/10",
-            badgeBg: "bg-amber-50 text-amber-700 border-amber-200/80",
-            dotColor: "bg-amber-500",
+            iconBg: "bg-amber-50 text-amber-700 border-amber-200/80",   
             filterKey: "low" as const,  
+            subtext: "Requiere reposición",
             show: true 
           },
           { 
-            label: "Sin Stock",        
+            label: "Sin Existencias",        
             value: outOfStockCount, 
             formattedValue: outOfStockCount.toString(),                          
             icon: X,             
-            iconBg: "bg-rose-50 text-rose-600 border-rose-200/60",    
-            activeBorder: "border-rose-500/80 ring-1 ring-rose-500/20 bg-rose-50/10",
-            badgeBg: "bg-rose-50 text-rose-700 border-rose-200/80",
-            dotColor: "bg-rose-500",
+            iconBg: "bg-rose-50 text-rose-700 border-rose-200/80",    
             filterKey: "out" as const,  
+            subtext: "Agotado en almacén",
             show: true 
           },
           { 
-            label: "Valor Total",      
+            label: "Valor del Inventario",      
             value: totalValue, 
-            formattedValue: `RD$ ${totalValue.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 
+            formattedValue: `RD$ ${totalValue.toLocaleString("es-DO", { maximumFractionDigits: 0 })}`, 
             icon: TrendingUp,  
-            iconBg: "bg-emerald-50 text-emerald-600 border-emerald-200/60", 
-            activeBorder: "",
-            badgeBg: "",
-            dotColor: "",
+            iconBg: "bg-emerald-50 text-emerald-700 border-emerald-200/80", 
             filterKey: null,            
+            subtext: "Valuación a costo de venta",
             show: isOwner 
           },
         ] as const).filter(kpi => kpi.show).map((kpi) => {
@@ -1330,151 +1402,88 @@ export default function InventoryPage() {
                 setKpiFilter(isActive && kpi.filterKey !== "all" ? "all" : kpi.filterKey!);
               }}
               className={cn(
-                "flex flex-col justify-between text-left rounded-xl border p-3.5 sm:p-4 transition-all duration-150 w-full bg-white shadow-2xs group relative h-full",
-                isClickable
-                  ? "cursor-pointer hover:border-neutral-300 hover:shadow-xs active:scale-[0.995]"
-                  : "cursor-default",
+                "flex items-center gap-3 rounded-2xl border p-3.5 bg-white shadow-2xs text-left transition-all group active:scale-[0.98]",
+                isClickable ? "cursor-pointer" : "cursor-default",
                 isActive
-                  ? `${kpi.activeBorder} bg-white`
-                  : "border-neutral-200/80"
+                  ? "border-neutral-900 ring-1 ring-neutral-900"
+                  : "border-neutral-200/80 hover:border-neutral-300 hover:shadow-xs"
               )}
             >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className={cn("flex h-7 w-7 items-center justify-center rounded-lg border flex-shrink-0 transition-transform group-hover:scale-105", kpi.iconBg)}>
-                    <kpi.icon className="h-3.5 w-3.5" />
-                  </div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 truncate">{kpi.label}</p>
-                </div>
-                {isActive && kpi.filterKey !== "all" && (
-                  <span className={cn("inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border flex-shrink-0 shadow-2xs", kpi.badgeBg)}>
-                    <span className={cn("h-1.5 w-1.5 rounded-full animate-pulse", kpi.dotColor)} />
-                    Filtrando
-                  </span>
+              <div
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-xl border flex-shrink-0 transition-transform group-hover:scale-105",
+                  kpi.iconBg
                 )}
+              >
+                <kpi.icon className="h-5 w-5" />
               </div>
-
-              <div className="mt-2.5">
-                {kpi.filterKey === null ? (
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-xs font-bold text-neutral-500">RD$</span>
-                    <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-900">
-                      {totalValue.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-xl sm:text-2xl font-extrabold tracking-tight text-neutral-900 leading-none">
-                    {kpi.formattedValue}
-                  </p>
-                )}
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 leading-tight truncate">
+                  {kpi.label}
+                </p>
+                <p className="text-xl font-bold tracking-tight text-neutral-900 leading-tight mt-0.5 font-mono tabular-nums truncate">
+                  {kpi.formattedValue}
+                </p>
+                <p className="text-[10px] text-neutral-400 truncate mt-0.5">
+                  {isActive && kpi.filterKey !== "all" ? "Filtrando activos" : kpi.subtext}
+                </p>
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Tabs: Productos / Combos / Movimientos / Pedidos */}
-      <Tabs value={activeTab} onValueChange={(val) => val && setActiveTab(val as string)}>
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-2 sm:p-2.5 rounded-2xl border border-neutral-200/80 shadow-2xs">
-          <TabsList className="bg-neutral-100/90 p-1 rounded-xl border border-neutral-200/60 inline-flex items-center gap-1 h-auto flex-wrap sm:flex-nowrap">
-            <TabsTrigger 
-              value="products" 
-              onClick={() => setActiveTab("products")}
-              className={cn(
-                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
-                activeTab === "products"
-                  ? "!bg-black !text-white shadow-xs"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
-              )}
-            >
-              <Package className="h-3.5 w-3.5" />
-              <span>Productos</span>
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
-                activeTab === "products"
-                  ? "!bg-neutral-800 !text-white"
-                  : "bg-neutral-200/80 text-neutral-700"
-              )}>
-                {products.filter(p => !p.isCombo).length}
-              </span>
-            </TabsTrigger>
+      {/* 3. Barra de Navegación y Filtros (Pills Negro Primario) */}
+      <Tabs value={activeTab} onValueChange={(val) => val && setActiveTab(val as string)} className="w-full">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-neutral-50/80 p-2 rounded-2xl border border-neutral-200/80">
+          {/* Pestañas con iconos */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0 scrollbar-none">
+            {([
+              { id: "products", label: "Productos", icon: Package, count: products.filter(p => !p.isCombo).length },
+              { id: "combos", label: "Combos", icon: Layers, count: products.filter(p => p.isCombo).length },
+              { id: "movements", label: "Kardex / Movimientos", icon: ArrowLeftRight, count: movements.length },
+              { id: "pedidos", label: "Reabastecimiento", icon: Truck, count: lowStockCount },
+            ] as const).map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer active:scale-[0.98]",
+                    isActive
+                      ? "bg-neutral-900 text-white font-semibold shadow-xs"
+                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/60 font-medium"
+                  )}
+                >
+                  <Icon className={cn("h-3.5 w-3.5", isActive ? "text-white" : "text-neutral-500")} />
+                  <span>{tab.label}</span>
+                  <span
+                    className={cn(
+                      "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
+                      isActive
+                        ? "bg-white/20 text-white"
+                        : tab.id === "pedidos" && tab.count > 0
+                        ? "bg-amber-100 text-amber-800 font-bold"
+                        : "bg-neutral-200/70 text-neutral-600"
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-            <TabsTrigger 
-              value="combos" 
-              onClick={() => setActiveTab("combos")}
-              className={cn(
-                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
-                activeTab === "combos"
-                  ? "!bg-black !text-white shadow-xs"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
-              )}
-            >
-              <Layers className="h-3.5 w-3.5" />
-              <span>Combos</span>
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
-                activeTab === "combos"
-                  ? "!bg-neutral-800 !text-white"
-                  : "bg-neutral-200/80 text-neutral-700"
-              )}>
-                {products.filter(p => p.isCombo).length}
-              </span>
-            </TabsTrigger>
-
-            <TabsTrigger 
-              value="movements" 
-              onClick={() => setActiveTab("movements")}
-              className={cn(
-                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
-                activeTab === "movements"
-                  ? "!bg-black !text-white shadow-xs"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
-              )}
-            >
-              <ArrowLeftRight className="h-3.5 w-3.5" />
-              <span>Movimientos</span>
-              <span className={cn(
-                "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
-                activeTab === "movements"
-                  ? "!bg-neutral-800 !text-white"
-                  : "bg-neutral-200/80 text-neutral-700"
-              )}>
-                {movements.length}
-              </span>
-            </TabsTrigger>
-
-            <TabsTrigger 
-              value="pedidos" 
-              onClick={() => setActiveTab("pedidos")}
-              className={cn(
-                "rounded-lg px-3.5 py-2 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer select-none [&[data-active]]:!bg-black [&[data-active]]:!text-white",
-                activeTab === "pedidos"
-                  ? "!bg-black !text-white shadow-xs"
-                  : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/50"
-              )}
-            >
-              <Truck className="h-3.5 w-3.5" />
-              <span>Pedidos (Auto)</span>
-              {lowStockCount > 0 && (
-                <span className={cn(
-                  "text-[10px] px-1.5 py-0.5 rounded-full font-black transition-colors",
-                  activeTab === "pedidos"
-                    ? "!bg-blue-600 !text-white"
-                    : "bg-blue-100 text-blue-700"
-                )}>
-                  {lowStockCount}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Search + filter */}
+          {/* Búsqueda + Filtro Categoría */}
           <div className="flex items-center gap-2 w-full lg:w-auto">
             <div className="relative flex-1 lg:w-72">
               <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-400" />
               <Input 
                 placeholder="Buscar producto, SKU, marca..." 
-                className="rounded-xl border-neutral-200 bg-neutral-50/50 hover:bg-white focus:bg-white pl-9 pr-7 h-9 text-xs focus:border-neutral-400 transition-colors shadow-2xs"
+                className="rounded-xl border-neutral-200 bg-white pl-9 pr-7 h-9 text-xs shadow-2xs"
                 value={search} 
                 onChange={(e) => setSearch(e.target.value)} 
               />
@@ -1490,7 +1499,7 @@ export default function InventoryPage() {
               )}
             </div>
             <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v || "Todos")}>
-              <SelectTrigger className="w-40 h-9 rounded-xl border-neutral-200 bg-neutral-50/50 hover:bg-white text-xs font-semibold text-neutral-700 hover:border-neutral-300 transition-colors shrink-0 shadow-2xs cursor-pointer">
+              <SelectTrigger className="w-40 h-9 rounded-xl border-neutral-200 bg-white text-xs font-medium text-neutral-700 shrink-0 shadow-2xs cursor-pointer">
                 <Filter className="h-3.5 w-3.5 mr-1.5 text-neutral-400" />
                 <SelectValue />
               </SelectTrigger>
@@ -1502,192 +1511,527 @@ export default function InventoryPage() {
           </div>
         </div>
 
-        <TabsContent value="products" className="mt-4 space-y-2">
+        <TabsContent value="products" className="mt-4 space-y-3">
           <div className="flex items-center justify-between px-1">
             <p className="text-xs text-neutral-500 font-medium">
-              {sortedProducts.length} producto{sortedProducts.length !== 1 ? "s" : ""} registrado{sortedProducts.length !== 1 ? "s" : ""}
+              Mostrando <strong className="text-neutral-900 font-bold">{sortedProducts.length}</strong> producto{sortedProducts.length !== 1 ? "s" : ""} registrado{sortedProducts.length !== 1 ? "s" : ""}
             </p>
           </div>
 
-          <div 
-            ref={productTableRef} 
-            style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
-            className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100"
-          >
-            <Table className="w-full text-xs min-w-[700px]">
-              <TableHeader className="bg-neutral-50/80">
-                <TableRow className="border-b border-neutral-200/80">
-                  <TableHead 
-                    className="min-w-[200px] cursor-pointer hover:text-neutral-900 select-none py-2.5 pl-3 text-xs"
-                    onClick={() => handleSort("name")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Producto
-                      {sortField === "name" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+          {/* VISTA DE LISTA (Table) */}
+          {viewMode === "list" && (
+            <div 
+              ref={productTableRef} 
+              style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
+              className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-hidden"
+            >
+              <div className="overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100">
+                <Table className="w-full text-xs min-w-[850px]">
+                  <TableHeader className="bg-neutral-50/80">
+                    <TableRow className="border-b border-neutral-200/80">
+                      <TableHead 
+                        className="min-w-[240px] cursor-pointer hover:text-neutral-900 select-none py-3.5 pl-6 text-[10px] font-semibold uppercase tracking-wider text-neutral-500"
+                        onClick={() => handleSort("name")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Producto & Compatibilidad</span>
+                          {sortField === "name" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[120px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                        Categoría
+                      </TableHead>
+                      <TableHead 
+                        className="w-[140px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-right"
+                        onClick={() => handleSort("salePrice")}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span>Precio Venta</span>
+                          {sortField === "salePrice" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="w-[110px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center"
+                        onClick={() => handleSort("stock")}
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span>Stock / Mín</span>
+                          {sortField === "stock" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      {isOwner && (
+                        <TableHead 
+                          className="w-[100px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center"
+                          onClick={() => handleSort("margin")}
+                        >
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span>Margen</span>
+                            {sortField === "margin" ? (
+                              sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-neutral-400" />
+                            )}
+                          </div>
+                        </TableHead>
                       )}
-                    </div>
-                  </TableHead>
-                  <TableHead className="w-[100px] font-bold text-neutral-900 py-2.5 text-xs text-center">Categoría</TableHead>
-                  <TableHead 
-                    className="w-[125px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
-                    onClick={() => handleSort("salePrice")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Precio Venta
-                      {sortField === "salePrice" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="w-[95px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
-                    onClick={() => handleSort("stock")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Stock
-                      {sortField === "stock" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
-                      )}
-                    </div>
-                  </TableHead>
-                  {isOwner && (
-                    <TableHead 
-                      className="w-[85px] cursor-pointer hover:text-neutral-900 select-none font-bold text-neutral-900 py-2.5 text-xs"
-                      onClick={() => handleSort("margin")}
+                      <TableHead className="w-[120px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                        Estado
+                      </TableHead>
+                      <TableHead className="w-[120px] text-right pr-6 py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                        Acciones
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedProducts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-44 text-center bg-white">
+                          <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                            <div className="h-12 w-12 rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400">
+                              <Package className="h-6 w-6" />
+                            </div>
+                            <p className="font-semibold text-neutral-800 text-sm">
+                              No se encontraron productos
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              {search
+                                ? `No hay artículos que coincidan con "${search}".`
+                                : categoryFilter !== "Todos"
+                                ? `No hay artículos en la categoría "${categoryFilter}".`
+                                : "No hay productos registrados en este filtro."}
+                            </p>
+                            {(search || categoryFilter !== "Todos" || kpiFilter !== "all") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSearch("");
+                                  setCategoryFilter("Todos");
+                                  setKpiFilter("all");
+                                }}
+                                className="mt-2 rounded-xl text-xs font-semibold cursor-pointer"
+                              >
+                                Limpiar filtros
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      paginatedProducts.map((product) => {
+                        const margin = calculateMargin(product.salePrice, product.costPrice);
+                        return (
+                          <TableRow key={product.id} className="group hover:bg-neutral-50/70 bg-white border-b border-neutral-100 transition-colors">
+                            {/* 1. Producto, SKU, Barcode, Compatibilidad */}
+                            <TableCell className="py-3.5 pl-6">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-900 text-white font-bold text-xs shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                                  <Package className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-neutral-900 text-xs sm:text-sm leading-snug line-clamp-1">
+                                    {product.name}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                    <span className="text-[10px] font-mono font-medium text-neutral-400">
+                                      SKU: {product.sku}
+                                    </span>
+                                    {product.barcode && (
+                                      <span className="text-[10px] font-mono text-neutral-400">
+                                        • {product.barcode}
+                                      </span>
+                                    )}
+                                    {product.brand && (
+                                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 rounded-md bg-neutral-50 text-neutral-600 border-neutral-200">
+                                        {product.brand}
+                                      </Badge>
+                                    )}
+                                    {/* Compatibilidad vehicular dominicana */}
+                                    {product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0 ? (
+                                      <>
+                                        {product.vehicleCompatibilities.slice(0, 1).map((c, i) => (
+                                          <div key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-neutral-100 border border-neutral-300 shadow-2xs font-mono">
+                                            <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">RD</span>
+                                            <span className="text-[10px] font-bold text-neutral-900">
+                                              {[c.make, c.model, c.year].filter(Boolean).join(" ")}
+                                            </span>
+                                          </div>
+                                        ))}
+                                        {product.vehicleCompatibilities.length > 1 && (
+                                          <span className="text-[9px] font-semibold text-neutral-500 bg-neutral-100 px-1 py-0.5 rounded border border-neutral-200">
+                                            +{product.vehicleCompatibilities.length - 1} más
+                                          </span>
+                                        )}
+                                      </>
+                                    ) : (product.vehicleMake || product.vehicleModel || product.vehicleYear) ? (
+                                      <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-neutral-100 border border-neutral-300 shadow-2xs font-mono">
+                                        <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">RD</span>
+                                        <span className="text-[10px] font-bold text-neutral-900">
+                                          {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
+                                        </span>
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            {/* 2. Categoría */}
+                            <TableCell className="py-3.5 text-center whitespace-nowrap">
+                              <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 text-[10px] font-semibold px-2.5 py-0.5">
+                                {product.category}
+                              </Badge>
+                            </TableCell>
+
+                            {/* 3. Precio Venta & Base */}
+                            <TableCell className="py-3.5 text-right whitespace-nowrap">
+                              <p className="font-mono font-black text-xs sm:text-sm text-neutral-900 tabular-nums">
+                                RD$ {product.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </p>
+                              <p className="text-[10px] font-mono text-neutral-400 mt-0.5">
+                                Base: RD$ {(product.salePrice / (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </p>
+                            </TableCell>
+
+                            {/* 4. Stock & Mínimo */}
+                            <TableCell className="py-3.5 text-center whitespace-nowrap">
+                              <div className="inline-flex flex-col items-center">
+                                <span className={cn(
+                                  "font-mono font-black text-xs sm:text-sm tabular-nums",
+                                  product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900"
+                                )}>
+                                  {product.stock}
+                                </span>
+                                <span className="text-[10px] font-mono text-neutral-400">
+                                  mín {product.minStock}
+                                </span>
+                              </div>
+                            </TableCell>
+
+                            {/* 5. Margen (si isOwner) */}
+                            {isOwner && (
+                              <TableCell className="py-3.5 text-center whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70">
+                                  {margin}%
+                                </span>
+                              </TableCell>
+                            )}
+
+                            {/* 6. Estado Semántico */}
+                            <TableCell className="py-3.5 text-center whitespace-nowrap">
+                              {product.stock <= 0 ? (
+                                <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold border border-rose-200/80 bg-rose-50 text-rose-700">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                                  <span>Agotado</span>
+                                </span>
+                              ) : product.stock <= product.minStock ? (
+                                <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold border border-amber-200/80 bg-amber-50 text-amber-700">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                                  <span>Stock Bajo</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center justify-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold border border-emerald-200/80 bg-emerald-50 text-emerald-700">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                                  <span>Disponible</span>
+                                </span>
+                              )}
+                            </TableCell>
+
+                            {/* 7. Acciones Rápidas */}
+                            <TableCell className="py-3.5 pr-6 text-right whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openAdjust(product)}
+                                  className="h-8 w-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
+                                  title="Ajustar Stock"
+                                >
+                                  <ArrowUpDown className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}
+                                  className="h-8 w-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
+                                  title="Imprimir Etiqueta"
+                                >
+                                  <Printer className="h-4 w-4" />
+                                </button>
+                                {isOwner && (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEdit(product)}
+                                    className="h-8 w-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
+                                    title="Editar Producto"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </button>
+                                )}
+
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-neutral-100 outline-none transition-colors cursor-pointer">
+                                    <MoreVertical className="h-4 w-4 text-neutral-400" />
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="rounded-2xl border-neutral-100 p-2 shadow-xl w-48">
+                                    <div className="px-2 pb-1 pt-0.5 text-[9px] font-bold text-neutral-400 uppercase tracking-wider font-mono">
+                                      Opciones
+                                    </div>
+                                    {isOwner && (
+                                      <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => openEdit(product)}>
+                                        <Edit className="h-4 w-4 text-neutral-500" /> Editar
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => openAdjust(product)}>
+                                      <ArrowUpDown className="h-4 w-4 text-neutral-500" /> Ajustar Stock
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}>
+                                      <Printer className="h-4 w-4 text-neutral-500" /> Imprimir Etiqueta
+                                    </DropdownMenuItem>
+                                    {product.stock <= 0 && (
+                                      <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium text-blue-700" onClick={() => { setSelectedProduct(product); setIsQuoteOpen(true); }}>
+                                        <TrendingUp className="h-4 w-4 text-blue-600" /> Solicitar Cotización
+                                      </DropdownMenuItem>
+                                    )}
+                                    {isOwner && (
+                                      <>
+                                        <DropdownMenuSeparator className="my-1 bg-neutral-100" />
+                                        <DropdownMenuItem className="rounded-xl py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2 text-xs font-medium" onClick={() => handleDelete(product.id, product.name)}>
+                                          <Trash2 className="h-4 w-4" /> Eliminar Producto
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {/* VISTA DE TARJETAS (Grid Mode) */}
+          {viewMode === "grid" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {paginatedProducts.length === 0 ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center bg-white rounded-3xl border border-neutral-200/80 p-8 shadow-2xs">
+                  <div className="h-14 w-14 rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400 mb-3">
+                    <Package className="h-7 w-7" />
+                  </div>
+                  <h3 className="text-base font-bold text-neutral-900 font-heading">
+                    No se encontraron productos
+                  </h3>
+                  <p className="text-xs text-neutral-500 max-w-sm mt-1">
+                    {search
+                      ? `No hay artículos que coincidan con "${search}".`
+                      : categoryFilter !== "Todos"
+                      ? `No hay artículos en la categoría "${categoryFilter}".`
+                      : "No hay productos registrados en este filtro."}
+                  </p>
+                  {(search || categoryFilter !== "Todos" || kpiFilter !== "all") && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSearch("");
+                        setCategoryFilter("Todos");
+                        setKpiFilter("all");
+                      }}
+                      className="mt-3 rounded-xl text-xs font-semibold cursor-pointer"
                     >
-                      <div className="flex items-center gap-1">
-                        Margen
-                        {sortField === "margin" ? (
-                          sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 text-neutral-400" />
-                        )}
-                      </div>
-                    </TableHead>
+                      Restablecer filtros
+                    </Button>
                   )}
-                  <TableHead className="w-[105px] font-bold text-neutral-900 py-2.5 text-xs text-center">Estado</TableHead>
-                  <TableHead className="w-[45px] text-right pr-3 py-2.5 text-xs" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedProducts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-28 text-center text-neutral-400 text-xs">
-                      No se encontraron productos.
-                    </TableCell>
-                  </TableRow>
-                ) : paginatedProducts.map((product) => {
+                </div>
+              ) : (
+                paginatedProducts.map((product) => {
                   const margin = calculateMargin(product.salePrice, product.costPrice);
                   return (
-                    <TableRow key={product.id} className="group hover:bg-neutral-50/70 transition-colors">
-                      <TableCell className="py-2 pl-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="h-7 w-7 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 group-hover:bg-neutral-900 group-hover:text-white transition-colors">
-                            <Package className="h-3.5 w-3.5" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-neutral-900 text-xs leading-snug line-clamp-1">{product.name}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <p className="text-[10px] text-neutral-400 font-mono font-medium">{product.sku}</p>
-                              {product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0 ? (
-                                <>
-                                  {product.vehicleCompatibilities.slice(0, 1).map((c, i) => (
-                                    <Badge key={i} variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
-                                      {[c.make, c.model, c.year].filter(Boolean).join(" ")}
-                                    </Badge>
-                                  ))}
-                                  {product.vehicleCompatibilities.length > 1 && (
-                                    <Badge variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
-                                      +{product.vehicleCompatibilities.length - 1} más
-                                    </Badge>
-                                  )}
-                                </>
-                              ) : (product.vehicleMake || product.vehicleModel || product.vehicleYear) ? (
-                                <Badge variant="outline" className="text-[9px] h-3.5 px-1 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
-                                  {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-2 text-center whitespace-nowrap">
-                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">
-                          {product.category}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="py-2 font-bold text-xs text-neutral-900 whitespace-nowrap">
-                        RD$ {product.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        <span className="block text-[9px] font-normal text-neutral-400">Base: RD$ {(product.salePrice / (1 + (product.tax || 18) / 100)).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      </TableCell>
-                      <TableCell className="py-2 whitespace-nowrap">
-                        <div>
-                          <span className={cn("font-bold text-xs", product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900")}>
-                            {product.stock}
-                          </span>
-                          <span className="text-neutral-400 text-[10px] font-medium"> / mín {product.minStock}</span>
-                        </div>
-                      </TableCell>
-                      {isOwner && (
-                        <TableCell className="py-2 whitespace-nowrap">
-                          <span className="text-xs font-bold text-emerald-600">{margin}%</span>
-                        </TableCell>
-                      )}
-                      <TableCell className="py-2 text-center whitespace-nowrap">
-                        {product.stock <= 0 ? (
-                          <Badge className="bg-rose-100 text-rose-700 hover:bg-rose-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Agotado</Badge>
-                        ) : product.stock <= product.minStock ? (
-                          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Stock Bajo</Badge>
-                        ) : (
-                          <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-none text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap">Disponible</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="py-2 text-right pr-3">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors ml-auto">
-                            <MoreVertical className="h-3.5 w-3.5 text-neutral-400" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
-                            <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
-                            {isOwner && (
-                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openEdit(product)}>
-                                <Edit className="h-4 w-4" /> Editar
-                              </DropdownMenuItem>
+                    <div
+                      key={product.id}
+                      className="rounded-2xl border border-neutral-200/80 bg-white p-4 shadow-2xs hover:shadow-xs hover:border-neutral-300 transition-all flex flex-col justify-between group"
+                    >
+                      <div>
+                        {/* Header Card: Category + Status Badge + Menu */}
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 text-[10px] font-semibold px-2 py-0.5">
+                            {product.category}
+                          </Badge>
+
+                          <div className="flex items-center gap-1">
+                            {product.stock <= 0 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-rose-200/80 bg-rose-50 text-rose-700">
+                                <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                                Agotado
+                              </span>
+                            ) : product.stock <= product.minStock ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-amber-200/80 bg-amber-50 text-amber-700">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                Stock Bajo
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold border border-emerald-200/80 bg-emerald-50 text-emerald-700">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                Disponible
+                              </span>
                             )}
-                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => openAdjust(product)}>
-                              <ArrowUpDown className="h-4 w-4" /> Ajustar Stock
-                            </DropdownMenuItem>
-                            {product.stock <= 0 && (
-                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-blue-600 focus:text-blue-600" onClick={() => { setSelectedProduct(product); setIsQuoteOpen(true); }}>
-                                <TrendingUp className="h-4 w-4" /> Solicitar Cotización
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2" onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}>
-                              <Printer className="h-4 w-4" /> Imprimir Etiqueta
-                            </DropdownMenuItem>
-                            {isOwner && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem className="rounded-lg py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2"
-                                  onClick={() => handleDelete(product.id, product.name)}>
-                                  <Trash2 className="h-4 w-4" /> Eliminar
+
+                            <DropdownMenu>
+                              <DropdownMenuTrigger className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-neutral-100 outline-none transition-colors cursor-pointer">
+                                <MoreVertical className="h-3.5 w-3.5 text-neutral-400" />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="rounded-2xl border-neutral-100 p-2 shadow-xl w-48">
+                                <div className="px-2 pb-1 pt-0.5 text-[9px] font-bold text-neutral-400 uppercase tracking-wider font-mono">
+                                  Opciones
+                                </div>
+                                {isOwner && (
+                                  <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => openEdit(product)}>
+                                    <Edit className="h-4 w-4 text-neutral-500" /> Editar
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => openAdjust(product)}>
+                                  <ArrowUpDown className="h-4 w-4 text-neutral-500" /> Ajustar Stock
                                 </DropdownMenuItem>
-                              </>
+                                <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium" onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}>
+                                  <Printer className="h-4 w-4 text-neutral-500" /> Imprimir Etiqueta
+                                </DropdownMenuItem>
+                                {product.stock <= 0 && (
+                                  <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium text-blue-700" onClick={() => { setSelectedProduct(product); setIsQuoteOpen(true); }}>
+                                    <TrendingUp className="h-4 w-4 text-blue-600" /> Solicitar Cotización
+                                  </DropdownMenuItem>
+                                )}
+                                {isOwner && (
+                                  <>
+                                    <DropdownMenuSeparator className="my-1 bg-neutral-100" />
+                                    <DropdownMenuItem className="rounded-xl py-2 text-rose-600 focus:text-rose-600 cursor-pointer gap-2 text-xs font-medium" onClick={() => handleDelete(product.id, product.name)}>
+                                      <Trash2 className="h-4 w-4" /> Eliminar Producto
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </div>
+
+                        {/* Product Icon & Title */}
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-neutral-900 text-white font-bold text-sm shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                            <Package className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-bold text-neutral-900 text-sm leading-snug line-clamp-2">
+                              {product.name}
+                            </h4>
+                            <p className="text-[11px] font-mono text-neutral-400 mt-0.5">
+                              SKU: {product.sku}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Compatibilities & Brand */}
+                        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                          {product.brand && (
+                            <Badge variant="outline" className="text-[9px] px-1.5 py-0 rounded-md bg-neutral-50 text-neutral-600 border-neutral-200">
+                              {product.brand}
+                            </Badge>
+                          )}
+                          {product.vehicleCompatibilities && product.vehicleCompatibilities.length > 0 ? (
+                            <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-neutral-100 border border-neutral-300 shadow-2xs font-mono">
+                              <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">RD</span>
+                              <span className="text-[10px] font-bold text-neutral-900 truncate max-w-[130px]">
+                                {[product.vehicleCompatibilities[0].make, product.vehicleCompatibilities[0].model, product.vehicleCompatibilities[0].year].filter(Boolean).join(" ")}
+                              </span>
+                            </div>
+                          ) : (product.vehicleMake || product.vehicleModel || product.vehicleYear) ? (
+                            <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-neutral-100 border border-neutral-300 shadow-2xs font-mono">
+                              <span className="text-[8px] font-bold text-neutral-400 uppercase tracking-wider">RD</span>
+                              <span className="text-[10px] font-bold text-neutral-900 truncate max-w-[130px]">
+                                {[product.vehicleMake, product.vehicleModel, product.vehicleYear].filter(Boolean).join(" ")}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Pricing, Stock & Action Buttons */}
+                      <div className="pt-3 border-t border-neutral-100 space-y-3">
+                        <div className="flex items-end justify-between">
+                          <div>
+                            <p className="text-[10px] uppercase font-semibold text-neutral-400 tracking-wider">Precio Venta</p>
+                            <p className="font-mono font-black text-base text-neutral-900 tabular-nums">
+                              RD$ {product.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            {isOwner && (
+                              <span className="inline-block mt-0.5 text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/60">
+                                Margen: {margin}%
+                              </span>
                             )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase font-semibold text-neutral-400 tracking-wider">Stock</p>
+                            <p className={cn(
+                              "font-mono font-black text-base tabular-nums",
+                              product.stock <= 0 ? "text-rose-600" : product.stock <= product.minStock ? "text-amber-600" : "text-neutral-900"
+                            )}>
+                              {product.stock} <span className="text-[10px] font-normal text-neutral-400">/ mín {product.minStock}</span>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openAdjust(product)}
+                            className="h-8 rounded-xl text-xs font-semibold gap-1.5 border-neutral-200 hover:bg-neutral-50 cursor-pointer"
+                          >
+                            <ArrowUpDown className="h-3 w-3" />
+                            <span>Ajustar</span>
+                          </Button>
+                          {isOwner ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEdit(product)}
+                              className="h-8 rounded-xl text-xs font-semibold gap-1.5 border-neutral-200 hover:bg-neutral-50 cursor-pointer"
+                            >
+                              <Edit className="h-3 w-3" />
+                              <span>Editar</span>
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => { setSelectedProduct(product); setIsPrintLabelOpen(true); }}
+                              className="h-8 rounded-xl text-xs font-semibold gap-1.5 border-neutral-200 hover:bg-neutral-50 cursor-pointer"
+                            >
+                              <Printer className="h-3 w-3" />
+                              <span>Etiqueta</span>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   );
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                })
+              )}
+            </div>
+          )}
 
           {/* Controles de Paginación — 20 por página */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 py-2.5 bg-white rounded-2xl border border-neutral-200/80 shadow-2xs mt-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 bg-white rounded-2xl border border-neutral-200/80 shadow-2xs mt-3">
             <div className="flex items-center gap-2 text-xs text-neutral-500 font-medium">
               <span>
                 Mostrando{" "}
@@ -1754,7 +2098,7 @@ export default function InventoryPage() {
                           className={cn(
                             "h-8 min-w-[32px] px-2 text-xs font-bold rounded-xl transition-all cursor-pointer",
                             isCurrent
-                              ? "bg-black text-white shadow-xs"
+                              ? "bg-neutral-900 text-white shadow-xs"
                               : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
                           )}
                         >
@@ -1791,237 +2135,500 @@ export default function InventoryPage() {
         </TabsContent>
 
         {/* Combos Tab Content */}
-        <TabsContent value="combos" className="mt-4 space-y-2">
+        <TabsContent value="combos" className="mt-4 space-y-3">
           <div className="flex items-center justify-between px-1">
             <p className="text-xs text-neutral-500 font-medium">
-              {sortedCombos.length} combo{sortedCombos.length !== 1 ? "s" : ""} registrado{sortedCombos.length !== 1 ? "s" : ""}
+              Mostrando <strong className="text-neutral-900 font-bold">{sortedCombos.length}</strong> combo{sortedCombos.length !== 1 ? "s" : ""} registrado{sortedCombos.length !== 1 ? "s" : ""}
             </p>
           </div>
 
-          <div 
-            ref={comboTableRef} 
-            style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
-            className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100"
-          >
-            <Table className="w-full text-xs min-w-[700px]">
-              <TableHeader className="bg-neutral-50/50">
-                <TableRow className="border-b border-neutral-200/80">
-                  <TableHead 
-                    className="min-w-[200px] cursor-pointer hover:text-neutral-900 select-none py-2.5 pl-3 text-xs"
-                    onClick={() => handleSort("name")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Combo / Paquete
-                      {sortField === "name" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+          {/* Combos List Mode */}
+          {viewMode === "list" && (
+            <div 
+              ref={comboTableRef} 
+              style={{ scrollbarWidth: 'thin', scrollbarColor: '#a3a3a3 #f5f5f5' }}
+              className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-hidden"
+            >
+              <div className="overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100">
+                <Table className="w-full text-xs min-w-[750px]">
+                  <TableHeader className="bg-neutral-50/80">
+                    <TableRow className="border-b border-neutral-200/80">
+                      <TableHead 
+                        className="min-w-[220px] cursor-pointer hover:text-neutral-900 select-none py-3.5 pl-6 text-[10px] font-semibold uppercase tracking-wider text-neutral-500"
+                        onClick={() => handleSort("name")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Combo / Paquete</span>
+                          {sortField === "name" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead className="w-[120px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                        Categoría
+                      </TableHead>
+                      <TableHead className="w-[130px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-right">
+                        Costo Real
+                      </TableHead>
+                      <TableHead 
+                        className="w-[140px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-right"
+                        onClick={() => handleSort("salePrice")}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span>Precio Venta</span>
+                          {sortField === "salePrice" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      <TableHead 
+                        className="w-[110px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center"
+                        onClick={() => handleSort("stock")}
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span>Stock Posible</span>
+                          {sortField === "stock" && (
+                            sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
+                          )}
+                        </div>
+                      </TableHead>
+                      {isOwner && (
+                        <TableHead 
+                          className="w-[100px] cursor-pointer hover:text-neutral-900 select-none py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center"
+                          onClick={() => handleSort("margin")}
+                        >
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span>Margen</span>
+                            {sortField === "margin" ? (
+                              sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
+                            ) : (
+                              <ArrowUpDown className="h-3 w-3 text-neutral-400" />
+                            )}
+                          </div>
+                        </TableHead>
                       )}
-                    </div>
-                  </TableHead>
-                  <TableHead className="w-[100px] font-bold text-neutral-900 py-2.5 text-xs">Categoría</TableHead>
-                  <TableHead className="w-[110px] font-bold text-neutral-900 py-2.5 text-xs">Costo Real</TableHead>
-                  <TableHead 
-                    className="w-[125px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
-                    onClick={() => handleSort("salePrice")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Precio Venta
-                      {sortField === "salePrice" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
-                      )}
-                    </div>
-                  </TableHead>
-                  <TableHead 
-                    className="w-[95px] cursor-pointer hover:text-neutral-900 select-none py-2.5 text-xs"
-                    onClick={() => handleSort("stock")}
-                  >
-                    <div className="flex items-center gap-1 font-bold text-neutral-900">
-                      Stock Posible
-                      {sortField === "stock" && (
-                        sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-neutral-900 font-bold" /> : <ArrowDown className="h-3 w-3 text-neutral-900 font-bold" />
-                      )}
-                    </div>
-                  </TableHead>
-                  {isOwner && (
-                    <TableHead 
-                      className="w-[85px] cursor-pointer hover:text-neutral-900 select-none font-bold text-neutral-900 py-2.5 text-xs"
-                      onClick={() => handleSort("margin")}
-                    >
-                      <div className="flex items-center gap-1">
-                        Margen
-                        {sortField === "margin" ? (
-                          sortOrder === "asc" ? <ArrowUp className="h-3 w-3 text-emerald-600 font-bold" /> : <ArrowDown className="h-3 w-3 text-emerald-600 font-bold" />
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 text-neutral-400" />
-                        )}
-                      </div>
-                    </TableHead>
-                  )}
-                  <TableHead className="w-[45px] text-right pr-3 py-2.5 text-xs" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedCombos.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-28 text-center text-neutral-400 text-xs">
-                      No se encontraron combos o paquetes. Crea uno usando el botón "Nuevo".
-                    </TableCell>
-                  </TableRow>
-                ) : sortedCombos.map((combo) => {
+                      <TableHead className="w-[80px] text-right pr-6 py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                        Acciones
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedCombos.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="h-44 text-center bg-white">
+                          <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                            <div className="h-12 w-12 rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400">
+                              <Layers className="h-6 w-6" />
+                            </div>
+                            <p className="font-semibold text-neutral-800 text-sm">
+                              No hay combos o paquetes registrados
+                            </p>
+                            <p className="text-xs text-neutral-500">
+                              Crea paquetes de servicios y repuestos agrupados usando el botón "Nuevo Artículo".
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setIsCreateComboOpen(true)}
+                              className="mt-2 rounded-xl text-xs font-semibold cursor-pointer"
+                            >
+                              <Plus className="h-3.5 w-3.5 mr-1" />
+                              Crear Combo
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      sortedCombos.map((combo) => {
+                        const margin = calculateMargin(combo.salePrice, combo.costPrice);
+                        return (
+                          <TableRow key={combo.id} className="group hover:bg-neutral-50/70 bg-white border-b border-neutral-100 transition-colors">
+                            <TableCell className="py-3.5 pl-6">
+                              <div className="flex items-center gap-3">
+                                <div className="h-9 w-9 rounded-xl bg-neutral-900 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                                  <Layers className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-neutral-900 text-xs sm:text-sm leading-snug line-clamp-1">{combo.name}</p>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[10px] text-neutral-400 font-mono font-medium">SKU: {combo.sku}</span>
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 rounded-md bg-neutral-50 text-neutral-600 border-neutral-200">
+                                      {combo.comboItems?.length || 0} artículos incluidos
+                                    </Badge>
+                                  </div>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-3.5 text-center whitespace-nowrap">
+                              <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 text-[10px] font-semibold px-2.5 py-0.5">
+                                {combo.category}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-3.5 text-right font-mono text-xs text-neutral-500 whitespace-nowrap tabular-nums">
+                              RD$ {combo.costPrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="py-3.5 text-right font-mono font-black text-xs sm:text-sm text-neutral-900 whitespace-nowrap tabular-nums">
+                              RD$ {combo.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="py-3.5 text-center whitespace-nowrap">
+                              <span className={cn("font-mono font-black text-xs sm:text-sm tabular-nums", combo.stock <= 0 ? "text-rose-600" : "text-emerald-700")}>
+                                {combo.stock}
+                              </span>
+                              <span className="text-[10px] text-neutral-400 font-mono block">unid.</span>
+                            </TableCell>
+                            {isOwner && (
+                              <TableCell className="py-3.5 text-center whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70">
+                                  {margin}%
+                                </span>
+                              </TableCell>
+                            )}
+                            <TableCell className="py-3.5 pr-6 text-right whitespace-nowrap">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-neutral-100 outline-none transition-colors ml-auto cursor-pointer">
+                                  <MoreVertical className="h-4 w-4 text-neutral-400" />
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="rounded-2xl border-neutral-100 p-2 shadow-xl w-44">
+                                  <div className="px-2 pb-1 pt-0.5 text-[9px] font-bold text-neutral-400 uppercase tracking-wider font-mono">OPCIONES</div>
+                                  {isOwner && (
+                                    <DropdownMenuItem className="rounded-xl py-2 cursor-pointer gap-2 text-xs font-medium text-rose-600 focus:text-rose-600" onClick={() => handleDelete(combo.id, combo.name)}>
+                                      <Trash2 className="h-4 w-4" /> Eliminar Combo
+                                    </DropdownMenuItem>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {/* Combos Grid Mode */}
+          {viewMode === "grid" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {sortedCombos.length === 0 ? (
+                <div className="col-span-full flex flex-col items-center justify-center py-16 text-center bg-white rounded-3xl border border-neutral-200/80 p-8 shadow-2xs">
+                  <div className="h-14 w-14 rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400 mb-3">
+                    <Layers className="h-7 w-7" />
+                  </div>
+                  <h3 className="text-base font-bold text-neutral-900 font-heading">
+                    No se encontraron combos
+                  </h3>
+                  <p className="text-xs text-neutral-500 max-w-sm mt-1">
+                    Crea combos o paquetes para empaquetar servicios y piezas con precio promocional.
+                  </p>
+                </div>
+              ) : (
+                sortedCombos.map((combo) => {
                   const margin = calculateMargin(combo.salePrice, combo.costPrice);
                   return (
-                    <TableRow key={combo.id} className="group hover:bg-neutral-50/50">
-                      <TableCell className="py-2 pl-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="h-7 w-7 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0 text-emerald-600 transition-colors">
-                            <Layers className="h-3.5 w-3.5" />
+                    <div
+                      key={combo.id}
+                      className="rounded-2xl border border-neutral-200/80 bg-white p-4 shadow-2xs hover:shadow-xs hover:border-neutral-300 transition-all flex flex-col justify-between group"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-700 border border-neutral-200 text-[10px] font-semibold px-2 py-0.5">
+                            {combo.category}
+                          </Badge>
+                          {isOwner && (
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(combo.id, combo.name)}
+                              className="text-neutral-400 hover:text-rose-600 transition-colors p-1"
+                              title="Eliminar combo"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-start gap-3 mb-3">
+                          <div className="h-11 w-11 rounded-xl bg-neutral-900 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                            <Layers className="h-5 w-5" />
                           </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-neutral-900 text-xs leading-snug line-clamp-1">{combo.name}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <p className="text-[10px] text-neutral-400 font-mono">{combo.sku}</p>
-                              <Badge variant="outline" className="text-[10px] h-4 px-1.5 py-0 bg-neutral-50 text-neutral-500 border-neutral-200">
-                                {combo.comboItems?.length || 0} artículos
-                              </Badge>
-                            </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-bold text-neutral-900 text-sm leading-snug line-clamp-2">
+                              {combo.name}
+                            </h4>
+                            <p className="text-[11px] font-mono text-neutral-400 mt-0.5">
+                              SKU: {combo.sku}
+                            </p>
                           </div>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="rounded-full bg-neutral-100 text-neutral-600 border-none text-xs">
-                          {combo.category}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">RD$ {combo.costPrice.toLocaleString("es-DO")}</TableCell>
-                      <TableCell className="font-semibold text-sm">RD$ {combo.salePrice.toLocaleString("es-DO")}</TableCell>
-                      <TableCell>
-                        <span className={cn("font-bold text-sm", combo.stock <= 0 ? "text-rose-600" : "text-emerald-600")}>
-                          {combo.stock} <span className="text-xs font-normal opacity-70">disponibles</span>
-                        </span>
-                      </TableCell>
-                      {isOwner && (
-                        <TableCell>
-                          <span className="text-sm font-semibold text-emerald-600">{margin}%</span>
-                        </TableCell>
-                      )}
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-neutral-100 outline-none transition-colors">
-                            <MoreVertical className="h-4 w-4 text-neutral-400" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="rounded-xl border-neutral-100 p-2 shadow-lg w-44">
-                            <div className="px-2 pb-1 pt-0.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">OPCIONES</div>
+
+                        <div className="mb-3">
+                          <Badge variant="outline" className="text-[10px] px-2 py-0.5 rounded-lg bg-neutral-50 text-neutral-600 border-neutral-200">
+                            {combo.comboItems?.length || 0} artículos vinculados
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-neutral-100 space-y-2">
+                        <div className="flex items-end justify-between">
+                          <div>
+                            <p className="text-[10px] uppercase font-semibold text-neutral-400 tracking-wider">Precio Venta</p>
+                            <p className="font-mono font-black text-base text-neutral-900 tabular-nums">
+                              RD$ {combo.salePrice.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
                             {isOwner && (
-                              <DropdownMenuItem className="rounded-lg py-2 cursor-pointer gap-2 text-rose-600 focus:text-rose-600" onClick={() => handleDelete(combo.id, combo.name)}>
-                                <Trash2 className="h-4 w-4" /> Eliminar Combo
-                              </DropdownMenuItem>
+                              <span className="inline-block mt-0.5 text-[10px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/60">
+                                Margen: {margin}%
+                              </span>
                             )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] uppercase font-semibold text-neutral-400 tracking-wider">Stock Posible</p>
+                            <p className={cn(
+                              "font-mono font-black text-base tabular-nums",
+                              combo.stock <= 0 ? "text-rose-600" : "text-emerald-700"
+                            )}>
+                              {combo.stock} <span className="text-[10px] font-normal text-neutral-400">unid.</span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Kardex / Movimientos Content */}
+        <TabsContent value="movements" className="mt-4 space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-neutral-500 font-medium">
+              Historial de <strong className="text-neutral-900 font-bold">{movements.length}</strong> movimientos registrados
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-thumb]:bg-neutral-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-neutral-100">
+              <Table className="w-full text-xs min-w-[700px]">
+                <TableHeader className="bg-neutral-50/80">
+                  <TableRow className="border-b border-neutral-200/80">
+                    <TableHead className="py-3.5 pl-6 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                      Producto
+                    </TableHead>
+                    <TableHead className="w-[120px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                      Tipo
+                    </TableHead>
+                    <TableHead className="w-[100px] py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                      Cantidad
+                    </TableHead>
+                    <TableHead className="py-3.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-center">
+                      Motivo / Justificación
+                    </TableHead>
+                    <TableHead className="w-[125px] py-3.5 pr-6 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 text-right">
+                      Fecha / Hora
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {movements.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-44 text-center bg-white">
+                        <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                          <div className="h-12 w-12 rounded-2xl bg-neutral-100 flex items-center justify-center text-neutral-400">
+                            <ArrowLeftRight className="h-6 w-6" />
+                          </div>
+                          <p className="font-semibold text-neutral-800 text-sm">
+                            Sin movimientos de inventario
+                          </p>
+                          <p className="text-xs text-neutral-500">
+                            Las entradas, salidas de facturación y ajustes se registrarán aquí con trazabilidad completa.
+                          </p>
+                        </div>
                       </TableCell>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                  ) : (
+                    [...movements].reverse().map((m) => (
+                      <TableRow key={m.id} className="hover:bg-neutral-50/70 bg-white border-b border-neutral-100 transition-colors">
+                        <TableCell className="py-3 pl-6">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-8 w-8 rounded-xl bg-neutral-900 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                              <Package className="h-3.5 w-3.5" />
+                            </div>
+                            <span className="font-bold text-xs sm:text-sm text-neutral-900">
+                              {m.productName}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span className={cn(
+                              "inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-lg border",
+                              m.type === "in" 
+                                ? "bg-emerald-50 text-emerald-700 border-emerald-200/80" 
+                                : m.type === "out" 
+                                ? "bg-rose-50 text-rose-700 border-rose-200/80" 
+                                : "bg-blue-50 text-blue-700 border-blue-200/80"
+                            )}>
+                              {m.type === "in" ? (
+                                <ArrowUp className="h-3 w-3 text-emerald-600" />
+                              ) : m.type === "out" ? (
+                                <ArrowDown className="h-3 w-3 text-rose-600" />
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 text-blue-600" />
+                              )}
+                              <span>{m.type === "in" ? "Entrada" : m.type === "out" ? "Salida" : "Ajuste"}</span>
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-3 text-center font-mono font-black text-xs sm:text-sm text-neutral-900 tabular-nums">
+                          {m.type === "in" ? `+${m.quantity}` : m.type === "out" ? `-${m.quantity}` : m.quantity}
+                        </TableCell>
+                        <TableCell className="py-3 text-center text-xs text-neutral-600 truncate max-w-[240px]">
+                          {m.reason}
+                        </TableCell>
+                        <TableCell className="py-3 pr-6 text-right whitespace-nowrap">
+                          <p className="font-mono text-xs font-bold text-neutral-900 tabular-nums leading-tight">
+                            {new Date(m.date).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" })}
+                          </p>
+                          <p className="font-mono text-[10px] text-neutral-400 tabular-nums leading-tight mt-0.5">
+                            {new Date(m.date).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         </TabsContent>
 
-        <TabsContent value="movements" className="mt-4">
-          <div className="rounded-2xl border border-neutral-200/80 bg-white shadow-2xs overflow-x-auto">
-            <Table className="w-full text-xs min-w-[650px]">
-              <TableHeader className="bg-neutral-50/80">
-                <TableRow className="border-b border-neutral-200/80">
-                  <TableHead className="py-2.5 pl-3 font-bold text-neutral-900 text-xs">Producto</TableHead>
-                  <TableHead className="w-[100px] py-2.5 font-bold text-neutral-900 text-xs text-center">Tipo</TableHead>
-                  <TableHead className="w-[85px] py-2.5 font-bold text-neutral-900 text-xs text-center">Cantidad</TableHead>
-                  <TableHead className="py-2.5 font-bold text-neutral-900 text-xs text-center">Motivo</TableHead>
-                  <TableHead className="w-[170px] py-2.5 pr-3 font-bold text-neutral-900 text-xs text-center">Fecha</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {movements.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="h-28 text-center text-neutral-400 text-xs">Sin movimientos registrados.</TableCell></TableRow>
-                ) : [...movements].reverse().map((m) => (
-                  <TableRow key={m.id} className="hover:bg-neutral-50/70 transition-colors">
-                    <TableCell className="py-2 pl-3 font-semibold text-xs text-neutral-900">{m.productName}</TableCell>
-                    <TableCell className="py-2 text-center whitespace-nowrap">
-                      <div className="flex items-center justify-center gap-1.5">
-                        {m.type === "in" ? <ArrowUp className="h-3 w-3 text-emerald-600" /> : m.type === "out" ? <ArrowDown className="h-3 w-3 text-rose-600" /> : <ArrowUpDown className="h-3 w-3 text-blue-600" />}
-                        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border border-none", m.type === "in" ? "bg-emerald-50 text-emerald-700" : m.type === "out" ? "bg-rose-50 text-rose-700" : "bg-blue-50 text-blue-700")}>
-                          {m.type === "in" ? "Entrada" : m.type === "out" ? "Salida" : "Ajuste"}
+        {/* Reabastecimiento / Pedidos Content */}
+        <TabsContent value="pedidos" className="mt-4 space-y-6">
+          {/* 1. Alerta de Reposición Prioritaria */}
+          {lowStockCount > 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 shadow-2xs">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <h3 className="font-bold text-sm text-amber-900">
+                  {lowStockCount} Producto{lowStockCount !== 1 ? "s" : ""} Requiere Reposición Inmediata
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {products
+                  .filter((p) => !p.isCombo && p.stock <= p.minStock)
+                  .slice(0, 6)
+                  .map((p) => (
+                    <div
+                      key={p.id}
+                      className="rounded-xl border border-amber-200/80 bg-white p-3 flex items-center justify-between shadow-2xs"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="font-bold text-xs text-neutral-900 truncate">{p.name}</p>
+                        <p className="text-[10px] text-neutral-500 font-mono">
+                          Stock: <strong className={p.stock <= 0 ? "text-rose-600" : "text-amber-600"}>{p.stock}</strong> / Mín: {p.minStock}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setSelectedProduct(p);
+                          setIsQuoteOpen(true);
+                        }}
+                        className="h-7 px-2 text-[10px] font-bold rounded-lg border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 shrink-0 cursor-pointer"
+                      >
+                        Cotizar
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* 2. Órdenes de Compra a Suplidores */}
+          <div>
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="font-heading font-bold text-sm text-neutral-900">
+                Órdenes de Compra & Suministro
+              </h3>
+              <p className="text-xs text-neutral-500 font-medium">
+                {purchaseOrders.length} orden{purchaseOrders.length !== 1 ? "es" : ""} registrada{purchaseOrders.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {purchaseOrders.length === 0 ? (
+                <div className="col-span-full text-center p-12 bg-white rounded-3xl border border-neutral-200/80 flex flex-col items-center justify-center shadow-2xs">
+                  <div className="h-14 w-14 rounded-2xl bg-neutral-100 flex items-center justify-center shadow-2xs mb-3 text-neutral-400">
+                    <Truck className="h-7 w-7" />
+                  </div>
+                  <h4 className="text-base font-bold text-neutral-900 font-heading">No hay órdenes de compra</h4>
+                  <p className="text-xs text-neutral-500 mt-1 max-w-sm">
+                    Los borradores y pedidos a suplidores se generarán aquí automáticamente cuando el inventario baje del mínimo o se importe una factura.
+                  </p>
+                </div>
+              ) : (
+                purchaseOrders.map((po) => (
+                  <Card key={po.id} className="border-neutral-200/80 shadow-2xs rounded-2xl overflow-hidden flex flex-col justify-between bg-white hover:border-neutral-300 hover:shadow-xs transition-all">
+                    <div>
+                      <div className="p-4 bg-neutral-50/80 border-b border-neutral-100 flex items-center justify-between">
+                        <div>
+                          <h4 className="font-bold text-neutral-900 text-sm truncate max-w-[170px]" title={po.supplierId || 'Suplidor Desconocido'}>
+                            {po.supplierId || 'Suplidor Desconocido'}
+                          </h4>
+                          <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
+                            {new Date(po.createdAt).toLocaleDateString("es-DO")}
+                          </p>
+                        </div>
+                        <span className={cn(
+                          "text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-lg border",
+                          po.status === 'borrador' ? "bg-amber-50 text-amber-700 border-amber-200" :
+                          po.status === 'enviada' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                          "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        )}>
+                          {po.status === 'borrador' ? 'Borrador' : po.status === 'enviada' ? 'Enviado' : 'Recibido'}
                         </span>
                       </div>
-                    </TableCell>
-                    <TableCell className="py-2 text-center font-bold text-xs text-neutral-900">{m.quantity}</TableCell>
-                    <TableCell className="py-2 text-center text-xs text-neutral-600 truncate max-w-[220px]">{m.reason}</TableCell>
-                    <TableCell className="py-2 pr-3 text-center text-[11px] text-neutral-500 font-medium whitespace-nowrap">
-                      {new Date(m.date).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" })}, {new Date(m.date).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-        <TabsContent value="pedidos" className="mt-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            {purchaseOrders.length === 0 ? (
-              <div className="col-span-3 text-center p-8 bg-neutral-50 rounded-xl border border-neutral-100 flex flex-col items-center justify-center">
-                <div className="h-12 w-12 rounded-full bg-white flex items-center justify-center shadow-sm border border-neutral-100 mb-3">
-                  <Package className="h-5 w-5 text-neutral-400" />
-                </div>
-                <p className="text-neutral-900 font-bold">No hay pedidos registrados</p>
-                <p className="text-sm text-neutral-500 mt-1 max-w-sm">Los borradores se generarán aquí automáticamente cuando el stock de un producto baje del mínimo establecido.</p>
-              </div>
-            ) : purchaseOrders.map((po) => (
-              <Card key={po.id} className="border-neutral-100 shadow-sm overflow-hidden flex flex-col">
-                <div className="p-4 bg-neutral-50 border-b border-neutral-100 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-bold text-neutral-900 truncate max-w-[150px]" title={po.supplierId || 'Suplidor Desconocido'}>
-                      {po.supplierId || 'Suplidor Desconocido'}
-                    </h3>
-                    <p className="text-[11px] text-neutral-500 mt-0.5">{new Date(po.createdAt).toLocaleDateString()}</p>
-                  </div>
-                  <Badge variant="outline" className={cn(
-                    "text-[10px] uppercase font-black tracking-wider px-2 py-0.5 border",
-                    po.status === 'borrador' ? "bg-amber-50 text-amber-600 border-amber-200" :
-                    po.status === 'enviada' ? "bg-blue-50 text-blue-600 border-blue-200" :
-                    "bg-emerald-50 text-emerald-600 border-emerald-200"
-                  )}>
-                    {po.status === 'borrador' ? 'Borrador' : po.status === 'enviada' ? 'Enviado' : 'Recibido'}
-                  </Badge>
-                </div>
-                <div className="p-4 flex-1">
-                  <p className="text-xs font-semibold text-neutral-500 mb-3 uppercase tracking-wider">
-                    {po.items.length} producto{po.items.length !== 1 && 's'}
-                  </p>
-                  <div className="space-y-2.5 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
-                    {po.items.map((item, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-sm">
-                        <span className="text-neutral-700 truncate pr-2 flex-1 text-xs">{item.productName}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-neutral-900 text-xs">{item.quantity} unid.</span>
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-neutral-400 mb-2 uppercase tracking-wider font-mono">
+                          {po.items.length} producto{po.items.length !== 1 && 's'} en pedido
+                        </p>
+                        <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                          {po.items.map((item: any, idx: number) => (
+                            <div key={idx} className="flex items-center justify-between text-xs">
+                              <span className="text-neutral-700 truncate pr-2 flex-1">{item.productName}</span>
+                              <span className="font-mono font-bold text-neutral-900 shrink-0">{item.quantity} unid.</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-neutral-500 font-medium">Total Estimado</p>
-                    <p className="text-sm font-black text-neutral-900">
-                      RD$ {po.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </p>
-                  </div>
-                  <Button size="sm" className="rounded-lg bg-black text-white hover:bg-neutral-800 transition-colors h-8 text-xs" onClick={() => {
-                     setSelectedPo(po);
-                     setIsPoPreviewOpen(true);
-                  }}>
-                    Revisar & Enviar
-                  </Button>
-                </div>
-              </Card>
-            ))}
+                    </div>
+                    <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">Total Estimado</p>
+                        <p className="text-sm font-mono font-black text-neutral-900 tabular-nums">
+                          RD$ {po.total.toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 transition-colors h-8 text-xs font-semibold cursor-pointer shadow-xs active:scale-[0.98]" 
+                        onClick={() => {
+                          setSelectedPo(po);
+                          setIsPoPreviewOpen(true);
+                        }}
+                      >
+                        Revisar & Enviar
+                      </Button>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
@@ -2170,10 +2777,14 @@ export default function InventoryPage() {
                               const val = Number(e.target.value) || 0;
                               const newItems = [...selectedPo.items];
                               newItems[idx] = { ...newItems[idx], quantity: val };
-                              const newTotal = newItems.reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
-                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              const newSubtotal = Math.round(newItems.reduce((acc, curr) => acc + (curr.quantity * (curr.unitPrice || 0)), 0) * 100) / 100;
+                              const poSupplier = suppliers.find((s) => s.id === selectedPo.supplierId || s.commercialName === selectedPo.supplierId);
+                              const itbisRate = poSupplier?.itbis !== undefined ? poSupplier.itbis : 18;
+                              const newTax = Math.round((newSubtotal * (itbisRate / 100)) * 100) / 100;
+                              const newTotal = Math.round((newSubtotal + newTax) * 100) / 100;
+                              const updatedPo = { ...selectedPo, items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal };
                               setSelectedPo(updatedPo);
-                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal });
                             }}
                           />
                         </TableCell>
@@ -2188,10 +2799,14 @@ export default function InventoryPage() {
                             className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50"
                             onClick={() => {
                               const newItems = selectedPo.items.filter((_: any, i: number) => i !== idx);
-                              const newTotal = newItems.reduce((acc: number, curr: any) => acc + (curr.quantity * (curr.unitPrice || 0)), 0);
-                              const updatedPo = { ...selectedPo, items: newItems, total: newTotal };
+                              const newSubtotal = Math.round(newItems.reduce((acc: number, curr: any) => acc + (curr.quantity * (curr.unitPrice || 0)), 0) * 100) / 100;
+                              const poSupplier = suppliers.find((s) => s.id === selectedPo.supplierId || s.commercialName === selectedPo.supplierId);
+                              const itbisRate = poSupplier?.itbis !== undefined ? poSupplier.itbis : 18;
+                              const newTax = Math.round((newSubtotal * (itbisRate / 100)) * 100) / 100;
+                              const newTotal = Math.round((newSubtotal + newTax) * 100) / 100;
+                              const updatedPo = { ...selectedPo, items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal };
                               setSelectedPo(updatedPo);
-                              updatePurchaseOrder(selectedPo.id, { items: newItems, total: newTotal });
+                              updatePurchaseOrder(selectedPo.id, { items: newItems, subtotal: newSubtotal, tax: newTax, total: newTotal });
                             }}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -2204,8 +2819,12 @@ export default function InventoryPage() {
               </div>
 
               <div className="p-5 sm:px-6 border-t border-neutral-100 bg-neutral-50/80 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-                <div>
-                  <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado</p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-4 text-xs text-neutral-500 font-medium">
+                    <span>Subtotal: <strong className="text-neutral-800">RD$ {(selectedPo.subtotal || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                    <span>ITBIS (18%): <strong className="text-neutral-800">RD$ {(selectedPo.tax || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                  </div>
+                  <p className="text-[11px] uppercase font-bold tracking-wider text-neutral-500 mb-0.5">Total Estimado (c/ITBIS)</p>
                   <p className="text-2xl font-black text-neutral-900 leading-none whitespace-nowrap">RD$ {selectedPo.total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                 </div>
                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">

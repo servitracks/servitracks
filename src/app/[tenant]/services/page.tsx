@@ -5,7 +5,7 @@ import { useStore, Service, Technician } from "@/store/useStore";
 import { 
   Plus, Search, MoreVertical, Layers, Clock, 
   Trash2, Edit, Filter, ChevronRight, X, 
-  UserCog, UserCheck, UserX, Phone, CalendarDays, AlertCircle
+  UserCog, UserCheck, UserX, Phone, CalendarDays, AlertCircle, Percent, Wallet
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,9 +16,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
+import { cn, formatRD } from "@/lib/utils";
 import { toast } from "sonner";
-import { useParams } from "@/lib/next-compat";
+import { useParams, useRouter } from "@/lib/next-compat";
 import { useNominaStore } from "@/store/useNominaStore";
 
 const CATEGORIES = [
@@ -46,8 +46,9 @@ const emptyTechnician: Partial<Technician> = {
 
 export default function ServicesPage() {
   const { tenant } = useParams();
+  const router = useRouter();
   const { services, addService, updateService, deleteService, tenants, technicians, addTechnician, updateTechnician, deleteTechnician } = useStore();
-  const { empleados, addEmpleado } = useNominaStore();
+  const { empleados, addEmpleado, updateEmpleado } = useNominaStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const tenantId = currentTenant?.id ?? "";
   
@@ -88,7 +89,7 @@ export default function ServicesPage() {
     } else {
       const newService: Service = {
         ...(form as Service),
-        id: `s${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId: tenantId,
       };
       addService(newService);
@@ -123,23 +124,57 @@ export default function ServicesPage() {
 
   const handleTechSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!techForm.name) {
+    if (!techForm.name?.trim()) {
       toast.error("El nombre del técnico es obligatorio");
       return;
     }
 
+    const normalizedTipoPago: "porcentaje" | "fijo" =
+      techForm.tipoPago === "fijo" ? "fijo" : "porcentaje";
+    const normalizedPagoNomina = Math.max(0, Number(techForm.pagoNomina || 0));
+
+    if (normalizedTipoPago === "porcentaje" && normalizedPagoNomina > 100) {
+      toast.error("El porcentaje de comisión no puede superar el 100%");
+      return;
+    }
+
     if (editingTechnician) {
-      updateTechnician(editingTechnician.id, techForm);
-      toast.success("Técnico actualizado con éxito");
+      const updatedPayload: Partial<Technician> = {
+        ...techForm,
+        name: techForm.name.trim(),
+        phone: techForm.phone?.trim() || undefined,
+        status: (techForm.status as "active" | "inactive") || "active",
+        tipoPago: normalizedTipoPago,
+        pagoNomina: normalizedPagoNomina,
+      };
+      updateTechnician(editingTechnician.id, updatedPayload);
+
+      // Sincronizar cambios con Nómina si ya existe el empleado
+      const matchingEmp = empleados.find(
+        (emp) =>
+          emp.tenantId === tenantId &&
+          `${emp.nombres} ${emp.apellidos}`.toLowerCase().trim() === editingTechnician.name.toLowerCase().trim()
+      );
+      if (matchingEmp) {
+        const parts = updatedPayload.name!.split(" ");
+        updateEmpleado(matchingEmp.id, {
+          nombres: parts[0] || "",
+          apellidos: parts.slice(1).join(" ") || "",
+          salarioBase: normalizedTipoPago === "fijo" ? normalizedPagoNomina : matchingEmp.salarioBase,
+          estado: updatedPayload.status === "active" ? "activo" : "inactivo",
+        });
+      }
+
+      toast.success(`Técnico ${updatedPayload.name} actualizado (${normalizedTipoPago === "fijo" ? formatRD(normalizedPagoNomina) : `${normalizedPagoNomina}%`})`);
     } else {
       const newTechnician: Technician = {
-        id: `tech-${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId: tenantId,
-        name: techForm.name,
-        phone: techForm.phone || undefined,
+        name: techForm.name.trim(),
+        phone: techForm.phone?.trim() || undefined,
         status: (techForm.status as "active" | "inactive") || "active",
-        pagoNomina: techForm.pagoNomina || 0,
-        tipoPago: techForm.tipoPago || "porcentaje",
+        pagoNomina: normalizedPagoNomina,
+        tipoPago: normalizedTipoPago,
         createdAt: new Date().toISOString(),
       };
       addTechnician(newTechnician);
@@ -150,9 +185,9 @@ export default function ServicesPage() {
       const apellidos = parts.slice(1).join(" ") || "";
       
       addEmpleado({
-        id: `emp-nom-${Date.now()}`,
+        id: crypto.randomUUID(),
         tenantId: tenantId,
-        cedula: "000-0000000-0", // Faltaría información
+        cedula: "000-0000000-0",
         nombres,
         apellidos,
         cargo: "Técnico",
@@ -166,7 +201,7 @@ export default function ServicesPage() {
         updatedAt: new Date().toISOString(),
       });
       
-      toast.success(`Técnico ${techForm.name} registrado con éxito y sincronizado con Nómina`);
+      toast.success(`Técnico ${newTechnician.name} registrado con éxito y sincronizado con Nómina`);
     }
     setIsTechFormOpen(false);
     setEditingTechnician(null);
@@ -175,7 +210,11 @@ export default function ServicesPage() {
 
   const openTechEdit = (tech: Technician) => {
     setEditingTechnician(tech);
-    setTechForm(tech);
+    setTechForm({
+      ...tech,
+      tipoPago: tech.tipoPago === "fijo" ? "fijo" : "porcentaje",
+      pagoNomina: Number(tech.pagoNomina || 0),
+    });
     setIsTechFormOpen(true);
   };
 
@@ -203,7 +242,14 @@ export default function ServicesPage() {
           <h1 className="font-heading text-3xl font-bold tracking-tight text-neutral-900">Catálogo de Servicios</h1>
           <p className="text-neutral-500">Gestiona los servicios que ofrece tu taller y los técnicos.</p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 shrink-0">
+          <Button 
+            variant="outline" 
+            className="rounded-lg border-blue-200 bg-blue-50/60 text-blue-700 font-bold hover:bg-blue-100 gap-2 shrink-0" 
+            onClick={() => router.push(`/${tenant}/mis-comisiones`)}
+          >
+            <Wallet className="h-4 w-4" /> Comisiones y Porcentajes
+          </Button>
           <Button 
             variant="outline" 
             className="rounded-lg border-neutral-200 text-neutral-700 font-bold hover:bg-neutral-50 gap-2 shrink-0" 
@@ -501,11 +547,12 @@ export default function ServicesPage() {
                         </p>
                       </div>
 
-                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+                      <div className="flex items-center gap-1 transition-all">
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-8 w-8 rounded-full text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100" 
+                          title="Editar porcentaje / datos del técnico"
+                          className="h-8 w-8 rounded-full text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100" 
                           onClick={() => openTechEdit(tech)}
                         >
                           <Edit className="h-4 w-4" />
@@ -513,7 +560,8 @@ export default function ServicesPage() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
-                          className="h-8 w-8 rounded-full text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100" 
+                          title={tech.status === "active" ? "Desactivar técnico" : "Activar técnico"}
+                          className="h-8 w-8 rounded-full text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100" 
                           onClick={() => toggleTechStatus(tech)}
                         >
                           {tech.status === "active" ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
@@ -521,6 +569,7 @@ export default function ServicesPage() {
                         <Button 
                           variant="ghost" 
                           size="icon" 
+                          title="Eliminar técnico"
                           className="h-8 w-8 rounded-full text-rose-400 hover:text-rose-700 hover:bg-rose-50" 
                           onClick={() => {
                             deleteTechnician(tech.id);
@@ -530,6 +579,21 @@ export default function ServicesPage() {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
+                    </div>
+
+                    {/* Esquema de Comisión / Porcentaje */}
+                    <div className="rounded-xl bg-blue-50/70 border border-blue-100 px-3 py-2 flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-blue-800 flex items-center gap-1.5">
+                        <Percent className="h-3.5 w-3.5 text-blue-600" />
+                        {tech.tipoPago === "fijo" ? "Monto Fijo:" : "Comisión:"}
+                      </span>
+                      <span className="text-xs font-black text-blue-900">
+                        {tech.pagoNomina && tech.pagoNomina > 0
+                          ? tech.tipoPago === "fijo"
+                            ? formatRD(tech.pagoNomina)
+                            : `${tech.pagoNomina}% por servicio`
+                          : "Sin % configurado"}
+                      </span>
                     </div>
                     
                     <div className="border-t border-dashed border-neutral-100 pt-3 flex flex-col gap-2">

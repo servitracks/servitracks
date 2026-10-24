@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Printer } from "lucide-react";
 import Barcode from "react-barcode";
 
+const BarcodeComponent = Barcode as any;
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -179,7 +181,7 @@ export default function PrintLabelDialog({ open, onOpenChange, product }: Props)
                 </div>
               )}
               <div ref={printRef} className="mt-1 w-full flex flex-col items-center justify-center overflow-hidden flex-1 [&_svg]:max-h-[11mm] [&_svg]:w-auto">
-                <Barcode 
+                <BarcodeComponent 
                   value={codeToPrint} 
                   width={barcodeSettings?.width ?? 1.5} 
                   height={barcodeSettings?.height ?? 40} 

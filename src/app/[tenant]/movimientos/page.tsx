@@ -16,7 +16,7 @@ import {
   CheckCircle2,
   XCircle,
   Printer,
-  X
+  X, Calendar, CalendarRange, History, ClipboardCheck, ShieldAlert
 } from "lucide-react";
 
 export default function MovimientosDashboard() {
@@ -183,21 +183,25 @@ export default function MovimientosDashboard() {
       </div>
 
       {/* Selector de Periodo */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-neutral-500 mr-1">Periodo:</span>
-        {(['hoy', 'mes', 'anual'] as const).map(p => (
-          <button
-            key={p}
-            onClick={() => setPeriodo(p)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-              periodo === p 
-                ? 'bg-neutral-900 text-white shadow-sm' 
-                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
-            }`}
-          >
-            {p === 'hoy' ? 'Hoy' : p === 'mes' ? 'Mensual' : 'Anual'}
-          </button>
-        ))}
+      <div className="flex items-center gap-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">Periodo</span>
+        <div className="inline-flex items-center rounded-xl bg-neutral-100 p-1">
+          {([
+            { id: 'hoy', label: 'Hoy', icon: Clock },
+            { id: 'mes', label: 'Mensual', icon: Calendar },
+            { id: 'anual', label: 'Anual', icon: CalendarRange },
+          ] as const).map(p => (
+            <button
+              key={p.id}
+              onClick={() => setPeriodo(p.id)}
+              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold cursor-pointer transition-colors duration-150 ${
+                periodo === p.id ? 'bg-neutral-900 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-900'
+              }`}
+            >
+              <p.icon className="h-3.5 w-3.5" /> {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tarjetas de Resumen Rápido (KPIs) — Clickeables */}
@@ -262,50 +266,44 @@ export default function MovimientosDashboard() {
       </div>
 
       {/* Navegación por Tabs */}
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-100 overflow-hidden flex flex-col h-[600px]">
-        <div className="flex items-center border-b border-neutral-100 p-2 gap-2 bg-neutral-50/50">
-          <button 
-            onClick={() => { setActiveTab('movimientos'); setFilterType(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'movimientos' ? 'bg-white shadow-sm text-neutral-900 border border-neutral-200/60' : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900'}`}
-          >
-            Historial de Movimientos
-            {filterType && activeTab === 'movimientos' && (
-              <span className={`ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-full ${filterType === 'in' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-                {filterType === 'in' ? 'Entradas' : 'Salidas'}
-              </span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setActiveTab('auditorias'); setFilterType(null); }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'auditorias' ? 'bg-white shadow-sm text-neutral-900 border border-neutral-200/60' : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900'}`}
-          >
-            Pases de Inventario
-          </button>
-          <button 
-            onClick={() => { setActiveTab('stock_minimo'); setFilterType(null); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'stock_minimo' ? 'bg-white shadow-sm text-orange-600 border border-orange-100' : 'text-neutral-500 hover:bg-orange-50 hover:text-orange-600'}`}
-          >
-            Stock Mínimo
-            {(lowStockProducts.length + zeroStockProducts.length) > 0 && (
-              <span className="bg-orange-100 text-orange-600 px-1.5 rounded-full text-xs">{lowStockProducts.length + zeroStockProducts.length}</span>
-            )}
-          </button>
-          <button 
-            onClick={() => { setActiveTab('alertas'); setFilterType(null); }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'alertas' ? 'bg-white shadow-sm text-rose-600 border border-rose-100' : 'text-neutral-500 hover:bg-rose-50 hover:text-rose-600'}`}
-          >
-            Alertas de Seguridad
-            {alertas.length > 0 && (
-              <span className="bg-rose-100 text-rose-600 px-1.5 rounded-full text-xs">{alertas.length}</span>
-            )}
-          </button>
-          {/* Botón de limpiar filtro cuando hay uno activo */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/70 overflow-hidden flex flex-col h-[640px]">
+        <div className="flex items-center gap-1.5 border-b border-neutral-100 p-2 overflow-x-auto">
+          {([
+            { id: 'movimientos', label: 'Historial de movimientos', icon: History, count: 0, badge: '' },
+            { id: 'auditorias', label: 'Pases de inventario', icon: ClipboardCheck, count: 0, badge: '' },
+            { id: 'stock_minimo', label: 'Stock mínimo', icon: TrendingDown, count: lowStockProducts.length + zeroStockProducts.length, badge: 'bg-orange-100 text-orange-700' },
+            { id: 'alertas', label: 'Alertas de seguridad', icon: ShieldAlert, count: alertas.length, badge: 'bg-rose-100 text-rose-700' },
+          ] as const).map(t => {
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => { setActiveTab(t.id as any); setFilterType(null); }}
+                className={`shrink-0 flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold cursor-pointer transition-colors duration-150 active:scale-[0.98] ${
+                  active ? 'bg-neutral-900 text-white shadow-sm' : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900'
+                }`}
+              >
+                <t.icon className="h-4 w-4" />
+                {t.label}
+                {t.count > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${active ? 'bg-white/15 text-white' : t.badge}`}>
+                    {t.count}
+                  </span>
+                )}
+                {t.id === 'movimientos' && filterType && active && (
+                  <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                    {filterType === 'in' ? 'Entradas' : 'Salidas'}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           {filterType && activeTab === 'movimientos' && (
             <button
               onClick={() => setFilterType(null)}
-              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold bg-neutral-200 text-neutral-700 hover:bg-neutral-300 transition-colors"
+              className="ml-auto shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 cursor-pointer transition-colors"
             >
-              ✕ Quitar filtro
+              <X className="h-3.5 w-3.5" /> Quitar filtro
             </button>
           )}
         </div>
@@ -328,19 +326,16 @@ export default function MovimientosDashboard() {
                 </div>
               </div>
               
-              <div className="rounded-xl border border-neutral-100 overflow-hidden">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-neutral-50 border-b border-neutral-100 text-neutral-500">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">Fecha</th>
-                      <th className="px-4 py-3 font-medium">Producto</th>
-                      <th className="px-4 py-3 font-medium">Usuario</th>
-                      <th className="px-4 py-3 font-medium">Comentario</th>
-                      <th className="px-4 py-3 font-medium text-center">Entra</th>
-                      <th className="px-4 py-3 font-medium text-center">Sale</th>
-                      <th className="px-4 py-3 font-bold text-neutral-900 text-center">Saldo</th>
-                      <th className="px-4 py-3 font-medium text-right">Costo</th>
-                      <th className="px-4 py-3 font-medium text-right">Balance Total</th>
+              <div className="rounded-xl border border-neutral-200/70 overflow-x-auto">
+                <table className="w-full min-w-[860px] text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-neutral-50 border-b border-neutral-200/70">
+                    <tr className="text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500">
+                      <th className="px-4 py-3 w-[120px]">Fecha</th>
+                      <th className="px-4 py-3">Producto</th>
+                      <th className="px-4 py-3 w-[170px]">Usuario</th>
+                      <th className="px-4 py-3 w-[110px] text-center">Movimiento</th>
+                      <th className="px-4 py-3 w-[80px] text-center">Saldo</th>
+                      <th className="px-4 py-3 w-[150px] text-right">Valor</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
@@ -354,13 +349,20 @@ export default function MovimientosDashboard() {
                         }
                         return true;
                       })
-                      .map(mov => (
-                      <tr key={mov.id} className="hover:bg-neutral-50/50 transition-colors">
-                        <td className="px-4 py-3 text-neutral-600 whitespace-nowrap text-xs">
-                          {new Date(mov.date).toLocaleString()}
+                      .map(mov => {
+                        const isIn = mov.type === 'in' || (mov.type === 'adjustment' && mov.quantity > 0);
+                        const d = new Date(mov.date);
+                        return (
+                      <tr key={mov.id} className="align-middle hover:bg-neutral-50/70 transition-colors duration-150">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <p className="text-xs font-semibold text-neutral-800 tabular-nums">{d.toLocaleDateString('es-DO', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                          <p className="text-[11px] text-neutral-400 tabular-nums">{d.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}</p>
                         </td>
-                        <td className="px-4 py-3 font-medium text-neutral-900">{mov.productName}</td>
-                        <td className="px-4 py-3 text-neutral-700 whitespace-nowrap">
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-semibold text-neutral-900 line-clamp-1" title={mov.productName}>{mov.productName}</p>
+                          <p className="text-xs text-neutral-500 line-clamp-1" title={mov.reason}>{mov.reason}</p>
+                        </td>
+                        <td className="px-4 py-3">
                           {(() => {
                             const effectiveUserId = mov.userId || (!mov.technicianId ? currentUserId : undefined);
                             let name = null;
@@ -384,61 +386,42 @@ export default function MovimientosDashboard() {
                               receptionist: 'Recepción', warehouse: 'Almacén', cashier: 'Caja'
                             };
 
-                            const roleColors: Record<string, string> = {
-                              owner: 'bg-purple-100 text-purple-700', admin: 'bg-blue-100 text-blue-700',
-                              mechanic: 'bg-orange-100 text-orange-700', receptionist: 'bg-emerald-100 text-emerald-700',
-                              warehouse: 'bg-amber-100 text-amber-700', cashier: 'bg-teal-100 text-teal-700'
-                            };
-
                             const roleLabel = role ? roleLabels[role] || role : '';
-                            const roleColor = role ? roleColors[role] || 'bg-neutral-100 text-neutral-700' : '';
 
                             return name ? (
-                              <div className="flex flex-col gap-0.5">
-                                <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-5 h-5 rounded-full bg-neutral-100 flex items-center justify-center text-[9px] font-bold text-neutral-600 uppercase">
-                                    {name.charAt(0)}
-                                  </span>
-                                  <span className="text-[11px] font-medium">{name}</span>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-[10px] font-bold text-neutral-600 uppercase">
+                                  {name.split(' ').map((w: string) => w[0]).slice(0, 2).join('')}
                                 </span>
-                                {roleLabel && (
-                                  <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded w-fit ml-6 ${roleColor}`}>
-                                    {roleLabel}
-                                  </span>
-                                )}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-neutral-800 truncate">{name}</p>
+                                  {roleLabel && <p className="text-[11px] text-neutral-400">{roleLabel}</p>}
+                                </div>
                               </div>
                             ) : (
-                              <span className="text-neutral-400 text-[10px] italic">Sistema</span>
+                              <span className="text-xs text-neutral-400">Sistema</span>
                             );
                           })()}
                         </td>
-                        <td className="px-4 py-3 text-neutral-500 text-xs max-w-[200px] truncate" title={mov.reason}>
-                          {mov.reason}
-                        </td>
                         <td className="px-4 py-3 text-center">
-                          {mov.type === 'in' || (mov.type === 'adjustment' && mov.quantity > 0) ? (
-                            <span className="font-bold text-green-600">+{Math.abs(mov.quantity)}</span>
-                          ) : <span className="text-neutral-300">-</span>}
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums ${isIn ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                            {isIn ? <ArrowDownRight className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
+                            {isIn ? '+' : '−'}{Math.abs(mov.quantity)}
+                          </span>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          {mov.type === 'out' || (mov.type === 'adjustment' && mov.quantity < 0) ? (
-                            <span className="font-bold text-rose-600">-{Math.abs(mov.quantity)}</span>
-                          ) : <span className="text-neutral-300">-</span>}
-                        </td>
-                        <td className="px-4 py-3 font-bold text-neutral-900 text-center bg-blue-50/30">
+                        <td className="px-4 py-3 text-center text-sm font-bold tabular-nums text-neutral-900">
                           {mov.resultingStock}
                         </td>
-                        <td className="px-4 py-3 text-right text-neutral-500 font-mono">
-                          RD${mov.unitCost.toLocaleString()}
-                        </td>
-                        <td className="px-4 py-3 text-right font-bold text-neutral-900 font-mono bg-neutral-50/50">
-                          RD${(mov.resultingStock * mov.unitCost).toLocaleString()}
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <p className="text-sm font-bold tabular-nums text-neutral-900">RD$ {(mov.resultingStock * mov.unitCost).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                          <p className="text-[11px] text-neutral-400 tabular-nums">RD$ {mov.unitCost.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} c/u</p>
                         </td>
                       </tr>
-                    ))}
+                        );
+                      })}
                     {movementsWithRunningStock.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="text-center py-8 text-neutral-400">No hay movimientos registrados.</td>
+                        <td colSpan={6} className="text-center py-12 text-sm text-neutral-400">No hay movimientos registrados.</td>
                       </tr>
                     )}
                   </tbody>
