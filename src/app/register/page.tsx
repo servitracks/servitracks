@@ -593,7 +593,8 @@ export default function RegisterPage() {
           config: {
             umbral_diferencia_caja: 500,
             formato_ticket: "80mm",
-            formato_ticket_default: "80mm"
+            formato_ticket_default: "80mm",
+            pricesIncludeItbis: true
           },
           plan_id: form.plan_id,
           estado: "TRIAL",

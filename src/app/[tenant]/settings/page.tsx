@@ -823,40 +823,40 @@ export default function SettingsPage() {
                 <div className="space-y-1 pr-4">
                   <div className="flex items-center gap-2">
                     <h4 className="text-sm font-bold text-neutral-900">
-                      {taller.config?.pricesIncludeItbis ? "PRECIOS INCLUYEN ITBIS" : "PRECIOS NO INCLUYEN ITBIS"}
+                      {taller.config?.pricesIncludeItbis !== false ? "PRECIOS INCLUYEN ITBIS" : "PRECIOS NO INCLUYEN ITBIS"}
                     </h4>
                     <span className={cn(
                       "text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider",
-                      taller.config?.pricesIncludeItbis
+                      taller.config?.pricesIncludeItbis !== false
                         ? "bg-blue-600 text-white"
                         : "bg-neutral-200 text-neutral-700"
                     )}>
-                      {taller.config?.pricesIncludeItbis ? "Modo Extracción (18% ya incluido)" : "Modo Aditivo (+18% sobre precio)"}
+                      {taller.config?.pricesIncludeItbis !== false ? "Modo Extracción (18% ya incluido)" : "Modo Aditivo (+18% sobre precio)"}
                     </span>
                   </div>
                   <p className="text-xs text-neutral-600">
-                    {taller.config?.pricesIncludeItbis
-                      ? "Los precios de tus productos ya contienen el 18% de ITBIS. En el POS, el sistema extraerá y desglosará automáticamente la base y el ITBIS (Base = Precio / 1.18). Para clientes que no paguen ITBIS, el sistema lo descuenta."
+                    {taller.config?.pricesIncludeItbis !== false
+                      ? "Los precios de tus productos ya contienen el 18% de ITBIS. En el POS, el sistema extraerá y desglosará automáticamente la base y el ITBIS (Base = Precio / 1.18). Si se desactiva el ITBIS en la venta, se cobra el valor íntegro del artículo sin ITBIS."
                       : "Los precios de tus productos son netos (sin impuestos). En el POS, el sistema calculará y sumará el 18% de ITBIS sobre el subtotal cuando aplique."}
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    const currentVal = Boolean(taller.config?.pricesIncludeItbis);
+                    const currentVal = taller.config?.pricesIncludeItbis !== false;
                     const newVal = !currentVal;
                     updateTenant(taller.id, { config: { ...taller.config, pricesIncludeItbis: newVal } });
                     toast.success(newVal ? "Modalidad activada: Los precios ahora INCLUYEN ITBIS (Extracción 18%)" : "Modalidad activada: Los precios NO incluyen ITBIS (Cálculo aditivo)");
                   }}
                   className={cn(
                     "h-6 w-11 rounded-full transition-all relative cursor-pointer border-none shrink-0",
-                    taller.config?.pricesIncludeItbis ? "bg-blue-600" : "bg-neutral-200"
+                    taller.config?.pricesIncludeItbis !== false ? "bg-blue-600" : "bg-neutral-200"
                   )}
                   title="Cambiar modalidad de precios con ITBIS"
                 >
                   <div className={cn(
                     "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
-                    taller.config?.pricesIncludeItbis ? "left-5" : "left-0.5"
+                    taller.config?.pricesIncludeItbis !== false ? "left-5" : "left-0.5"
                   )} />
                 </button>
               </div>
@@ -866,35 +866,35 @@ export default function SettingsPage() {
                 <div className="font-bold text-neutral-800 flex items-center justify-between">
                   <span>Ejemplo práctico con un producto de RD$ 1,180.00:</span>
                   <span className="text-[11px] font-medium text-neutral-500">
-                    {taller.config?.pricesIncludeItbis ? "Configuración activa: PRECIOS INCLUYEN ITBIS" : "Configuración activa: PRECIOS NO INCLUYEN ITBIS"}
+                    {taller.config?.pricesIncludeItbis !== false ? "Configuración activa: PRECIOS INCLUYEN ITBIS" : "Configuración activa: PRECIOS NO INCLUYEN ITBIS"}
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="bg-white p-2.5 rounded-lg border border-neutral-200/60 shadow-2xs">
                     <span className="text-[10px] text-neutral-400 block font-semibold">Subtotal (Base imponible)</span>
                     <span className="text-sm font-bold text-neutral-900">
-                      {taller.config?.pricesIncludeItbis ? "RD$ 1,000.00" : "RD$ 1,180.00"}
+                      {taller.config?.pricesIncludeItbis !== false ? "RD$ 1,000.00" : "RD$ 1,180.00"}
                     </span>
                     <span className="text-[10px] text-neutral-400 block">
-                      {taller.config?.pricesIncludeItbis ? "(1,180 / 1.18)" : "(Precio neto)"}
+                      {taller.config?.pricesIncludeItbis !== false ? "(1,180 / 1.18)" : "(Precio neto)"}
                     </span>
                   </div>
                   <div className="bg-white p-2.5 rounded-lg border border-neutral-200/60 shadow-2xs">
                     <span className="text-[10px] text-neutral-400 block font-semibold">ITBIS (18%)</span>
                     <span className="text-sm font-bold text-blue-600">
-                      {taller.config?.pricesIncludeItbis ? "RD$ 180.00" : "RD$ 212.40"}
+                      {taller.config?.pricesIncludeItbis !== false ? "RD$ 180.00" : "RD$ 212.40"}
                     </span>
                     <span className="text-[10px] text-neutral-400 block">
-                      {taller.config?.pricesIncludeItbis ? "(Extraído del precio)" : "(1,180 x 18%)"}
+                      {taller.config?.pricesIncludeItbis !== false ? "(Extraído del precio)" : "(1,180 x 18%)"}
                     </span>
                   </div>
                   <div className="bg-white p-2.5 rounded-lg border border-neutral-200/60 shadow-2xs">
                     <span className="text-[10px] text-neutral-400 block font-semibold">Total a Cobrar</span>
                     <span className="text-sm font-black text-emerald-700">
-                      {taller.config?.pricesIncludeItbis ? "RD$ 1,180.00" : "RD$ 1,392.40"}
+                      {taller.config?.pricesIncludeItbis !== false ? "RD$ 1,180.00" : "RD$ 1,392.40"}
                     </span>
                     <span className="text-[10px] text-neutral-400 block">
-                      {taller.config?.pricesIncludeItbis ? "(Mantiene el precio marcado)" : "(Subtotal + ITBIS)"}
+                      {taller.config?.pricesIncludeItbis !== false ? "(Mantiene el precio marcado)" : "(Subtotal + ITBIS)"}
                     </span>
                   </div>
                 </div>

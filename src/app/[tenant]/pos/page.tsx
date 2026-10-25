@@ -148,7 +148,7 @@ export default function POSPage() {
   const orderId = searchParams.get("orderId");
   const quoteId = searchParams.get("quoteId");
   
-  const { products, tenants, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab, quotes, updateQuote } = useStore();
+  const { products, tenants, updateTenant, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab, quotes, updateQuote } = useStore();
   const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
@@ -343,12 +343,12 @@ export default function POSPage() {
   };
   // Modalidad de ITBIS: Precios incluyen ITBIS (extracción 18%) vs Precios no incluyen ITBIS (cálculo aditivo)
   const [pricesIncludeItbis, setPricesIncludeItbis] = useState<boolean>(() => {
-    return Boolean(currentTenant?.config?.pricesIncludeItbis);
+    return currentTenant?.config?.pricesIncludeItbis !== false;
   });
 
   useEffect(() => {
     if (currentTenant?.config?.pricesIncludeItbis !== undefined) {
-      setPricesIncludeItbis(Boolean(currentTenant.config.pricesIncludeItbis));
+      setPricesIncludeItbis(currentTenant.config.pricesIncludeItbis !== false);
     }
   }, [currentTenant?.config?.pricesIncludeItbis]);
 
@@ -390,10 +390,10 @@ export default function POSPage() {
       itbis = calculatedTax;
       total = Math.round(grossAfterDiscount * 100) / 100;
     } else {
-      // Cliente sin ITBIS: Se le descuenta el 18% extraído y se le cobra solo la base neta
-      subtotal = calculatedNet;
+      // Cliente sin ITBIS: Se mantiene el valor del artículo (ej. 425 queda en 425 sin ITBIS)
+      subtotal = Math.round(grossAfterDiscount * 100) / 100;
       itbis = 0;
-      total = calculatedNet;
+      total = Math.round(grossAfterDiscount * 100) / 100;
     }
   } else {
     // ── MODO: PRECIOS NO INCLUYEN ITBIS (Cálculo Aditivo Tradicional) ──
@@ -1092,7 +1092,7 @@ export default function POSPage() {
               items: cart.map(i => {
                 const rate = getItemTaxRate(i);
                 const discountedUnitPrice = i.salePrice * discountRatio;
-                const netPrice = (pricesIncludeItbis && rate > 0)
+                const netPrice = (pricesIncludeItbis && rate > 0 && isItbisEnabled && !isSpecialRegime)
                   ? Math.round((discountedUnitPrice / (1 + rate / 100)) * 100) / 100
                   : Math.round(discountedUnitPrice * 100) / 100;
                 const itemIsExempt = isSpecialRegime || !isItbisEnabled || rate === 0;
@@ -1236,7 +1236,7 @@ export default function POSPage() {
               lineNet = Math.round((gross / (1 + itemTaxRate / 100)) * 100) / 100;
               lineTax = Math.round((gross - lineNet) * 100) / 100;
             } else {
-              lineNet = Math.round((gross / (itemTaxRate > 0 ? (1 + itemTaxRate / 100) : 1)) * 100) / 100;
+              lineNet = Math.round(gross * 100) / 100;
               lineTax = 0;
             }
           } else {
@@ -1252,6 +1252,8 @@ export default function POSPage() {
             quantity: i.quantity, 
             unitPrice: i.salePrice, 
             tax: lineTax,
+            taxAmount: lineTax,
+            taxPercentage: isItbisEnabled ? itemTaxRate : 0,
             laborPrice: itemCommission,
             alreadyDeducted: Boolean((i as any).alreadyDeducted),
           };
@@ -1944,6 +1946,10 @@ export default function POSPage() {
                             <span className="px-1 py-0.5 rounded bg-neutral-100 text-neutral-500 text-[9px] font-bold leading-none">
                               Exento
                             </span>
+                          ) : !isItbisEnabled ? (
+                            <span className="px-1 py-0.5 rounded bg-neutral-100 text-neutral-500 text-[9px] font-bold leading-none">
+                              Sin ITBIS
+                            </span>
                           ) : pricesIncludeItbis ? (
                             <span className="px-1 py-0.5 rounded bg-blue-50 text-blue-600 text-[9px] font-bold leading-none">
                               ITBIS incl.
@@ -2192,7 +2198,7 @@ export default function POSPage() {
             <div className="bg-white rounded-xl border border-neutral-200/90 px-3.5 py-2.5 shadow-2xs space-y-1.5">
               <div className="flex justify-between text-xs text-neutral-500 items-center">
                 <span className="font-medium">
-                  {pricesIncludeItbis ? "Subtotal (Base neta)" : "Subtotal"}
+                  {pricesIncludeItbis && isItbisEnabled ? "Subtotal (Base neta)" : "Subtotal"}
                 </span>
                 <span className="font-bold text-neutral-800 tabular-nums">
                   RD$ {subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2226,6 +2232,11 @@ export default function POSPage() {
                     onClick={() => {
                       const nextVal = !pricesIncludeItbis;
                       setPricesIncludeItbis(nextVal);
+                      if (currentTenant?.id) {
+                        updateTenant(currentTenant.id, {
+                          config: { ...currentTenant.config, pricesIncludeItbis: nextVal }
+                        });
+                      }
                       toast.info(nextVal ? "Modo: Precios INCLUYEN ITBIS (Extrayendo 18%)" : "Modo: Precios NO incluyen ITBIS (Calculando 18% adicional)");
                     }}
                     title="Clic para alternar entre Precios con ITBIS incluido o +18% adicional"

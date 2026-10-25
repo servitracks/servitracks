@@ -157,6 +157,8 @@ export interface Product {
   stock: number;
   minStock: number;
   tax: number;
+  taxAmount?: number;
+  taxPercentage?: number;
   image?: string;
   supplier?: string;
   location?: string;
@@ -268,6 +270,8 @@ export interface InvoiceItem {
   laborPrice?: number; // Comisión del técnico extraída en el momento de la venta
   discount?: number;
   tax: number;
+  taxAmount?: number;
+  taxPercentage?: number;
   alreadyDeducted?: boolean;
 }
 
