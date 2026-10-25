@@ -608,7 +608,7 @@ export function Ticket({
             </div>
             {ordenObj.itbis > 0 && (
               <div className="flex justify-between text-neutral-600">
-                <span>{tenantObj.config?.pricesIncludeItbis !== false ? "ITBIS (18% extraído):" : "ITBIS (18%):"}</span>
+                <span>ITBIS (18%):</span>
                 <span className="font-semibold text-neutral-900">{formatRD(ordenObj.itbis)}</span>
               </div>
             )}
@@ -967,7 +967,7 @@ export function Ticket({
           <div className="flex justify-between items-center gap-2">
             <div className="flex items-center gap-1.5 font-semibold shrink-0">
               <Landmark className="h-3.5 w-3.5 shrink-0 text-black" />
-              <span>{tenantObj.config?.pricesIncludeItbis !== false ? "ITBIS 18% (Extraído)" : "ITBIS 18%"}</span>
+              <span>ITBIS (18%)</span>
             </div>
             <span className="font-semibold tabular-nums tracking-tight whitespace-nowrap">
               {formatRD(ordenObj.itbis)}
