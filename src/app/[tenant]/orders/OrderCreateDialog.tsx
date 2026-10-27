@@ -132,10 +132,17 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
 
   useEffect(() => {
     if (open) {
-      const cId = searchParams.get("customerId");
-      const vId = searchParams.get("vehicleId");
+      const cId = searchParams.get("customerId") || searchParams.get("customer");
+      let vId = searchParams.get("vehicleId");
+      const plate = searchParams.get("plate");
       const category = searchParams.get("category");
-      if (cId && vId) {
+
+      if (!vId && plate && vehicles.length > 0) {
+        const found = vehicles.find(v => v.plate.toUpperCase() === plate.toUpperCase() || v.id === plate);
+        if (found) vId = found.id;
+      }
+
+      if (cId) {
         let initialServiceIds: string[] = [];
         let desc = "";
         
@@ -164,9 +171,9 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
         setForm({
           ...emptyForm,
           customerId: cId,
-          vehicleId: vId,
+          vehicleId: vId || "",
           description: desc || "Mantenimiento preventivo",
-          notes: "Creado automáticamente desde Alerta de Mantenimiento",
+          notes: category ? "Creado automáticamente desde Alerta de Mantenimiento" : "",
           currentKm: "",
           kmUnit: "km",
           serviceIds: initialServiceIds,

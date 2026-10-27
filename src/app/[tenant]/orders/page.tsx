@@ -24,7 +24,7 @@ import { toast } from "sonner";
 const LazyCreateDialog = lazy(() => import("./OrderCreateDialog"));
 const LazyDetailDialog = lazy(() => import("./OrderDetailDialog"));
 
-const statusConfig = {
+const statusConfig: Record<string, { label: string; color: string; dot: string; icon: any }> = {
   pending: {
     label: "Pendiente",
     color: "bg-neutral-100 text-neutral-800 border-neutral-200",
@@ -59,7 +59,7 @@ const statusConfig = {
     label: "Entregado",
     color: "bg-neutral-900 text-white border-neutral-900",
     dot: "bg-white",
-    icon: CheckCircle2,
+    icon: ShieldCheck,
   },
   invoiced: {
     label: "Facturado",
@@ -67,13 +67,37 @@ const statusConfig = {
     dot: "bg-purple-500",
     icon: Banknote,
   },
-} as const;
+  cancelled: {
+    label: "Cancelado",
+    color: "bg-rose-50 text-rose-700 border-rose-200/80",
+    dot: "bg-rose-400",
+    icon: X,
+  },
+  cancelada: {
+    label: "Cancelada",
+    color: "bg-rose-50 text-rose-700 border-rose-200/80",
+    dot: "bg-rose-400",
+    icon: X,
+  },
+};
 
-type Status = keyof typeof statusConfig;
+const DEFAULT_STATUS_CONFIG = {
+  label: "Pendiente",
+  color: "bg-neutral-100 text-neutral-800 border-neutral-200",
+  dot: "bg-neutral-400",
+  icon: Clock,
+};
+
+function getStatusConfig(status?: string) {
+  if (!status) return DEFAULT_STATUS_CONFIG;
+  return (statusConfig as Record<string, any>)[status] || DEFAULT_STATUS_CONFIG;
+}
+
+type Status = WorkOrder['status'];
 
 const STATUS_FLOW: Status[] = ["pending", "diagnosing", "repairing", "waiting_parts", "finished", "delivered", "invoiced"];
 
-const statusLabels: Record<Status, string> = {
+const statusLabels: Record<string, string> = {
   pending: "Pendiente",
   diagnosing: "En Diagnóstico",
   repairing: "En Reparación",
@@ -81,6 +105,8 @@ const statusLabels: Record<Status, string> = {
   finished: "Finalizado",
   delivered: "Entregado",
   invoiced: "Facturado",
+  cancelled: "Cancelado",
+  cancelada: "Cancelada",
 };
 
 export default function OrdersPage() {
@@ -149,9 +175,11 @@ export default function OrdersPage() {
   const usagePercentage = orderLimit ? Math.min(Math.round((ordersThisMonth / orderLimit) * 100), 100) : 0;
 
   useEffect(() => {
-    const cId = searchParams.get("customerId");
+    const cId = searchParams.get("customerId") || searchParams.get("customer");
     const vId = searchParams.get("vehicleId");
-    if (cId && vId) {
+    const plate = searchParams.get("plate");
+    const create = searchParams.get("create");
+    if (create === "true" || (cId && vId) || (cId && plate)) {
       setIsCreateOpen(true);
     }
   }, [searchParams]);
@@ -678,8 +706,8 @@ export default function OrdersPage() {
             </div>
           ) : (
             filteredOrders.map((order) => {
-              const config = statusConfig[order.status];
-              const StatusIcon = config.icon;
+              const config = getStatusConfig(order.status);
+              const StatusIcon = config?.icon || Clock;
               const idx = STATUS_FLOW.indexOf(order.status);
               const nextStatus = idx < STATUS_FLOW.length - 1 ? STATUS_FLOW[idx + 1] : null;
               const vehicle = getVehicleObj(order.vehicleId);
@@ -843,7 +871,7 @@ export default function OrdersPage() {
                             )}
                             onClick={() => setStatus(order.id, s)}
                           >
-                            <div className={cn("h-2 w-2 rounded-full", statusConfig[s].dot)} />
+                            <div className={cn("h-2 w-2 rounded-full", getStatusConfig(s).dot)} />
                             <span>{statusLabels[s]}</span>
                           </DropdownMenuItem>
                         ))}
@@ -875,8 +903,8 @@ export default function OrdersPage() {
       {viewMode === "kanban" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 overflow-x-auto pb-4">
           {STATUS_FLOW.map((status) => {
-            const config = statusConfig[status];
-            const StatusIcon = config.icon;
+            const config = getStatusConfig(status);
+            const StatusIcon = config?.icon || Clock;
             const colOrders = orders.filter((o) => o.status === status);
 
             return (

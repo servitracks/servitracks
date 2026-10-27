@@ -536,7 +536,7 @@ export default function CustomerDetailPage() {
 
               {/* Botón rápido para abrir nueva orden */}
               <Button
-                onClick={() => router.push(`/${tenant}/orders`)}
+                onClick={() => router.push(`/${tenant}/orders?create=true&customerId=${customer.id}`)}
                 className="w-full rounded-2xl bg-neutral-900 text-white hover:bg-neutral-800 text-xs font-semibold h-11 gap-2 shadow-sm cursor-pointer active:scale-[0.98]"
               >
                 <Wrench className="h-4 w-4" />
@@ -551,7 +551,8 @@ export default function CustomerDetailPage() {
           {/* BARRA DE PESTAÑAS (Con control directo y activo garantizado en negro) */}
           <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-neutral-100/90 border border-neutral-200/80 overflow-x-auto scrollbar-none">
             {tabsConfig.map((tab) => {
-              const Icon = tab.icon;
+              if (!tab) return null;
+              const Icon = tab.icon || Car;
               const isActive = activeTab === tab.id;
               return (
                 <button
@@ -735,7 +736,7 @@ export default function CustomerDetailPage() {
 
                           <Button
                             size="sm"
-                            onClick={() => router.push(`/${tenant}/orders?create=true&customer=${customer.id}&plate=${vehicle.plate}`)}
+                            onClick={() => router.push(`/${tenant}/orders?create=true&customerId=${customer.id}&vehicleId=${vehicle.id}&plate=${vehicle.plate}`)}
                             className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 text-xs font-semibold h-8 px-3 gap-1 shadow-2xs cursor-pointer active:scale-[0.98]"
                           >
                             <Plus className="h-3 w-3" />

@@ -593,7 +593,7 @@ export default function CotizacionesPage() {
                     const customer = customers.find((c) => c.id === quote.customerId);
                     const vehicle = vehicles.find((v) => v.id === quote.vehicleId);
                     const statusInfo = statusConfig[quote.status] || statusConfig.draft;
-                    const StatusIcon = statusInfo.icon;
+                    const StatusIcon = statusInfo?.icon || Clock;
                     const expiryInfo = getExpiryInfo(quote.validUntil);
                     const customerInitials = customer?.name
                       ? customer.name

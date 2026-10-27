@@ -648,7 +648,10 @@ export default function CustomersPage() {
             iconBg: "bg-amber-50 text-amber-700 border-amber-200/80",
             tabAction: "business" as CustomerFilterTab,
           },
-        ].map((kpi) => (
+        ].map((kpi) => {
+          if (!kpi) return null;
+          const KpiIcon = kpi.icon || Users;
+          return (
           <button
             key={kpi.label}
             type="button"
@@ -663,10 +666,10 @@ export default function CustomersPage() {
             <div
               className={cn(
                 "flex h-10 w-10 items-center justify-center rounded-xl border flex-shrink-0 transition-transform group-hover:scale-105",
-                kpi.iconBg
+                kpi.iconBg || "bg-neutral-100"
               )}
             >
-              <kpi.icon className="h-5 w-5" />
+              <KpiIcon className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 leading-tight">
@@ -677,7 +680,8 @@ export default function CustomersPage() {
               </p>
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {/* Barra de Filtros: Pestañas con Iconos y Active State Negro Primario */}
@@ -685,7 +689,8 @@ export default function CustomersPage() {
         {/* Pestañas con iconos */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
           {tabsConfig.map((tab) => {
-            const Icon = tab.icon;
+            if (!tab) return null;
+            const Icon = tab.icon || Users;
             const isActive = activeTab === tab.id;
             return (
               <button

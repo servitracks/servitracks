@@ -218,7 +218,7 @@ export interface WorkOrder {
   mechanicId?: string;
   km?: number;
   kmUnit?: 'km' | 'mi';
-  status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced';
+  status: 'pending' | 'diagnosing' | 'repairing' | 'waiting_parts' | 'finished' | 'delivered' | 'invoiced' | 'cancelled';
   description: string;
   customerType?: 'consumidor_final' | 'credito_fiscal' | 'gubernamental' | 'regimen_especial';
   ncfType?: string; // 'E31', 'E32', etc.
