@@ -77,9 +77,14 @@ export function printThermalDocument({
             * {
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
-              color: black !important;
               border-color: black !important;
               -webkit-font-smoothing: antialiased !important;
+            }
+            .text-white, [class*="text-white"], [style*="color: white"], [style*="color: rgb(255, 255, 255)"], [style*="color:#fff"] {
+              color: white !important;
+            }
+            .bg-black, [class*="bg-black"], [style*="background-color: black"], [style*="background-color: #000"] {
+              background-color: black !important;
             }
             img {
               filter: grayscale(100%) contrast(150%) !important;
@@ -152,26 +157,45 @@ export function printThermalDocument({
       await new Promise((resolve) => setTimeout(resolve, 80));
 
       if (!isA4) {
-        // Medir estrictamente el contenedor real del ticket
-        const ticketEl =
-          (doc.querySelector(".thermal-ticket") as HTMLElement) ||
-          (doc.getElementById("print-root")?.firstElementChild as HTMLElement) ||
-          (doc.getElementById("print-root") as HTMLElement);
+        // Medir el contenedor real de impresión (soportando tickets simples o consecutivos con copia interna)
+        const printRoot = doc.getElementById("print-root") as HTMLElement;
+        const allTickets = Array.from(doc.querySelectorAll(".thermal-ticket")) as HTMLElement[];
 
-        if (ticketEl) {
-          const rect = ticketEl.getBoundingClientRect();
-          const contentPx = Math.ceil(
+        let contentPx = 0;
+        if (allTickets.length > 1) {
+          const sumTickets = allTickets.reduce(
+            (acc, t) => acc + (t.scrollHeight || t.offsetHeight || 0),
+            0
+          );
+          contentPx = Math.ceil(
             Math.max(
-              rect.height,
-              ticketEl.scrollHeight || 0,
-              ticketEl.offsetHeight || 0
+              printRoot?.scrollHeight || 0,
+              printRoot?.offsetHeight || 0,
+              sumTickets + (allTickets.length - 1) * 35
             )
           );
+        } else {
+          const ticketEl =
+            allTickets[0] ||
+            (printRoot?.firstElementChild as HTMLElement) ||
+            printRoot;
 
-          if (contentPx > 0) {
+          if (ticketEl) {
+            const rect = ticketEl.getBoundingClientRect();
+            contentPx = Math.ceil(
+              Math.max(
+                rect.height,
+                ticketEl.scrollHeight || 0,
+                ticketEl.offsetHeight || 0
+              )
+            );
+          }
+        }
+
+        if (contentPx > 0) {
             // Conversión exacta: 96 DPI (1 in = 25.4 mm)
-            // + 2mm de margen de seguridad para que la cuchilla física corte después de la última línea
-            const calculatedMm = Math.ceil((contentPx * 25.4) / 96) + 2;
+            // + 3mm de margen de seguridad para que la cuchilla física corte después de la última línea
+            const calculatedMm = Math.ceil((contentPx * 25.4) / 96) + 3;
 
             const finalPageCss = `
               @page {
@@ -186,9 +210,14 @@ export function printThermalDocument({
                 * {
                   -webkit-print-color-adjust: exact !important;
                   print-color-adjust: exact !important;
-                  color: black !important;
                   border-color: black !important;
                   -webkit-font-smoothing: antialiased !important;
+                }
+                .text-white, [class*="text-white"], [style*="color: white"], [style*="color: rgb(255, 255, 255)"], [style*="color:#fff"] {
+                  color: white !important;
+                }
+                .bg-black, [class*="bg-black"], [style*="background-color: black"], [style*="background-color: #000"] {
+                  background-color: black !important;
                 }
                 img {
                   filter: grayscale(100%) contrast(150%) !important;
@@ -230,7 +259,6 @@ export function printThermalDocument({
             }
           }
         }
-      }
 
       // 4. Invocar el diálogo nativo de impresión
       setTimeout(() => {

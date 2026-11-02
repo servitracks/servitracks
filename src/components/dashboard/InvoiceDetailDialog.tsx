@@ -207,7 +207,9 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                 paperFormat === "A4" ? "w-full max-w-[850px] p-4 sm:p-6" : "w-auto"
               )}
             >
+              {/* Primer ticket: Cliente (original sin modificaciones) */}
               <Ticket
+
                 invoiceId={invoice.id}
                 ncf={invoice.ncf}
                 qrUrl={invoice.qrUrl}
@@ -326,7 +328,142 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                     };
                   }),
                 }}
+                esCopiaInterna={false}
               />
+
+              {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
+              {printSettings?.printInternalCopy && (
+                <>
+                  <div
+                    className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
+                    style={{ pageBreakBefore: "always", breakBefore: "page" }}
+                  >
+                    ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
+                  </div>
+                  <Ticket
+
+                invoiceId={invoice.id}
+                ncf={invoice.ncf}
+                qrUrl={invoice.qrUrl}
+                securityCode={invoice.securityCode}
+                signatureDate={invoice.signatureDate}
+                createdAt={invoice.createdAt}
+                tenant={{
+                  nombre: taller.name,
+                  name: taller.name,
+                  logo: taller.logo,
+                  logo_url: taller.logo,
+                  direccion: taller.address,
+                  address: taller.address,
+                  telefono: taller.phone,
+                  phone: taller.phone,
+                  rnc: taller.rnc,
+                }}
+                customer={
+                  customer
+                    ? {
+                        nombre: customer.name,
+                        name: customer.name,
+                        telefono: customer.phone,
+                        phone: customer.phone,
+                        rnc: customer.rnc,
+                        cedula: customer.rnc,
+                        direccion: customer.address,
+                        address: customer.address,
+                      }
+                    : invoice.customerName
+                    ? {
+                        nombre: invoice.customerName,
+                        name: invoice.customerName,
+                        rnc: invoice.customerRnc,
+                        cedula: invoice.customerRnc,
+                      }
+                    : undefined
+                }
+                cliente={
+                  customer
+                    ? {
+                        nombre: customer.name,
+                        telefono: customer.phone,
+                        phone: customer.phone,
+                        rnc: customer.rnc,
+                        cedula: customer.rnc,
+                        direccion: customer.address,
+                      }
+                    : undefined
+                }
+                vehicle={
+                  vehicle
+                    ? {
+                        brand: vehicle.brand,
+                        model: vehicle.model,
+                        year: vehicle.year,
+                        plate: vehicle.plate,
+                        color: vehicle.color,
+                        km: vehicle.km,
+                      }
+                    : undefined
+                }
+                items={(invoice.items || []).map((i) => {
+                  const qty = i.quantity || 1;
+                  const price = i.unitPrice || (i as any).salePrice || 0;
+                  const lineTax = i.tax || 0;
+                  return {
+                    id: i.id,
+                    name: i.name,
+                    descripcion: i.name,
+                    quantity: qty,
+                    cantidad: qty,
+                    unitPrice: price,
+                    precio_unitario: price,
+                    salePrice: price,
+                    tax: lineTax,
+                    is_exento: lineTax === 0,
+                    total: (i as any).total || qty * price,
+                  };
+                })}
+                subtotal={invoice.subtotal}
+                itbis={invoice.tax}
+                discount={invoice.discount}
+                total={invoice.total}
+                payMethod={invoice.paymentMethod}
+                notes={cleanNotesText || undefined}
+                formato={paperFormat}
+                orden={{
+                  numero: invoice.ncf || invoice.id,
+                  creado_en: invoice.createdAt,
+                  subtotal: invoice.subtotal,
+                  itbis: invoice.tax,
+                  descuento: invoice.discount || 0,
+                  total: invoice.total,
+                  saldo: invoice.pendingAmount ?? parsedMeta?.pendingAmount ?? 0,
+                  pagado: invoice.paidAmount ?? parsedMeta?.paidAmount ?? invoice.total,
+                  metodo_pago: invoice.paymentMethod,
+                  pago_referencia: parsedMeta?.referencia,
+                  notas: cleanNotesText || undefined,
+                  items: (invoice.items || []).map((i) => {
+                    const qty = i.quantity || 1;
+                    const price = i.unitPrice || (i as any).salePrice || 0;
+                    const lineTax = i.tax || 0;
+                    return {
+                      id: i.id,
+                      name: i.name,
+                      descripcion: i.name,
+                      quantity: qty,
+                      cantidad: qty,
+                      unitPrice: price,
+                      precio_unitario: price,
+                      salePrice: price,
+                      tax: lineTax,
+                      is_exento: lineTax === 0,
+                      total: (i as any).total || qty * price,
+                    };
+                  }),
+                }}
+                    esCopiaInterna={true}
+                  />
+                </>
+              )}
             </div>
           </div>
 

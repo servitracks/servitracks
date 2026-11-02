@@ -134,6 +134,7 @@ export interface TicketProps {
   ocultarNotas?: boolean;
   esProduccion?: boolean;
   esCopiaCaja?: boolean;
+  esCopiaInterna?: boolean;
 
   // Propiedades Directas / Legadas (POS ServiTracks)
   invoiceId?: string;
@@ -233,6 +234,7 @@ export function Ticket({
   ocultarNotas = false,
   esProduccion = false,
   esCopiaCaja = false,
+  esCopiaInterna = false,
   invoiceId,
   ncf,
   createdAt,
@@ -427,6 +429,21 @@ export function Ticket({
         className={`thermal-ticket mx-auto ${w} bg-white p-12 font-sans text-neutral-800 text-sm`}
         style={{ fontFamily: '"Plus Jakarta Sans", sans-serif' }}
       >
+        {/* FRANJA SUPERIOR COPIA INTERNA */}
+        {esCopiaInterna && (
+          <div
+            className="w-full text-center font-black uppercase text-xs sm:text-sm py-2 px-4 mb-6 tracking-widest text-white bg-black rounded"
+            style={{
+              backgroundColor: "#000000",
+              color: "#ffffff",
+              WebkitPrintColorAdjust: "exact",
+              printColorAdjust: "exact",
+            }}
+          >
+            COPIA INTERNA
+          </div>
+        )}
+
         {/* Header A4 */}
         <div className="flex justify-between items-start mb-8 pb-6 border-b-2 border-neutral-100">
           <div className="flex gap-6 items-center">
@@ -682,6 +699,25 @@ export function Ticket({
         printColorAdjust: "exact",
       }}
     >
+      {/* FRANJA SUPERIOR COPIA INTERNA */}
+      {esCopiaInterna && (
+        <div
+          className="text-center font-black uppercase text-[12px] py-1.5 px-2 mb-2 tracking-widest text-white bg-black -mx-2.5 -mt-1 block"
+          style={{
+            backgroundColor: "#000000",
+            color: "#ffffff",
+            width: "calc(100% + 1.25rem)",
+            marginLeft: "-0.625rem",
+            marginRight: "-0.625rem",
+            marginTop: "-0.25rem",
+            WebkitPrintColorAdjust: "exact",
+            printColorAdjust: "exact",
+          }}
+        >
+          COPIA INTERNA
+        </div>
+      )}
+
       {/* 1. ENCABEZADO / LOGO */}
       <div className="text-center space-y-0.5">
         {tenantObj.logo_url ? (

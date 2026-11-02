@@ -2816,7 +2816,9 @@ export default function OrdenesControlPage() {
                           : "w-auto"
                       )}
                     >
+                      {/* Primer ticket: Cliente (original sin modificaciones) */}
                       <Ticket
+
                         invoiceId={detailOrder.numero}
                         ncf={detailOrder.ncf}
                         qrUrl={detailOrder.qrUrl}
@@ -2888,7 +2890,95 @@ export default function OrdenesControlPage() {
                             total: it.quantity * it.unitPrice,
                           })),
                         }}
+                        esCopiaInterna={false}
                       />
+
+                      {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
+                      {printSettings?.printInternalCopy && (
+                        <>
+                          <div
+                            className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
+                            style={{ pageBreakBefore: "always", breakBefore: "page" }}
+                          >
+                            ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
+                          </div>
+                          <Ticket
+
+                        invoiceId={detailOrder.numero}
+                        ncf={detailOrder.ncf}
+                        qrUrl={detailOrder.qrUrl}
+                        securityCode={detailOrder.securityCode}
+                        signatureDate={detailOrder.signatureDate}
+                        createdAt={detailOrder.createdAt}
+                        tenant={{
+                          nombre: currentTenant?.name || "ServiTracks",
+                          name: currentTenant?.name || "ServiTracks",
+                          logo: currentTenant?.logo,
+                          logo_url: currentTenant?.logo,
+                          direccion: currentTenant?.address,
+                          address: currentTenant?.address,
+                          telefono: currentTenant?.phone,
+                          phone: currentTenant?.phone,
+                          rnc: currentTenant?.rnc,
+                        }}
+                        customer={{
+                          nombre: detailOrder.customerName,
+                          name: detailOrder.customerName,
+                          telefono: detailOrder.customerPhone,
+                          phone: detailOrder.customerPhone,
+                          rnc: detailOrder.customerRnc,
+                          cedula: detailOrder.customerRnc,
+                        }}
+                        items={detailOrder.items.map((it) => ({
+                          id: it.id,
+                          name: it.name,
+                          descripcion: it.name,
+                          quantity: it.quantity,
+                          cantidad: it.quantity,
+                          unitPrice: it.unitPrice,
+                          precio_unitario: it.unitPrice,
+                          salePrice: it.unitPrice,
+                          tax: it.tax,
+                          is_exento: it.tax === 0,
+                          total: it.quantity * it.unitPrice,
+                        }))}
+                        subtotal={detailOrder.subtotal}
+                        itbis={detailOrder.tax}
+                        discount={detailOrder.discount}
+                        total={detailOrder.total}
+                        payMethod={detailOrder.paymentMethod}
+                        notes={detailOrder.notesText}
+                        formato={detailPaperFormat}
+                        orden={{
+                          numero: detailOrder.ncf || detailOrder.numero,
+                          creado_en: detailOrder.createdAt,
+                          subtotal: detailOrder.subtotal,
+                          itbis: detailOrder.tax,
+                          descuento: detailOrder.discount,
+                          total: detailOrder.total,
+                          saldo: detailOrder.pendingAmount,
+                          pagado: detailOrder.paidAmount,
+                          metodo_pago: detailOrder.paymentMethod,
+                          pago_referencia: detailOrder.referencia,
+                          notas: detailOrder.notesText,
+                          items: detailOrder.items.map((it) => ({
+                            id: it.id,
+                            name: it.name,
+                            descripcion: it.name,
+                            quantity: it.quantity,
+                            cantidad: it.quantity,
+                            unitPrice: it.unitPrice,
+                            precio_unitario: it.unitPrice,
+                            salePrice: it.unitPrice,
+                            tax: it.tax,
+                            is_exento: it.tax === 0,
+                            total: it.quantity * it.unitPrice,
+                          })),
+                        }}
+                            esCopiaInterna={true}
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

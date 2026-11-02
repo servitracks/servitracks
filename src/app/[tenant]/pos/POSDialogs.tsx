@@ -1426,6 +1426,63 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
 
   const modalWidth = printSettings.paperSize === "A4" ? "sm:max-w-3xl" : "sm:max-w-md";
 
+  const commonTicketProps = {
+    invoiceId: lastInvoice?.id || `TEMP-${Date.now()}`,
+    ncf: lastInvoice?.ncf,
+    qrUrl: lastInvoice?.qrUrl,
+    securityCode: lastInvoice?.securityCode,
+    signatureDate: lastInvoice?.signatureDate,
+    createdAt: lastInvoice?.createdAt || new Date().toISOString(),
+    tenant: taller,
+    customer: lastInvoice?.customerName 
+      ? { name: lastInvoice.customerName, rnc: lastInvoice.customerRnc } 
+      : lastInvoice?.customerId 
+        ? customers.find(c => c.id === lastInvoice.customerId) 
+        : undefined,
+    items: lastInvoice?.items || cart.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      quantity: c.quantity,
+      salePrice: c.salePrice,
+      tax: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0) ? 0 : c.tax,
+      is_exento: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0),
+    })),
+    subtotal: lastInvoice?.subtotal || subtotal,
+    itbis: itbis,
+    total: total,
+    payMethod: payMethod,
+    cashReceived: cashNum,
+    mechanicName: techName,
+    notes: lastInvoice?.notes,
+    warrantyText: warrantyText,
+    discount: lastInvoice?.discount,
+    formato: printSettings.paperSize as any,
+    orden: lastInvoice ? {
+      numero: lastInvoice.id,
+      creado_en: lastInvoice.createdAt,
+      subtotal: lastInvoice.subtotal,
+      itbis: lastInvoice.tax,
+      descuento: lastInvoice.discount || 0,
+      total: lastInvoice.total,
+      saldo: lastInvoice.status === "pending" ? (lastInvoice.total - (lastInvoice.paidAmount || 0)) : (lastInvoice.pendingAmount ?? 0),
+      pagado: lastInvoice.status === "pending" ? (lastInvoice.paidAmount || 0) : (lastInvoice.paidAmount ?? lastInvoice.total),
+      metodo_pago: (lastInvoice.notes ? (() => {
+        try {
+          const parsed = JSON.parse(lastInvoice.notes);
+          return parsed.instrumentoPago || lastInvoice.paymentMethod;
+        } catch {
+          return lastInvoice.paymentMethod;
+        }
+      })() : lastInvoice.paymentMethod) || payMethod,
+      notas: lastInvoice.notes,
+      items: lastInvoice.items || [],
+      ncf: lastInvoice.ncf,
+      ecf_qr: lastInvoice.qrUrl,
+      ecf_security_code: lastInvoice.securityCode,
+      ecf_signature_date: lastInvoice.signatureDate,
+    } : undefined,
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className={`${modalWidth} rounded-2xl p-6`}>
@@ -1437,64 +1494,21 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
         </DialogHeader>
         <div className="bg-neutral-100/80 rounded-2xl border border-neutral-200/80 overflow-hidden flex justify-center py-6 px-3 max-h-[65vh] overflow-y-auto">
           <div ref={componentRef} className="print-container bg-white shadow-lg rounded-sm my-1">
-            <Ticket 
-              invoiceId={lastInvoice?.id || `TEMP-${Date.now()}`}
-              ncf={lastInvoice?.ncf}
-              qrUrl={lastInvoice?.qrUrl}
-              securityCode={lastInvoice?.securityCode}
-              signatureDate={lastInvoice?.signatureDate}
-              createdAt={lastInvoice?.createdAt || new Date().toISOString()}
-              tenant={taller}
-              customer={
-                lastInvoice?.customerName 
-                  ? { name: lastInvoice.customerName, rnc: lastInvoice.customerRnc } 
-                  : lastInvoice?.customerId 
-                    ? customers.find(c => c.id === lastInvoice.customerId) 
-                    : undefined
-              }
-              items={lastInvoice?.items || cart.map((c: any) => ({
-                id: c.id,
-                name: c.name,
-                quantity: c.quantity,
-                salePrice: c.salePrice,
-                tax: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0) ? 0 : c.tax,
-                is_exento: (c.id?.startsWith("labor-") || c.sku === "MANO-OBRA" || c.name?.toLowerCase().includes("mano de obra") || c.tax === 0),
-              }))}
-              subtotal={lastInvoice?.subtotal || subtotal}
-              itbis={itbis}
-              total={total}
-              payMethod={payMethod}
-              cashReceived={cashNum}
-              mechanicName={techName}
-              notes={lastInvoice?.notes}
-              warrantyText={warrantyText}
-              discount={lastInvoice?.discount}
-              formato={printSettings.paperSize as any}
-              orden={lastInvoice ? {
-                numero: lastInvoice.id,
-                creado_en: lastInvoice.createdAt,
-                subtotal: lastInvoice.subtotal,
-                itbis: lastInvoice.tax,
-                descuento: lastInvoice.discount || 0,
-                total: lastInvoice.total,
-                saldo: lastInvoice.status === "pending" ? (lastInvoice.total - (lastInvoice.paidAmount || 0)) : (lastInvoice.pendingAmount ?? 0),
-                pagado: lastInvoice.status === "pending" ? (lastInvoice.paidAmount || 0) : (lastInvoice.paidAmount ?? lastInvoice.total),
-                metodo_pago: (lastInvoice.notes ? (() => {
-                  try {
-                    const parsed = JSON.parse(lastInvoice.notes);
-                    return parsed.instrumentoPago || lastInvoice.paymentMethod;
-                  } catch {
-                    return lastInvoice.paymentMethod;
-                  }
-                })() : lastInvoice.paymentMethod) || payMethod,
-                notas: lastInvoice.notes,
-                items: lastInvoice.items || [],
-                ncf: lastInvoice.ncf,
-                ecf_qr: lastInvoice.qrUrl,
-                ecf_security_code: lastInvoice.securityCode,
-                ecf_signature_date: lastInvoice.signatureDate,
-              } : undefined}
-            />
+            {/* Primer ticket: Cliente (original sin modificaciones) */}
+            <Ticket {...commonTicketProps} esCopiaInterna={false} />
+
+            {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
+            {printSettings.printInternalCopy && (
+              <>
+                <div
+                  className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
+                  style={{ pageBreakBefore: "always", breakBefore: "page" }}
+                >
+                  ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
+                </div>
+                <Ticket {...commonTicketProps} esCopiaInterna={true} />
+              </>
+            )}
           </div>
         </div>
         <div className="flex gap-3">

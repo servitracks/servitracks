@@ -28,6 +28,7 @@ const TABS = [
   { id: "interface", label: "Interfaz", icon: Sparkles, group: "General", description: "Apariencia y orden del menú" },
   { id: "tenants", label: "Sucursales", icon: Store, group: "General", description: "Gestiona tus ubicaciones" },
   { id: "ecf", label: "Facturación e-CF", icon: FileCheck2, group: "Operación", description: "Comprobantes fiscales DGII" },
+  { id: "ticket", label: "Ticket", icon: ReceiptText, group: "Operación", description: "Opciones y copias de tickets térmicos" },
   { id: "whatsapp", label: "WhatsApp", icon: Bell, group: "Operación", description: "Notificaciones a clientes" },
   { id: "print", label: "Impresión", icon: Printer, group: "Operación", description: "Tickets, etiquetas y garantías" },
   { id: "users", label: "Usuarios y Roles", icon: Users, group: "Equipo y cuenta", description: "Accesos de tu equipo" },
@@ -1390,6 +1391,174 @@ export default function SettingsPage() {
         </Card>
       )}
 
+      {/* ── TICKET ── */}
+      {tab === "ticket" && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <Card className="border-neutral-100 shadow-sm">
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-xl font-black text-neutral-900 flex items-center gap-2">
+                    <ReceiptText className="h-5 w-5 text-neutral-800" />
+                    Configuración de Tickets de Órdenes
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    Administra las opciones de impresión de tickets térmicos para clientes y copias de control interno del taller.
+                  </CardDescription>
+                </div>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "px-3 py-1 text-xs font-semibold rounded-full border self-start sm:self-auto",
+                    ps.printInternalCopy
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : "bg-neutral-100 text-neutral-600 border-neutral-200"
+                  )}
+                >
+                  {ps.printInternalCopy ? "Copia Interna Activa" : "Copia Interna Desactivada"}
+                </Badge>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              {/* Opción Principal: Interruptor Imprimir copia interna */}
+              <div className="p-4 rounded-2xl border border-neutral-200/80 bg-neutral-50/70 hover:bg-neutral-50 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-neutral-900 text-base">Imprimir copia interna</span>
+                    {ps.printInternalCopy && (
+                      <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded font-black tracking-wider uppercase">
+                        2 Tickets Consecutivos
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-neutral-600 max-w-xl leading-relaxed">
+                    Permite imprimir automáticamente una segunda copia del ticket de cada orden, destinada al uso interno del negocio.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs font-semibold text-neutral-500">
+                    {ps.printInternalCopy ? "Activado" : "Desactivado"}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(ps.printInternalCopy)}
+                    onClick={() => {
+                      const nextVal = !Boolean(ps.printInternalCopy);
+                      updatePrintSettings({ printInternalCopy: nextVal });
+                      toast.success(
+                        nextVal
+                          ? "Copia interna activada: se imprimirán 2 tickets por cada orden."
+                          : "Copia interna desactivada: se imprimirá un único ticket para el cliente."
+                      );
+                    }}
+                    className={cn(
+                      "h-7 w-12 rounded-full transition-all relative cursor-pointer border-none shadow-inner",
+                      ps.printInternalCopy ? "bg-black" : "bg-neutral-300"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition-all duration-200 ease-out",
+                        ps.printInternalCopy ? "left-6" : "left-1"
+                      )}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Explicación del Comportamiento de Impresión */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl border border-neutral-200 bg-white space-y-2">
+                  <div className="flex items-center gap-2 text-neutral-900 font-bold text-sm">
+                    <div className="h-6 w-6 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-black text-neutral-700">
+                      1
+                    </div>
+                    Primer ticket – Cliente
+                  </div>
+                  <p className="text-xs text-neutral-600 leading-relaxed">
+                    Se imprime el ticket original, exactamente como funciona actualmente, sin modificaciones en su diseño ni contenido. Entrégaselo al cliente al realizar la orden o cobro.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-neutral-200 bg-white space-y-2">
+                  <div className="flex items-center gap-2 text-neutral-900 font-bold text-sm">
+                    <div className="h-6 w-6 rounded-full bg-black text-white flex items-center justify-center text-xs font-black">
+                      2
+                    </div>
+                    Segundo ticket – Negocio
+                  </div>
+                  <p className="text-xs text-neutral-600 leading-relaxed">
+                    Se imprime automáticamente una copia idéntica del ticket con una franja negra superior con el texto <b className="text-black">COPIA INTERNA</b> para el archivo o control operativo del taller.
+                  </p>
+                </div>
+              </div>
+
+              {/* Muestra Visual del Encabezado */}
+              <div className="p-4 rounded-xl border border-neutral-100 bg-neutral-50/50 space-y-3">
+                <Label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">
+                  Muestra visual del encabezado de la Copia Interna
+                </Label>
+                <div className="max-w-sm mx-auto bg-white p-3 rounded-lg border border-neutral-200 shadow-xs space-y-2">
+                  <div className="w-full bg-black text-white text-center py-1.5 px-2 rounded-xs font-black text-xs tracking-widest uppercase">
+                    COPIA INTERNA
+                  </div>
+                  <div className="text-center font-bold text-xs text-neutral-800">
+                    {taller.name || "ServiTracks Taller Automotriz"}
+                  </div>
+                  <div className="text-[10px] text-center text-neutral-500">
+                    RNC: {taller.rnc || "130-XXXXX-X"} • Tel: {taller.phone || "(809) 000-0000"}
+                  </div>
+                  <div className="border-t border-dashed border-neutral-300 pt-2 text-[10px] text-neutral-600 flex justify-between">
+                    <span>ORDEN #OT-0001</span>
+                    <span className="font-bold">RD$ 2,500.00</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Formato de Papel para Tickets */}
+              <div className="space-y-2 pt-2 border-t border-neutral-100">
+                <Label className="text-sm font-bold text-neutral-800">Formato de Papel Térmico</Label>
+                <div className="flex flex-wrap gap-2">
+                  {(["80mm", "58mm", "A4"] as const).map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => updatePrintSettings({ paperSize: size })}
+                      className={cn(
+                        "px-4 py-2 rounded-xl border text-sm font-bold transition-all cursor-pointer",
+                        ps.paperSize === size
+                          ? "bg-black text-white border-black shadow-xs"
+                          : "border-neutral-200 text-neutral-600 hover:bg-neutral-50"
+                      )}
+                    >
+                      {size === "80mm" ? "80 mm (Estándar)" : size === "58mm" ? "58 mm / 57 mm (Compacto)" : "A4 (Documento)"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-neutral-500">
+                  Compatible con formatos de impresión térmica de 80 mm y 58 mm / 57 mm, así como hojas A4.
+                </p>
+              </div>
+
+              {/* Botón de Confirmación */}
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  onClick={() => toast.success("Configuración de tickets guardada y sincronizada")}
+                  className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer h-10 px-5 gap-2"
+                >
+                  <Check className="h-4 w-4" />
+                  Guardar Configuración de Tickets
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* ── IMPRESIÓN ── */}
       {tab === "print" && (
         <div className="space-y-6">
@@ -1444,6 +1613,7 @@ export default function SettingsPage() {
                     { key: "showNcf", label: "Mostrar número NCF" },
                     { key: "showItbis", label: "Mostrar ITBIS desglosado" },
                     { key: "showChange", label: "Mostrar cambio/vuelto" },
+                    { key: "printInternalCopy", label: "Imprimir copia interna (segundo ticket para negocio)" },
                   ] as { key: keyof typeof ps; label: string }[]).map(opt => (
                     <div key={opt.key} className="flex items-center justify-between p-3 rounded-xl border border-neutral-100 bg-neutral-50">
                       <span className="text-sm font-medium text-neutral-700">{opt.label}</span>

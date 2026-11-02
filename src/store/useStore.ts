@@ -254,6 +254,7 @@ export const useStore = create<AppState>()(
         footer: '¡Gracias por su preferencia!',
         warrantyText: 'Garantía: 30 días en mano de obra.',
         showWarranty: true,
+        printInternalCopy: false,
         physicalPrinter: {
           connectionType: 'usb',
           printProfile: 'basic',
@@ -367,7 +368,13 @@ export const useStore = create<AppState>()(
       // Actions
       setCurrentUserId: (id) => set({ currentUserId: id }),
       setTenants: (tenants) => set({ tenants }),
-      setCurrentTenant: (tenant) => set({ currentTenant: tenant }),
+      setCurrentTenant: (tenant) =>
+        set((state) => ({
+          currentTenant: tenant,
+          ...(tenant?.config?.printSettings
+            ? { printSettings: { ...state.printSettings, ...tenant.config.printSettings } }
+            : {}),
+        })),
       updateTenant: (id, updates) => {
         set((state) => ({
           tenants: state.tenants.map((t) => (t.id === id ? { ...t, ...updates } : t)),
@@ -1703,7 +1710,7 @@ export const useStore = create<AppState>()(
             plans: [],
             licencias: [],
             globalConfig: { requirePlanOnRegistration: true, trialDays: 25, defaultPlanId: 'basico' },
-            printSettings: _persistedState?.printSettings ?? { paperSize: '80mm', showLogo: true, showNcf: true, showItbis: true, showChange: true, copies: 1, footer: '¡Gracias por su preferencia!', warrantyText: 'Garantía: 30 días en mano de obra.', showWarranty: true },
+            printSettings: _persistedState?.printSettings ?? { paperSize: '80mm', showLogo: true, showNcf: true, showItbis: true, showChange: true, copies: 1, footer: '¡Gracias por su preferencia!', warrantyText: 'Garantía: 30 días en mano de obra.', showWarranty: true, printInternalCopy: false },
             barcodeSettings: _persistedState?.barcodeSettings ?? { width: 1.5, height: 40, showText: true, fontSize: 14 },
             currentUserId: null,
             isAuthenticated: false,
