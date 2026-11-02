@@ -3,7 +3,7 @@
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
 import { supabaseAdmin } from "@/lib/supabase";
-import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab, InventorySession, Tenant } from "@/store/types";
+import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab, InventorySession, Tenant, TenantUser } from "@/store/types";
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
@@ -1454,6 +1454,35 @@ export async function deleteTenantUserFromSupabase(id: string, tenantId?: string
   }
 }
 
+export async function upsertTenantUsers(users: TenantUser[]): Promise<void> {
+  if (users.length === 0) return;
+  for (const u of users) {
+    try {
+      const { data: existing } = await supabaseAdmin
+        .from("tenant_users")
+        .select("id, user_id")
+        .or(`id.eq.${u.id},user_id.eq.${u.id}`)
+        .limit(1);
+
+      const rowId = existing?.[0]?.id || u.id;
+      const dbUser = {
+        id: rowId,
+        user_id: u.id,
+        tenant_id: u.tenantId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        status: u.status || "active",
+        updated_at: new Date().toISOString()
+      };
+      const { error } = await supabaseAdmin.from("tenant_users").upsert(dbUser, { onConflict: "id" });
+      if (error) console.error("[sync] upsert tenant_user error:", error);
+    } catch (err) {
+      console.error("[sync] upsertTenantUsers error:", err);
+    }
+  }
+}
+
 export async function syncTenantToSupabase(id: string, updates: Partial<Tenant>): Promise<void> {
   const dbUpdates: Record<string, any> = {};
   if (updates.name !== undefined) dbUpdates.name = updates.name;
@@ -1542,7 +1571,8 @@ export async function syncStoreToSupabase(
     quoteRequests?: QuoteRequest[],
     activityLogs?: ActivityLog[],
     openTabs?: OpenTab[],
-    inventorySessions?: InventorySession[]
+    inventorySessions?: InventorySession[],
+    users?: TenantUser[]
   }
 ): Promise<void> {
   const tasks = [];
@@ -1571,6 +1601,7 @@ export async function syncStoreToSupabase(
   if (state.activityLogs) tasks.push(upsertActivityLogs(state.activityLogs.filter(i => i.tenantId === tenantId)));
   if (state.openTabs) tasks.push(upsertOpenTabs(state.openTabs.filter(i => i.tenantId === tenantId)));
   if (state.inventorySessions) tasks.push(upsertInventorySessions(state.inventorySessions.filter(i => i.tenantId === tenantId)));
+  if (state.users) tasks.push(upsertTenantUsers(state.users.filter(i => i.tenantId === tenantId)));
 
   await Promise.all(tasks);
   console.log(`[sync] Synced full state for tenant ${tenantId} to Supabase`);
@@ -1703,8 +1734,18 @@ export async function syncTableFromSupabase(table: string, tenantId: string): Pr
       break;
     }
     case "tenant_users": {
-      const users = await loadUsersFromSupabase(tenantId);
-      store.setState({ users });
+      const remoteUsers = await loadUsersFromSupabase(tenantId);
+      const currentUsers = store.getState().users || [];
+      const otherTenantUsers = currentUsers.filter(u => u.tenantId !== tenantId);
+      const tenantLocal = currentUsers.filter(u => u.tenantId === tenantId);
+      const remoteIds = new Set(remoteUsers.map(u => u.id));
+      const now = Date.now();
+      const pendingLocal = tenantLocal.filter(u => {
+        if (remoteIds.has(u.id)) return false;
+        const age = now - new Date(u.createdAt || 0).getTime();
+        return age >= 0 && age < 15000;
+      });
+      store.setState({ users: [...otherTenantUsers, ...pendingLocal, ...remoteUsers] });
       break;
     }
     default:

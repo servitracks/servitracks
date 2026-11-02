@@ -40,18 +40,18 @@ export const navigation = [
   { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
   { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
   { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
-  { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'cashier', 'receptionist'] },
-  { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
-  { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },
-  { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'warehouse'] },
-  { name: "Control de Movimientos", href: "/movimientos", icon: ClipboardList, roles: ['owner', 'warehouse'] },
-  { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner'] },
-  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'warehouse'] },
-  { name: "Comisiones Técnicos", href: "/mis-comisiones", icon: Wallet, roles: ['owner', 'cashier', 'mechanic', 'superadmin'] },
-  { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner'] },
-  { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner'] },
-  { name: "Registro de Actividad", href: "/activity", icon: History, roles: ['owner'] },
-  { name: "Mantenimiento", href: "/maintenance", icon: Activity, roles: ['owner', 'cashier'] },
+  { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Inventario", href: "/inventory", icon: Package, roles: ['owner', 'admin', 'warehouse', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Control de Movimientos", href: "/movimientos", icon: ClipboardList, roles: ['owner', 'admin', 'warehouse', 'superadmin'] },
+  { name: "Servicios", href: "/services", icon: LayoutDashboard, roles: ['owner', 'admin', 'receptionist', 'superadmin'] },
+  { name: "Proveedores", href: "/proveedores", icon: Truck, roles: ['owner', 'admin', 'warehouse', 'superadmin'] },
+  { name: "Comisiones Técnicos", href: "/mis-comisiones", icon: Wallet, roles: ['owner', 'admin', 'cashier', 'mechanic', 'superadmin'] },
+  { name: "Nómina", href: "/nomina", icon: Briefcase, roles: ['owner', 'admin', 'superadmin'] },
+  { name: "Reportes", href: "/reports", icon: BarChart3, roles: ['owner', 'admin', 'superadmin'] },
+  { name: "Registro de Actividad", href: "/activity", icon: History, roles: ['owner', 'admin', 'superadmin'] },
+  { name: "Mantenimiento", href: "/maintenance", icon: Activity, roles: ['owner', 'admin', 'cashier', 'mechanic', 'receptionist', 'superadmin'] },
 ];
 
 interface SidebarProps {
@@ -76,12 +76,41 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
       ? (params.tenant as string)
       : "autocheck";
 
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
+  const storeTenant = useStore((s) => s.currentTenant);
+  const currentTenant = useMemo(() => {
+    return (
+      tenants.find(
+        (t) =>
+          t.slug?.toLowerCase() === tenantSlug.toLowerCase() ||
+          t.id === tenantSlug
+      ) ||
+      (storeTenant &&
+      (storeTenant.slug?.toLowerCase() === tenantSlug.toLowerCase() ||
+        storeTenant.id === tenantSlug)
+        ? storeTenant
+        : null)
+    );
+  }, [tenants, tenantSlug, storeTenant]);
   const tenantId = currentTenant?.id ?? "";
 
   const currentUser = useMemo(() => {
-    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === tenantId) || null;
-  }, [users, currentUserId, tenantId]);
+    if (currentUserId === 'admin') {
+      return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const sessionStr = localStorage.getItem("servitracks-session");
+        if (sessionStr) {
+          const parsed = JSON.parse(sessionStr);
+          if (parsed.role === 'superadmin' || parsed.empleado_id === 'admin') {
+            return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+          }
+        }
+      } catch (e) {}
+    }
+    if (!currentUserId) return null;
+    return users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId) || null;
+  }, [users, currentUserId]);
 
   const allowedTenants = useMemo(() => {
     if (!currentUser) return currentTenant ? [currentTenant] : [];
@@ -278,7 +307,7 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
         </nav>
 
         {/* Bottom settings (only for owners) */}
-        {(!currentUser || activeRole === 'owner') && (
+        {(!currentUser || ['owner', 'admin', 'superadmin'].includes(activeRole)) && (
           <div className="border-t border-neutral-100 p-3">
             <Link
               href={`/${tenantSlug}/settings`}

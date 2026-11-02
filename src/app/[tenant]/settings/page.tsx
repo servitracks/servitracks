@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useStore, TenantUser } from "@/store/useStore";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import { waSendTestMessage } from "@/lib/wasender";
 import { Building2, MessageSquare, Bell, Printer, Users, Shield, ShieldCheck, Upload, X, Plus, Trash2, Check, Eye, EyeOff, Store, MapPin, Phone, Mail, FileText, Landmark, RefreshCw, Pencil, Crown, ArrowUpRight, HardDrive, Package, FileCheck2, CreditCard, Sparkles, Zap, CheckCircle2, Key, AlertTriangle, LogOut, ArrowUp, ArrowDown, ReceiptText } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,12 +35,13 @@ const TABS = [
   { id: "planes", label: "Planes", icon: CreditCard, group: "Equipo y cuenta", description: "Suscripción y facturación" },
 ];
 
-const ROLES: { value: TenantUser["role"]; label: string; color: string }[] = [
-  { value: "owner", label: "Dueño", color: "bg-black text-white" },
-  { value: "mechanic", label: "Mecánico", color: "bg-amber-100 text-amber-800" },
-  { value: "cashier", label: "Cajero", color: "bg-blue-100 text-blue-800" },
-  { value: "warehouse", label: "Almacén", color: "bg-emerald-100 text-emerald-800" },
-  { value: "receptionist", label: "Recepción", color: "bg-violet-100 text-violet-800" },
+const ROLES: { value: TenantUser["role"]; label: string; color: string; tag: string; description: string }[] = [
+  { value: "owner", label: "Dueño", color: "bg-black text-white", tag: "Dueño", description: "Control total del taller y sucursales" },
+  { value: "admin", label: "Administrador", color: "bg-indigo-100 text-indigo-800", tag: "Admin", description: "Gestión operativa, reportes y configuración" },
+  { value: "receptionist", label: "Recepción", color: "bg-violet-100 text-violet-800", tag: "CRM", description: "Atención, registro de clientes, vehículos y órdenes" },
+  { value: "cashier", label: "Cajero", color: "bg-blue-100 text-blue-800", tag: "POS", description: "Apertura/cierre de caja, facturación y cobros" },
+  { value: "mechanic", label: "Mecánico", color: "bg-amber-100 text-amber-800", tag: "OT", description: "Diagnóstico, órdenes de trabajo y comisiones" },
+  { value: "warehouse", label: "Almacén", color: "bg-emerald-100 text-emerald-800", tag: "Stock", description: "Entradas/salidas, inventario y proveedores" },
 ];
 
 function roleLabel(r: TenantUser["role"]) {
@@ -58,13 +59,94 @@ export default function SettingsPage() {
     addUser, updateUser, deleteUser, updatePrintSettings, updateBarcodeSettings
   } = useStore();
 
-  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
-  const taller = currentTenant ?? { id: "", name: "", address: "", phone: "", email: "", rnc: "", logo: "", slug: "", wasenderApiKey: undefined, wasenderPhone: undefined, config: undefined };
+  const storeTenant = useStore((s) => s.currentTenant);
+  const currentTenant = useMemo(() => {
+    return (
+      tenants.find(
+        (t) =>
+          t.slug?.toLowerCase() === tenant?.toLowerCase() ||
+          t.id === tenant
+      ) ||
+      (storeTenant &&
+      (storeTenant.slug?.toLowerCase() === tenant?.toLowerCase() ||
+        storeTenant.id === tenant)
+        ? storeTenant
+        : null)
+    );
+  }, [tenants, tenant, storeTenant]);
+
+  const taller = currentTenant ?? {
+    id: storeTenant?.id || "",
+    name: storeTenant?.name || "",
+    address: storeTenant?.address || "",
+    phone: storeTenant?.phone || "",
+    email: storeTenant?.email || "",
+    rnc: storeTenant?.rnc || "",
+    logo: storeTenant?.logo || "",
+    slug: storeTenant?.slug || tenant,
+    wasenderApiKey: storeTenant?.wasenderApiKey,
+    wasenderPhone: storeTenant?.wasenderPhone,
+    config: storeTenant?.config,
+  };
 
   const currentUserId = useStore((s) => s.currentUserId);
   const currentUser = useMemo(() => {
-    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === taller.id) || null;
-  }, [users, currentUserId, taller.id]);
+    if (currentUserId === 'admin') {
+      return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const sessionStr = localStorage.getItem("servitracks-session");
+        if (sessionStr) {
+          const parsed = JSON.parse(sessionStr);
+          if (parsed.role === 'superadmin' || parsed.empleado_id === 'admin') {
+            return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+          }
+        }
+      } catch (e) {}
+    }
+    if (!currentUserId) return null;
+    return users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId) || null;
+  }, [users, currentUserId]);
+
+  const [usersLoading, setUsersLoading] = useState(false);
+
+  useEffect(() => {
+    const targetTenantId = taller.id;
+    if (!targetTenantId) return;
+
+    let isMounted = true;
+    setUsersLoading(true);
+
+    import("@/lib/supabaseSync").then(async ({ loadUsersFromSupabase }) => {
+      try {
+        const remoteUsers = await loadUsersFromSupabase(targetTenantId);
+        if (isMounted && remoteUsers && remoteUsers.length > 0) {
+          useStore.setState((state) => {
+            const otherUsers = (state.users || []).filter(
+              u => u.tenantId !== targetTenantId && u.tenantId !== taller.slug
+            );
+            return { users: [...otherUsers, ...remoteUsers] };
+          });
+        }
+      } catch (e) {
+        console.warn("[Settings] Error al cargar usuarios de Supabase:", e);
+      } finally {
+        if (isMounted) setUsersLoading(false);
+      }
+    });
+
+    return () => { isMounted = false; };
+  }, [taller.id, taller.slug]);
+
+  const activeTenantUsers = useMemo(() => {
+    return users.filter(
+      (u) =>
+        (taller.id && u.tenantId === taller.id) ||
+        (taller.slug && u.tenantId === taller.slug) ||
+        (tenant && u.tenantId === tenant)
+    );
+  }, [users, taller.id, taller.slug, tenant]);
 
   const allowedTenants = useMemo(() => {
     if (!currentUser) return currentTenant ? [currentTenant] : [];
@@ -404,15 +486,23 @@ export default function SettingsPage() {
         name: editUserForm.name,
         role: editUserForm.role,
         status: editUserForm.status,
+        updated_at: new Date().toISOString()
       })
-      .eq("user_id", editUserTarget.id)
-      .eq("tenant_id", taller.id);
+      .or(`id.eq.${editUserTarget.id},user_id.eq.${editUserTarget.id}`);
 
     if (error) {
       console.error("Error updating user in DB:", error);
       toast.warning("Actualizado localmente. Hubo un error al sincronizar.");
     } else {
       toast.success(`Usuario "${editUserForm.name}" actualizado`);
+      const targetId = taller.id || currentTenant?.id;
+      if (targetId) {
+        supabase.channel(`sync_tenant_${targetId}`).send({
+          type: "broadcast",
+          event: "state_updated",
+          payload: { ts: Date.now(), tables: ["tenant_users"] }
+        });
+      }
     }
 
     setEditUserTarget(null);
@@ -425,6 +515,12 @@ export default function SettingsPage() {
     }
     if (inviteForm.password.length < 6) {
       toast.error("La contraseña debe tener al menos 6 caracteres");
+      return;
+    }
+
+    const targetTenantId = taller.id || currentTenant?.id;
+    if (!targetTenantId) {
+      toast.error("No se pudo identificar el taller actual para crear el usuario");
       return;
     }
 
@@ -462,7 +558,7 @@ export default function SettingsPage() {
       .from("tenant_users")
       .insert({
         user_id: newUserId,
-        tenant_id: taller.id,
+        tenant_id: targetTenantId,
         name: inviteForm.name,
         email: inviteForm.email,
         role: inviteForm.role,
@@ -485,12 +581,19 @@ export default function SettingsPage() {
     // 3. Guardar en store local
     addUser({ 
       id: newUserId, 
-      tenantId: taller.id, 
+      tenantId: targetTenantId, 
       status: "active", 
       createdAt: new Date().toISOString(), 
       name: inviteForm.name,
       email: inviteForm.email,
       role: inviteForm.role
+    });
+
+    // Broadcast change
+    supabase.channel(`sync_tenant_${targetTenantId}`).send({
+      type: "broadcast",
+      event: "state_updated",
+      payload: { ts: Date.now(), tables: ["tenant_users"] }
     });
 
     toast.success(`Usuario "${inviteForm.name}" creado con éxito. Ya puede iniciar sesión.`);
@@ -1509,27 +1612,19 @@ export default function SettingsPage() {
               </Button>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {ROLES.map(r => (
-                  <div key={r.value} className="flex items-center gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50">
-                    <Shield className="h-4 w-4 text-neutral-400" />
-                    <div>
+                  <div key={r.value} className="flex items-start gap-3 p-3 rounded-xl border border-neutral-100 bg-neutral-50/70">
+                    <Shield className="h-4 w-4 text-neutral-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold">{r.label}</span>
-                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5", r.color)}>
-                          {r.value === "owner" ? "Admin" : r.value === "cashier" ? "POS" : r.value === "mechanic" ? "OT" : r.value === "warehouse" ? "Stock" : "CRM"}
+                        <span className="text-sm font-bold truncate">{r.label}</span>
+                        <Badge className={cn("text-[10px] border-none rounded-full px-1.5 flex-shrink-0", r.color)}>
+                          {r.tag}
                         </Badge>
                       </div>
-                      <p className="text-xs text-neutral-400">
-                        {r.value === "owner"
-                          ? "Control total del taller"
-                          : r.value === "mechanic"
-                          ? "Ver y actualizar órdenes asignadas"
-                          : r.value === "cashier"
-                          ? "Acceso al POS y facturación"
-                          : r.value === "warehouse"
-                          ? "Gestión de inventario, compras y repuestos"
-                          : "Registrar clientes y vehículos"}
+                      <p className="text-xs text-neutral-400 mt-0.5 leading-snug">
+                        {r.description}
                       </p>
                     </div>
                   </div>
@@ -1540,46 +1635,86 @@ export default function SettingsPage() {
 
           {/* Active users */}
           <Card className="border-neutral-100 shadow-sm">
-            <CardHeader><CardTitle>Usuarios Activos</CardTitle></CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y divide-neutral-50">
-                {users.filter((u) => u.tenantId === taller.id).map(u => (
-                  <div key={u.id} className="flex items-center gap-4 px-5 py-4 hover:bg-neutral-50/50 transition-colors group">
-                    <div 
-                      className="flex flex-1 items-center gap-4 cursor-pointer"
-                      onClick={() => handleEditUser(u)}
-                    >
-                      <div className="h-9 w-9 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 group-hover:bg-emerald-600 transition-colors">
-                        {u.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-neutral-900 group-hover:text-emerald-600 transition-colors">{u.name}</p>
-                        <p className="text-xs text-neutral-400">{u.email}</p>
-                      </div>
-                    </div>
-                    <Badge className={cn("border-none rounded-full text-xs", roleBadge(u.role))}>{roleLabel(u.role)}</Badge>
-                    <Badge className={cn("border-none rounded-full text-xs",
-                      u.status === "active" ? "bg-emerald-100 text-emerald-700"
-                        : u.status === "invited" ? "bg-amber-100 text-amber-700"
-                          : "bg-neutral-100 text-neutral-500")}>
-                      {u.status === "active" ? "Activo" : u.status === "invited" ? "Invitado" : "Inactivo"}
-                    </Badge>
-                    {u.role !== "owner" && (
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => { setPinTarget(u); setPinForm(u.pin || ""); }}
-                          className="text-neutral-400 hover:text-emerald-600 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-emerald-50"
-                          title="Asignar PIN de Caja">
-                          <Key className="h-4 w-4" />
-                        </button>
-                        <button onClick={() => setDeleteTarget(u)}
-                          className="text-neutral-300 hover:text-rose-500 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-rose-50">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <div>
+                <CardTitle>Usuarios Activos</CardTitle>
+                <CardDescription>
+                  {activeTenantUsers.length} {activeTenantUsers.length === 1 ? "usuario asignado" : "usuarios asignados"} a este taller
+                </CardDescription>
               </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-xs rounded-xl"
+                onClick={() => setInviteOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Invitar Empleado
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              {usersLoading && activeTenantUsers.length === 0 ? (
+                <div className="flex items-center justify-center py-12 text-neutral-400 gap-2">
+                  <div className="h-4 w-4 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs">Cargando usuarios del taller...</span>
+                </div>
+              ) : activeTenantUsers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                  <div className="h-12 w-12 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-400 mb-3">
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-neutral-900 mb-1">No hay usuarios registrados</h3>
+                  <p className="text-xs text-neutral-500 max-w-sm mb-4">
+                    Invita a tu equipo (cajeros, mecánicos, recepcionistas, administradores) para colaborar con permisos sincronizados en tiempo real.
+                  </p>
+                  <Button
+                    onClick={() => setInviteOpen(true)}
+                    className="rounded-xl bg-black text-white hover:bg-neutral-800 text-xs gap-1.5 h-9"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Invitar Primer Usuario
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-y divide-neutral-50">
+                  {activeTenantUsers.map(u => (
+                    <div key={u.id} className="flex items-center gap-4 px-5 py-4 hover:bg-neutral-50/50 transition-colors group">
+                      <div 
+                        className="flex flex-1 items-center gap-4 cursor-pointer"
+                        onClick={() => handleEditUser(u)}
+                      >
+                        <div className="h-9 w-9 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center flex-shrink-0 group-hover:bg-emerald-600 transition-colors">
+                          {u.name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-neutral-900 group-hover:text-emerald-600 transition-colors">{u.name}</p>
+                          <p className="text-xs text-neutral-400">{u.email}</p>
+                        </div>
+                      </div>
+                      <Badge className={cn("border-none rounded-full text-xs", roleBadge(u.role))}>{roleLabel(u.role)}</Badge>
+                      <Badge className={cn("border-none rounded-full text-xs",
+                        u.status === "active" ? "bg-emerald-100 text-emerald-700"
+                          : u.status === "invited" ? "bg-amber-100 text-amber-700"
+                            : "bg-neutral-100 text-neutral-500")}>
+                        {u.status === "active" ? "Activo" : u.status === "invited" ? "Invitado" : "Inactivo"}
+                      </Badge>
+                      {u.role !== "owner" && (
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { setPinTarget(u); setPinForm(u.pin || ""); }}
+                            className="text-neutral-400 hover:text-emerald-600 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-emerald-50"
+                            title="Asignar PIN de Caja">
+                            <Key className="h-4 w-4" />
+                          </button>
+                          <button onClick={() => setDeleteTarget(u)}
+                            className="text-neutral-300 hover:text-rose-500 transition-colors cursor-pointer border-none bg-transparent p-1.5 rounded-md hover:bg-rose-50">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 

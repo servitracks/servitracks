@@ -39,14 +39,53 @@ export default function DashboardLayout() {
       ? (params.tenant as string)
       : null;
 
-  // IMPORTANTE: No usar || tenants[0] como fallback para evitar que datos
-  // de otros tenants (ej. "autocheck") aparezcan en nuevos usuarios.
-  const currentTenant = tenantSlug
-    ? tenants.find((t) => t.slug === tenantSlug) ?? null
-    : null;
+  // IMPORTANTE: Buscar por slug (case-insensitive) o por id
+  const storeTenant = useStore((s) => s.currentTenant);
+  const currentTenant = useMemo(() => {
+    if (!tenantSlug) return null;
+    const fromTenants = tenants.find(
+      (t) =>
+        t.slug?.toLowerCase() === tenantSlug.toLowerCase() ||
+        t.id === tenantSlug
+    );
+    if (fromTenants) return fromTenants;
+    if (
+      storeTenant &&
+      (storeTenant.slug?.toLowerCase() === tenantSlug.toLowerCase() ||
+        storeTenant.id === tenantSlug)
+    ) {
+      return storeTenant;
+    }
+    return null;
+  }, [tenants, tenantSlug, storeTenant]);
+
   const isPending = currentTenant?.status === "pending";
   const isPosPage = location.pathname.endsWith("/pos") || location.pathname.includes("/pos");
   const isOrdenesPage = location.pathname.endsWith("/ordenes") || location.pathname.includes("/ordenes");
+
+  // Fallback: Si el tenant no está en memoria, buscarlo directamente en Supabase
+  useEffect(() => {
+    if (!tenantSlug || currentTenant) return;
+    let isMounted = true;
+    async function fetchRemoteTenant() {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("tenants")
+          .select("*")
+          .or(`slug.ilike.${tenantSlug},id.eq.${tenantSlug}`)
+          .maybeSingle();
+
+        if (!error && data && isMounted) {
+          useStore.getState().addTenant(data);
+          useStore.getState().setCurrentTenant(data);
+        }
+      } catch (err) {
+        console.warn("[Layout] Error buscando tenant en Supabase:", err);
+      }
+    }
+    fetchRemoteTenant();
+    return () => { isMounted = false; };
+  }, [tenantSlug, currentTenant]);
 
   // Redirigir a login si no está autenticado o si el tenant no existe (una vez hidratado el store)
   useEffect(() => {
@@ -55,11 +94,19 @@ export default function DashboardLayout() {
       navigate("/login");
       return;
     }
-    // Si el slug en la URL no coincide con ningún tenant del usuario, redirigir a login
-    if (tenantSlug && tenants.length > 0 && !tenants.find((t) => t.slug === tenantSlug)) {
+    // Si es superadmin, no redirigir
+    if (currentUserId === 'admin') return;
+    if (typeof window !== 'undefined') {
+      try {
+        const s = localStorage.getItem("servitracks-session");
+        if (s && (JSON.parse(s).role === 'superadmin' || JSON.parse(s).empleado_id === 'admin')) return;
+      } catch (e) {}
+    }
+    // Si el slug en la URL no coincide con ningún tenant del usuario y ya no está cargando, redirigir a login
+    if (tenantSlug && tenants.length > 0 && !currentTenant) {
       navigate("/login");
     }
-  }, [hydrated, currentUserId, tenantSlug, tenants, navigate]);
+  }, [hydrated, currentUserId, tenantSlug, tenants, currentTenant, navigate]);
 
   // Cerrar sidebar al cambiar de página
   useEffect(() => {
@@ -75,15 +122,35 @@ export default function DashboardLayout() {
     if (typeof window !== 'undefined') {
       try {
         const sessionStr = localStorage.getItem("servitracks-session");
-        if (sessionStr && JSON.parse(sessionStr).role === 'superadmin') {
-          return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+        if (sessionStr) {
+          const parsed = JSON.parse(sessionStr);
+          if (parsed.role === 'superadmin' || parsed.empleado_id === 'admin') {
+            return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+          }
         }
       } catch (e) {}
     }
 
     if (!currentUserId) return null;
-    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === currentTenant?.id) || null;
-  }, [users, currentUserId, currentTenant?.id]);
+    const directUser = users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId);
+    if (directUser) return directUser;
+
+    // Buscar por email desde la sesión activa para no asignar usuarios erróneos
+    if (typeof window !== 'undefined') {
+      try {
+        const sessionStr = localStorage.getItem("servitracks-session");
+        if (sessionStr) {
+          const parsed = JSON.parse(sessionStr);
+          if (parsed.email) {
+            const byEmail = users.find((u) => u.email?.toLowerCase().trim() === parsed.email.toLowerCase().trim());
+            if (byEmail) return byEmail;
+          }
+        }
+      } catch (e) {}
+    }
+
+    return null;
+  }, [users, currentUserId]);
 
   // Recuperación: Si el usuario está autenticado pero no en el store local, lo buscamos en Supabase
   useEffect(() => {
@@ -179,7 +246,7 @@ export default function DashboardLayout() {
 
     console.log("[RBAC] Pathname:", location.pathname, "Subpath:", subpath, "Role:", userRole);
 
-    // Mapa de permisos por subruta
+    // Mapa de permisos por subruta (sincronizado con Sidebar y roles RBAC)
     const pathPermissions: Record<string, string[]> = {
       "": ['owner', 'admin', 'receptionist', 'superadmin'],
       "/orders": ['owner', 'admin', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
@@ -187,19 +254,20 @@ export default function DashboardLayout() {
       "/cotizaciones": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
       "/pos": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
       "/caja": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
-      "/conversaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
-      "/reminders": ['owner', 'cashier', 'receptionist', 'superadmin'],
-      "/customers": ['owner', 'cashier', 'receptionist', 'superadmin'],
-      "/inventory": ['owner', 'warehouse', 'superadmin'],
-      "/movimientos": ['owner', 'warehouse', 'superadmin'],
-      "/services": ['owner', 'superadmin'],
-      "/proveedores": ['owner', 'warehouse', 'superadmin'],
-      "/mis-comisiones": ['mechanic', 'owner', 'cashier', 'superadmin'],
-      "/nomina": ['owner', 'superadmin'],
-      "/reports": ['owner', 'superadmin'],
-      "/activity": ['owner', 'superadmin'],
-      "/maintenance": ['owner', 'cashier', 'superadmin'],
-      "/settings": ['owner', 'superadmin'],
+      "/conversaciones": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
+      "/reminders": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
+      "/customers": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
+      "/inventory": ['owner', 'admin', 'warehouse', 'cashier', 'receptionist', 'superadmin'],
+      "/movimientos": ['owner', 'admin', 'warehouse', 'superadmin'],
+      "/services": ['owner', 'admin', 'receptionist', 'superadmin'],
+      "/proveedores": ['owner', 'admin', 'warehouse', 'superadmin'],
+      "/mis-comisiones": ['mechanic', 'owner', 'admin', 'cashier', 'superadmin'],
+      "/nomina": ['owner', 'admin', 'superadmin'],
+      "/reports": ['owner', 'admin', 'superadmin'],
+      "/activity": ['owner', 'admin', 'superadmin'],
+      "/maintenance": ['owner', 'admin', 'cashier', 'mechanic', 'receptionist', 'superadmin'],
+      "/mantenimiento": ['owner', 'admin', 'cashier', 'mechanic', 'receptionist', 'superadmin'],
+      "/settings": ['owner', 'admin', 'superadmin'],
     };
 
     // Buscar si la ruta actual coincide con una de las rutas protegidas

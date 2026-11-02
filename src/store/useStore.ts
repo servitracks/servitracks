@@ -82,6 +82,7 @@ interface AppState {
   addUser: (user: TenantUser) => void;
   updateUser: (id: string, updates: Partial<TenantUser>) => void;
   deleteUser: (id: string) => void;
+  setUsers: (users: TenantUser[]) => void;
 
   // Technicians
   addTechnician: (technician: Technician) => void;
@@ -383,19 +384,27 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('tenants', id));
       },
 
-      addUser: (user) => set((state) => {
-        const exists = state.users.some((u) => u.id === user.id);
-        if (exists) {
-          return { users: state.users.map((u) => u.id === user.id ? { ...u, ...user } : u) };
-        }
-        state.addActivityLog({ action: 'created_user', details: `Creó el usuario ${user.name} (${user.role})`, module: 'AJUSTES' });
-        return { users: [...state.users, user] };
-      }),
+      addUser: (user) => {
+        set((state) => {
+          const exists = state.users.some((u) => u.id === user.id);
+          if (exists) {
+            return { users: state.users.map((u) => u.id === user.id ? { ...u, ...user } : u) };
+          }
+          state.addActivityLog({ action: 'created_user', details: `Creó el usuario ${user.name} (${user.role})`, module: 'AJUSTES' });
+          return { users: [...state.users, user] };
+        });
+        import("@/lib/supabaseSync").then(m => m.upsertTenantUsers([user]));
+      },
       updateUser: (id, updates) =>
         set((state) => {
           const user = state.users.find(u => u.id === id);
           if (user) state.addActivityLog({ action: 'updated_user', details: `Actualizó el usuario ${user.name}`, module: 'AJUSTES' });
-          return { users: state.users.map((u) => (u.id === id ? { ...u, ...updates } : u)) };
+          const updated = state.users.map((u) => (u.id === id ? { ...u, ...updates } : u));
+          const userToSync = updated.find(u => u.id === id);
+          if (userToSync) {
+            import("@/lib/supabaseSync").then(m => m.upsertTenantUsers([userToSync]));
+          }
+          return { users: updated };
         }),
       deleteUser: (id) => set((state) => {
         const user = state.users.find(u => u.id === id);
@@ -403,6 +412,7 @@ export const useStore = create<AppState>()(
         import("@/lib/supabaseSync").then(m => m.deleteTenantUserFromSupabase(id, user?.tenantId));
         return { users: state.users.filter((u) => u.id !== id) };
       }),
+      setUsers: (users) => set({ users }),
 
       addTechnician: (tech) => {
         set((state) => ({ technicians: [...state.technicians, tech] }));

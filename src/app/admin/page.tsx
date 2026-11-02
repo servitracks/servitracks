@@ -128,6 +128,7 @@ export default function AdminPage() {
     async function load() {
       const [t, p, cfg] = await Promise.all([getTenants(), getPlans(), getGlobalConfig()]);
       setTenants(t);
+      useStore.getState().setTenants(t);
       setPlans(p);
       setGlobalConfig(cfg);
       const ordsMap: Record<string, { count: number; total: number }> = {};
@@ -276,6 +277,8 @@ export default function AdminPage() {
                                     <DropdownMenuItem 
                                       className="rounded-lg gap-2 cursor-pointer py-2 hover:bg-neutral-100/70"
                                       onClick={() => {
+                                        useStore.getState().addTenant(t);
+                                        useStore.getState().setCurrentTenant(t);
                                         setSession({ empleado_id: 'admin', tenant_id: t.id, iniciado_en: new Date().toISOString() });
                                         setActiveTenant(t.slug);
                                         toast.success(`Entrando a ${t.name}...`);
