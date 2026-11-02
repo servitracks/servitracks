@@ -105,12 +105,25 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
           if (parsed.role === 'superadmin' || parsed.empleado_id === 'admin') {
             return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
           }
+          const matched = users.find(u => u.id === parsed.user_id || u.id === parsed.empleado_id || (parsed.email && u.email?.toLowerCase().trim() === parsed.email.toLowerCase().trim()));
+          if (matched) return matched;
+          if (parsed.email) {
+            return {
+              id: parsed.user_id || parsed.empleado_id || currentUserId || 'user',
+              name: parsed.name || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? currentTenant?.name : parsed.email.split('@')[0]),
+              email: parsed.email,
+              role: (parsed.role || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? 'owner' : 'owner')) as any,
+              tenantId: parsed.tenant_id || currentTenant?.id || '',
+              status: 'active' as const,
+              createdAt: parsed.iniciado_en || new Date().toISOString()
+            };
+          }
         }
       } catch (e) {}
     }
     if (!currentUserId) return null;
-    return users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId) || null;
-  }, [users, currentUserId]);
+    return users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId || (currentTenant?.email && u.email?.toLowerCase().trim() === currentTenant.email.toLowerCase().trim())) || null;
+  }, [users, currentUserId, currentTenant]);
 
   const allowedTenants = useMemo(() => {
     if (!currentUser) return currentTenant ? [currentTenant] : [];
@@ -129,8 +142,8 @@ export function Sidebar({ isOpen = false, onClose, unreadChatsCount = 0 }: Sideb
     router.push(newPath);
   };
 
-  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
-  const activeRole = simulatedRole || currentUser?.role || 'owner';
+  const isTenantOwner = !!(currentTenant && currentUser?.email && currentTenant.email?.toLowerCase().trim() === currentUser.email?.toLowerCase().trim());
+  const activeRole = currentUser?.role || (isTenantOwner ? 'owner' : (currentUserId === 'admin' ? 'superadmin' : 'owner'));
 
   const filteredNavigation = [...navigation].filter((item) => {
     if (!item.roles.includes(activeRole)) return false;

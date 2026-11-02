@@ -135,7 +135,7 @@ export default function DashboardLayout() {
     const directUser = users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId);
     if (directUser) return directUser;
 
-    // Buscar por email desde la sesión activa para no asignar usuarios erróneos
+    // Buscar por email desde la sesión activa o recuperar usuario de sesión
     if (typeof window !== 'undefined') {
       try {
         const sessionStr = localStorage.getItem("servitracks-session");
@@ -144,13 +144,22 @@ export default function DashboardLayout() {
           if (parsed.email) {
             const byEmail = users.find((u) => u.email?.toLowerCase().trim() === parsed.email.toLowerCase().trim());
             if (byEmail) return byEmail;
+            return {
+              id: parsed.user_id || parsed.empleado_id || currentUserId || 'user',
+              name: parsed.name || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? currentTenant?.name : parsed.email.split('@')[0]),
+              email: parsed.email,
+              role: (parsed.role || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? 'owner' : 'owner')) as any,
+              tenantId: parsed.tenant_id || currentTenant?.id || '',
+              status: 'active' as const,
+              createdAt: parsed.iniciado_en || new Date().toISOString()
+            };
           }
         }
       } catch (e) {}
     }
 
     return null;
-  }, [users, currentUserId]);
+  }, [users, currentUserId, currentTenant]);
 
   // Recuperación: Si el usuario está autenticado pero no en el store local, lo buscamos en Supabase
   useEffect(() => {
@@ -241,8 +250,8 @@ export default function DashboardLayout() {
       subpath = subpath.slice(0, -1);
     }
 
-    const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
-    const userRole = simulatedRole || currentUser.role || 'receptionist';
+    const isTenantOwner = !!(currentTenant && currentUser?.email && currentTenant.email?.toLowerCase().trim() === currentUser.email?.toLowerCase().trim());
+    const userRole = currentUser?.role || (isTenantOwner ? 'owner' : (currentUserId === 'admin' ? 'superadmin' : 'owner'));
 
     console.log("[RBAC] Pathname:", location.pathname, "Subpath:", subpath, "Role:", userRole);
 

@@ -493,10 +493,10 @@ export default function InventoryPage() {
   const currentUserId = useStore((s) => s.currentUserId);
   const users = useStore((s) => s.users);
   const currentUser = currentUserId === 'admin' 
-    ? { role: 'owner' } 
+    ? { role: 'owner', email: 'admin@servitracks.com' } 
     : users.find((u) => u.id === currentUserId);
-  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
-  const activeRole = simulatedRole || currentUser?.role || 'receptionist';
+  const isTenantOwner = !!(currentTenant && (currentUser as any)?.email && currentTenant.email?.toLowerCase().trim() === (currentUser as any).email?.toLowerCase().trim());
+  const activeRole = currentUser?.role || (isTenantOwner ? 'owner' : (currentUserId === 'admin' ? 'superadmin' : 'owner'));
   const isOwner = ['owner', 'superadmin', 'super_admin', 'admin'].includes((activeRole || '').toLowerCase());
 
   const { addProduct, updateProduct, deleteProduct, bulkImportProducts, addMovement, addAccountPayable, updatePurchaseOrder, addPurchaseOrder, deletePurchaseOrder } = useStore();

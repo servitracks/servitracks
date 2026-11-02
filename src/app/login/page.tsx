@@ -247,6 +247,7 @@ export default function LoginPage() {
         iniciado_en: new Date().toISOString(),
         remember_me: rememberMe
       };
+      localStorage.removeItem("simulated-role");
       localStorage.setItem("servitracks-session", JSON.stringify(sessionData));
       if (!rememberMe) {
         sessionStorage.setItem("servitracks-session", JSON.stringify(sessionData));

@@ -56,7 +56,7 @@ export function useRequireAuth() {
       id: activeUser?.id || "guest",
       name: activeUser?.name || "Cargando...",
       email: activeUser?.email || "",
-      role: activeUser?.role || "receptionist"
+      role: activeUser?.role || "owner"
     }
   };
 }

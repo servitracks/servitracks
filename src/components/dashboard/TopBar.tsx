@@ -91,7 +91,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     };
   })();
 
-  // Current user (dynamic)
+  // Current user (dynamic con recuperación de sesión)
   const currentUser = (() => {
     if (currentUserId === 'admin') {
       return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
@@ -100,28 +100,46 @@ export function TopBar({ onMenuClick }: TopBarProps) {
     if (typeof window !== 'undefined') {
       try {
         const sessionStr = localStorage.getItem("servitracks-session");
-        if (sessionStr && JSON.parse(sessionStr).role === 'superadmin') {
-          return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+        if (sessionStr) {
+          const parsed = JSON.parse(sessionStr);
+          if (parsed.role === 'superadmin' || parsed.empleado_id === 'admin') {
+            return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'superadmin' as const };
+          }
+          const matched = users.find(u => u.id === parsed.user_id || u.id === parsed.empleado_id || (parsed.email && u.email?.toLowerCase().trim() === parsed.email.toLowerCase().trim()));
+          if (matched) return matched;
+          if (parsed.email) {
+            return {
+              id: parsed.user_id || parsed.empleado_id || currentUserId || 'user',
+              name: parsed.name || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? currentTenant?.name : parsed.email.split('@')[0]),
+              email: parsed.email,
+              role: (parsed.role || (currentTenant?.email?.toLowerCase() === parsed.email.toLowerCase() ? 'owner' : 'owner')) as any,
+              tenantId: parsed.tenant_id || currentTenant?.id || '',
+              status: 'active' as const,
+              createdAt: parsed.iniciado_en || new Date().toISOString()
+            };
+          }
         }
       } catch (e) {}
     }
 
-    return users.find((u) => u.id === currentUserId);
+    if (!currentUserId) return null;
+    return users.find((u) => u.id === currentUserId || (u as any).userId === currentUserId || (currentTenant?.email && u.email?.toLowerCase().trim() === currentTenant.email.toLowerCase().trim())) || null;
   })();
 
-  const simulatedRole = typeof window !== 'undefined' ? localStorage.getItem("simulated-role") : null;
-  const activeRole = simulatedRole || currentUser?.role || 'receptionist';
-  const isOwner = currentUser?.role === 'owner' || !!simulatedRole;
+  const isTenantOwner = !!(currentTenant && currentUser?.email && currentTenant.email?.toLowerCase().trim() === currentUser.email?.toLowerCase().trim());
+  const activeRole = currentUser?.role || (isTenantOwner ? 'owner' : (currentUserId === 'admin' ? 'superadmin' : 'owner'));
+  const isOwner = activeRole === 'owner' || activeRole === 'admin' || activeRole === 'superadmin';
 
   const roleNames: Record<string, string> = {
     'owner': 'Administrador',
+    'admin': 'Administrador',
     'cashier': 'Cajera',
     'warehouse': 'Almacén',
     'mechanic': 'Mecánico',
     'receptionist': 'Recepcionista',
     'superadmin': 'Super Admin'
   };
-  const displayRole = roleNames[activeRole] || 'Usuario';
+  const displayRole = roleNames[activeRole] || 'Administrador';
 
   // Recovery: If the user is authenticated but not in the local store (e.g. after login or refresh), fetch them
   useEffect(() => {
@@ -218,7 +236,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
 
 
   const initials = currentUser
-    ? currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    ? (currentUser.name || "Usuario").split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
     : "YA";
 
   return (
