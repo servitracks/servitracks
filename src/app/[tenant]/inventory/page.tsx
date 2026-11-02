@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect, useDeferredValue } from "react";
 import { useParams } from "@/lib/next-compat";
 import { useStore, Product } from "@/store/useStore";
+import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import { InventoryMovement } from "@/store/types";
 import {
   Plus,
@@ -484,11 +485,11 @@ const ProductFormFields = ({ form, setForm, isEditOpen, services, suppliers, onB
 };
 
 export default function InventoryPage() {
-  const params = useParams();
-  const tenantSlug = params?.tenant as string;
-  const tenants = useStore((s) => s.tenants);
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+  const { currentTenant, tenantId, tenantSlug } = useCurrentTenant();
+
+
+
+
 
   const currentUserId = useStore((s) => s.currentUserId);
   const users = useStore((s) => s.users);

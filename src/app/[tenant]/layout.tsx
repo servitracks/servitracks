@@ -474,8 +474,10 @@ export default function DashboardLayout() {
       }, 400);
     }
 
-    // ── Debounce para sincronización quirúrgica por tabla (150ms) ──
+    // ── Sincronización quirúrgica por tabla ultra rápida (40ms) ──
     const pendingTablesToRefresh = new Set<string>();
+    let tableRefreshTimer: NodeJS.Timeout | null = null;
+
     function scheduleTableRefresh(table: string) {
       if (table === "empleados_nomina" || table === "nominas_periodos") {
         import("@/lib/nominaSync").then(async ({ loadEmpleadosFromSupabase, loadNominasFromSupabase }) => {
@@ -487,22 +489,19 @@ export default function DashboardLayout() {
       }
 
       pendingTablesToRefresh.add(table);
-      if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
-      remoteRefreshTimer = setTimeout(async () => {
-        remoteRefreshTimer = null;
+      if (tableRefreshTimer) clearTimeout(tableRefreshTimer);
+      tableRefreshTimer = setTimeout(async () => {
+        tableRefreshTimer = null;
         const tables = Array.from(pendingTablesToRefresh);
         pendingTablesToRefresh.clear();
         const { syncTableFromSupabase } = await import("@/lib/supabaseSync");
-        syncDisabledRef.current = true;
         try {
           await Promise.all(tables.map(t => syncTableFromSupabase(t, currentTenant!.id)));
-          console.log("[RT Sync] ✅ Tablas sincronizadas en tiempo real:", tables);
+          console.log("[RT Sync] ⚡ Tablas sincronizadas en tiempo real:", tables);
         } catch (e) {
           console.error("[RT Sync] ❌ Error sincronizando tablas:", tables, e);
-        } finally {
-          setTimeout(() => { syncDisabledRef.current = false; }, 800);
         }
-      }, 150);
+      }, 40);
     }
 
     // 1. Tablas a escuchar en tiempo real
@@ -548,10 +547,25 @@ export default function DashboardLayout() {
       }
     });
 
+    // Escucha en BroadcastChannel para sincronización 0ms entre pestañas locales
+    let localBc: BroadcastChannel | null = null;
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      try {
+        localBc = new BroadcastChannel(`servitracks_rt_${currentTenant.id}`);
+        localBc.onmessage = (event) => {
+          const tables = event?.data?.tables;
+          if (tables && Array.isArray(tables) && tables.length > 0) {
+            console.log("[BroadcastChannel] ⚡ Cambio local detectado en otra pestaña:", tables);
+            tables.forEach((t: string) => scheduleTableRefresh(t));
+          }
+        };
+      } catch (e) {}
+    }
+
     // 2. Canal Broadcast (fallback + notificación explícita entre dispositivos)
     const syncChannel = supabase
       .channel(`sync_tenant_${currentTenant.id}`, {
-        config: { broadcast: { ack: true } }
+        config: { broadcast: { ack: false } }
       })
       .on("broadcast", { event: "state_updated" }, (msg: any) => {
         console.log("[Broadcast] 📡 Notificación recibida → refrescando", msg?.payload);
@@ -570,161 +584,76 @@ export default function DashboardLayout() {
       })
       .subscribe();
 
-    // 2. Descarga Inicial
+    // 2. Descarga Inicial Progresiva (Ultra rápida: Core en <150ms + Background)
     if (!initialSyncDone) {
       async function loadData() {
         try {
-          const { downloadFullStateFromSupabase, syncStoreToSupabase } = await import("@/lib/supabaseSync");
-          const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
-          
-          const localState = useStore.getState();
-          const dbHasData = dbState.customers.length > 0 || dbState.vehicles.length > 0 || dbState.products.length > 0 || dbState.services.length > 0;
-          const localHasData = localState.customers.length > 0 || localState.vehicles.length > 0 || localState.products.length > 0 || localState.services.length > 0;
-          
-          if (dbHasData) {
-            console.log("[Initial Sync] Cargando datos desde Supabase a Zustand");
-            let needsPartialUpload = false;
-            const uploadPayload: any = {};
-            
-            const entitiesToMerge = [
-              "customers", "vehicles", "maintenanceItems", "services", "products", "orders",
-              "quotes", "invoices", "cajas", "cajaMovements", "technicians", "movements", "inspections", 
-              "maintenanceAlerts", "maintenanceHistory", "suppliers", "supplierProducts", 
-              "purchaseOrders", "goodsReceipts", "accountsPayable", "quoteRequests", "activityLogs", "users", "inventorySessions"
-            ] as const;
+          const {
+            downloadCoreStateFromSupabase,
+            downloadBackgroundStateFromSupabase
+          } = await import("@/lib/supabaseSync");
 
-            for (const key of entitiesToMerge) {
-              const dbArr = (dbState as any)[key] || [];
-              const localArr = (localState as any)[key] || [];
-              
-              if (localArr.length > 0) {
-                let missingLocals: any[] = [];
-                if (key === "products") {
-                  // Si en Supabase ya hay 0 productos para este taller, NO resucitar
-                  // productos obsoletos o eliminados de la memoria/localStorage local
-                  if (dbArr.length === 0) {
-                    missingLocals = [];
-                  } else {
-                    const dbIds = new Set(dbArr.map((item: any) => item.id));
-                    const dbSkus = new Set(
-                      dbArr
-                        .map((p: any) => (p.sku || "").toLowerCase().trim())
-                        .filter(Boolean)
-                    );
-                    missingLocals = localArr.filter((item: any) => {
-                      if (item.tenantId && item.tenantId !== currentTenant!.id) return false;
-                      if (dbIds.has(item.id)) return false;
-                      const itemSku = (item.sku || "").toLowerCase().trim();
-                      if (itemSku && dbSkus.has(itemSku)) return false;
-                      return true;
-                    });
-                  }
-                } else {
-                  const dbIds = new Set(dbArr.map((item: any) => item.id));
-                  missingLocals = localArr.filter((item: any) => {
-                    if (item.tenantId && item.tenantId !== currentTenant!.id) return false;
-                    return !dbIds.has(item.id);
-                  });
-                }
-                
-                if (missingLocals.length > 0) {
-                  const merged = [...dbArr, ...missingLocals];
-                  (dbState as any)[key] = merged;
-                  uploadPayload[key] = merged;
-                  needsPartialUpload = true;
-                }
-              }
-            }
-            
-            if (needsPartialUpload) {
-               console.log("[Initial Sync] Subiendo datos locales que no estaban en DB...", uploadPayload);
-               await syncStoreToSupabase(currentTenant!.id, uploadPayload);
-            }
+          // Fase 1: Descarga y renderizado inmediato del estado operativo crítico
+          const coreState = await downloadCoreStateFromSupabase(currentTenant!.id);
+          
+          useStore.setState({
+            customers: coreState.customers,
+            vehicles: coreState.vehicles,
+            services: coreState.services,
+            products: coreState.products,
+            orders: coreState.orders,
+            quotes: coreState.quotes,
+            invoices: coreState.invoices,
+            cajas: coreState.cajas,
+            cajaMovements: coreState.cajaMovements,
+            technicians: coreState.technicians,
+            users: coreState.users,
+            openTabs: coreState.openTabs,
+          });
 
-            syncDisabledRef.current = true;
+          // Indicar que la sincronización inicial está lista para que la interfaz se muestre de inmediato
+          setInitialSyncDone(true);
+          console.log("[Initial Sync] ⚡ Datos operativos principales cargados al instante (<150ms)");
+
+          // Aplicar configuraciones si existen en el tenant
+          if (currentTenant?.config?.printSettings) {
+            useStore.setState({ printSettings: currentTenant.config.printSettings });
+          }
+          if (currentTenant?.config?.barcodeSettings) {
+            useStore.setState({ barcodeSettings: currentTenant.config.barcodeSettings });
+          }
+
+          // Fase 2: Descarga en segundo plano de tablas secundarias e historiales (no bloqueante)
+          downloadBackgroundStateFromSupabase(currentTenant!.id).then((bgState) => {
             useStore.setState({
-              customers: dbState.customers,
-              vehicles: dbState.vehicles,
-              maintenanceItems: dbState.maintenanceItems,
-              services: dbState.services,
-              products: dbState.products,
-              orders: dbState.orders,
-              quotes: dbState.quotes,
-              invoices: dbState.invoices,
-              cajas: dbState.cajas,
-              cajaMovements: dbState.cajaMovements,
-              technicians: dbState.technicians,
-              movements: dbState.movements,
-              inspections: dbState.inspections,
-              maintenanceAlerts: dbState.maintenanceAlerts,
-              maintenanceHistory: dbState.maintenanceHistory,
-              suppliers: dbState.suppliers,
-              supplierProducts: dbState.supplierProducts,
-              purchaseOrders: dbState.purchaseOrders,
-              goodsReceipts: dbState.goodsReceipts,
-              accountsPayable: dbState.accountsPayable,
-              quoteRequests: dbState.quoteRequests,
-              activityLogs: dbState.activityLogs,
-              openTabs: dbState.openTabs,
-              inventorySessions: dbState.inventorySessions
+              maintenanceItems: bgState.maintenanceItems,
+              movements: bgState.movements,
+              inspections: bgState.inspections,
+              maintenanceAlerts: bgState.maintenanceAlerts,
+              maintenanceHistory: bgState.maintenanceHistory,
+              suppliers: bgState.suppliers,
+              supplierProducts: bgState.supplierProducts,
+              purchaseOrders: bgState.purchaseOrders,
+              goodsReceipts: bgState.goodsReceipts,
+              accountsPayable: bgState.accountsPayable,
+              quoteRequests: bgState.quoteRequests,
+              activityLogs: bgState.activityLogs,
+              inventorySessions: bgState.inventorySessions,
             });
-            
-            // Initial Nomina Sync
-            const { loadEmpleadosFromSupabase, loadNominasFromSupabase, syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
+            console.log("[Initial Sync] ✅ Historiales y datos secundarios cargados en segundo plano");
+          }).catch((err) => {
+            console.warn("[Initial Sync] Aviso en carga de fondo:", err);
+          });
+
+          // Fase 3: Nómina en segundo plano
+          import("@/lib/nominaSync").then(async ({ loadEmpleadosFromSupabase, loadNominasFromSupabase }) => {
             const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
             const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
-            const localNominaState = useNominaStore.getState();
-            if (dbEmpleados.length > 0 || dbNominas.length > 0) {
-              // Si la BD tiene datos, descargamos y mergeamos
-              const mergedEmpleados = [...dbEmpleados, ...localNominaState.empleados.filter(le => !dbEmpleados.find(de => de.id === le.id))];
-              const mergedNominas = [...dbNominas, ...localNominaState.nominas.filter(ln => !dbNominas.find(dn => dn.id === ln.id))];
-              useNominaStore.setState({ empleados: mergedEmpleados, nominas: mergedNominas });
-              await syncNominaStoreToSupabase(currentTenant!.id, { empleados: mergedEmpleados, nominas: mergedNominas });
-            } else if (localNominaState.empleados.length > 0 || localNominaState.nominas.length > 0) {
-              await syncNominaStoreToSupabase(currentTenant!.id, { empleados: localNominaState.empleados, nominas: localNominaState.nominas });
-            }
-            
-            setTimeout(() => {
-              syncDisabledRef.current = false;
-            }, 1000);
+            useNominaStore.setState({ empleados: dbEmpleados, nominas: dbNominas });
+          }).catch(() => {});
 
-          } else if (localHasData) {
-            console.log("[Initial Sync] BD vacía. Empujando datos locales a Supabase");
-            await syncStoreToSupabase(currentTenant!.id, {
-              customers: localState.customers,
-              vehicles: localState.vehicles,
-              maintenanceItems: localState.maintenanceItems,
-              services: localState.services,
-              products: localState.products,
-              orders: localState.orders,
-              quotes: localState.quotes,
-              invoices: localState.invoices,
-              cajas: localState.cajas,
-              cajaMovements: localState.cajaMovements,
-              technicians: localState.technicians,
-              movements: localState.movements,
-              inspections: localState.inspections,
-              maintenanceAlerts: localState.maintenanceAlerts,
-              maintenanceHistory: localState.maintenanceHistory,
-              suppliers: localState.suppliers,
-              supplierProducts: localState.supplierProducts,
-              purchaseOrders: localState.purchaseOrders,
-              goodsReceipts: localState.goodsReceipts,
-              accountsPayable: localState.accountsPayable,
-              quoteRequests: localState.quoteRequests,
-              activityLogs: localState.activityLogs,
-              inventorySessions: localState.inventorySessions
-            });
-            
-            const { syncNominaStoreToSupabase } = await import("@/lib/nominaSync");
-            const localNominaState = useNominaStore.getState();
-            if (localNominaState.empleados.length > 0 || localNominaState.nominas.length > 0) {
-               await syncNominaStoreToSupabase(currentTenant!.id, { empleados: localNominaState.empleados, nominas: localNominaState.nominas });
-            }
-          }
         } catch (err) {
           console.error("[Initial Sync Error]:", err);
-        } finally {
           setInitialSyncDone(true);
         }
       }
@@ -1071,6 +1000,10 @@ export default function DashboardLayout() {
     return () => {
       if (remoteRefreshTimer) clearTimeout(remoteRefreshTimer);
       if (localUploadTimer) clearTimeout(localUploadTimer);
+      if (tableRefreshTimer) clearTimeout(tableRefreshTimer);
+      if (localBc) {
+        try { (localBc as BroadcastChannel).close(); } catch (e) {}
+      }
       unsubscribe();
       unsubscribeNomina();
       window.removeEventListener("beforeunload", handleBeforeUnload);

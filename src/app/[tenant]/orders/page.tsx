@@ -3,6 +3,7 @@
 import { useState, lazy, Suspense, useEffect, useMemo } from "react";
 import { useRouter, useParams, useSearchParams } from "@/lib/next-compat";
 import { useStore, WorkOrder } from "@/store/useStore";
+import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import {
   Plus, Search, MoreVertical, Clock, User as UserIcon, Car as CarIcon,
   CheckCircle2, AlertCircle, Wrench, Filter, Trash2,
@@ -111,11 +112,11 @@ const statusLabels: Record<string, string> = {
 
 export default function OrdersPage() {
   const router = useRouter();
-  const { tenant } = useParams();
+  const { currentTenant, tenantId, tenantSlug: tenant } = useCurrentTenant();
   const searchParams = useSearchParams();
-  const tenants = useStore((s) => s.tenants);
-  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+
+
+
 
   const allOrders = useStore((s) => s.orders);
   const orders = useMemo(() => {

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useParams, useRouter } from "@/lib/next-compat";
+import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 
 // Lazy-load recharts
@@ -105,11 +106,11 @@ const formatPaymentMethod = (method?: string) => {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const params = useParams();
-  const tenantSlug = params?.tenant as string;
-  const tenants = useStore((s) => s.tenants);
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+  const { currentTenant, tenantId, tenantSlug } = useCurrentTenant();
+
+
+
+
 
   const allOrders = useStore((s) => s.orders);
   const allCustomers = useStore((s) => s.customers);

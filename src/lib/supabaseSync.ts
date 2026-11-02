@@ -2,8 +2,77 @@
  * Supabase ↔ Zustand sync service for maintenance-related data.
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabase, supabaseAdmin } from "@/lib/supabase";
 import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab, InventorySession, Tenant, TenantUser } from "@/store/types";
+
+// ─── Instant Real-time Broadcast & Synchronization ───────────────────────────
+
+let activeBroadcastChannel: BroadcastChannel | null = null;
+let activeSyncTenantId: string | null = null;
+let activeSupabaseSyncChannel: any = null;
+
+export function getTenantSyncChannel(tenantId: string) {
+  if (!tenantId) return null;
+  if (activeSupabaseSyncChannel && activeSyncTenantId === tenantId) {
+    return activeSupabaseSyncChannel;
+  }
+  if (activeSupabaseSyncChannel) {
+    try {
+      supabase.removeChannel(activeSupabaseSyncChannel);
+    } catch (e) {}
+  }
+  activeSyncTenantId = tenantId;
+  activeSupabaseSyncChannel = supabase.channel(`sync_tenant_${tenantId}`, {
+    config: { broadcast: { ack: false } }
+  });
+  activeSupabaseSyncChannel.subscribe();
+  return activeSupabaseSyncChannel;
+}
+
+export function broadcastTenantChange(tenantId: string, tables: string[], data?: any) {
+  if (!tenantId || !tables || tables.length === 0) return;
+
+  const payload = {
+    tables,
+    data,
+    tenantId,
+    timestamp: Date.now(),
+  };
+
+  // 1. Instantáneo (0ms) en la misma máquina entre pestañas y ventanas
+  if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+    try {
+      if (!activeBroadcastChannel || activeBroadcastChannel.name !== `servitracks_rt_${tenantId}`) {
+        activeBroadcastChannel?.close();
+        activeBroadcastChannel = new BroadcastChannel(`servitracks_rt_${tenantId}`);
+      }
+      activeBroadcastChannel.postMessage(payload);
+    } catch (e) {
+      // Ignorar error de BroadcastChannel si no está disponible
+    }
+  }
+
+  // 2. Ultrarrápido (30-50ms) entre dispositivos distintos vía Supabase WebSocket Broadcast
+  try {
+    const ch = getTenantSyncChannel(tenantId);
+    if (ch) {
+      ch.send({
+        type: "broadcast",
+        event: "state_updated",
+        payload,
+      }).catch((err: any) => {
+        console.warn("[Broadcast] Error al emitir broadcast:", err);
+      });
+    }
+  } catch (e) {
+    // Ignorar si el socket aún está conectando
+  }
+
+  // 3. Evento nativo en la ventana actual para refrescar componentes al instante
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("servitracks:tenant_changed", { detail: payload }));
+  }
+}
 
 // ─── Column mappers ───────────────────────────────────────────────────────────
 
@@ -627,15 +696,18 @@ export async function loadInventorySessionsFromSupabase(tenantId: string): Promi
   );
 }
 
-export async function downloadFullStateFromSupabase(tenantId: string) {
+/**
+ * Descarga prioritaria y ultra rápida (<150ms) de las entidades operativas esenciales.
+ * Permite que el Dashboard del Administrador, Órdenes, POS, Caja y Clientes se
+ * muestren inmediatamente en pantalla sin esperar tablas pesadas o historiales.
+ */
+export async function downloadCoreStateFromSupabase(tenantId: string) {
   const [
-    customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices,
-    cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs, inventorySessions
+    customers, vehicles, services, products, orders, quotes, invoices,
+    cajas, cajaMovements, technicians, users, openTabs
   ] = await Promise.all([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
-    loadMaintenanceItemsFromSupabase(tenantId),
     loadServicesFromSupabase(tenantId),
     loadProductsFromSupabase(tenantId),
     loadOrdersFromSupabase(tenantId),
@@ -644,6 +716,26 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadCajasFromSupabase(tenantId),
     loadMovimientosCajaFromSupabase(tenantId),
     loadTechniciansFromSupabase(tenantId),
+    loadUsersFromSupabase(tenantId),
+    loadOpenTabsFromSupabase(tenantId),
+  ]);
+
+  return {
+    customers, vehicles, services, products, orders, quotes, invoices,
+    cajas, cajaMovements, technicians, users, openTabs
+  };
+}
+
+/**
+ * Descarga en segundo plano de tablas secundarias e historiales (sin bloquear la UI).
+ */
+export async function downloadBackgroundStateFromSupabase(tenantId: string) {
+  const [
+    maintenanceItems, movements, inspections, maintenanceAlerts, maintenanceHistory,
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable,
+    quoteRequests, activityLogs, inventorySessions
+  ] = await Promise.all([
+    loadMaintenanceItemsFromSupabase(tenantId),
     loadInventoryMovementsFromSupabase(tenantId),
     loadInspectionsFromSupabase(tenantId),
     loadMaintenanceAlertsFromSupabase(tenantId),
@@ -655,12 +747,23 @@ export async function downloadFullStateFromSupabase(tenantId: string) {
     loadAccountsPayableFromSupabase(tenantId),
     loadQuoteRequestsFromSupabase(tenantId),
     loadActivityLogsFromSupabase(tenantId),
-    loadUsersFromSupabase(tenantId),
-    loadOpenTabsFromSupabase(tenantId),
-    loadInventorySessionsFromSupabase(tenantId)
+    loadInventorySessionsFromSupabase(tenantId),
   ]);
-  
-  return { customers, vehicles, maintenanceItems, services, products, orders, quotes, invoices, cajas, cajaMovements, technicians, movements, inspections, maintenanceAlerts, maintenanceHistory, suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable, quoteRequests, activityLogs, users, openTabs, inventorySessions };
+
+  return {
+    maintenanceItems, movements, inspections, maintenanceAlerts, maintenanceHistory,
+    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable,
+    quoteRequests, activityLogs, inventorySessions
+  };
+}
+
+export async function downloadFullStateFromSupabase(tenantId: string) {
+  const [core, background] = await Promise.all([
+    downloadCoreStateFromSupabase(tenantId),
+    downloadBackgroundStateFromSupabase(tenantId),
+  ]);
+
+  return { ...core, ...background };
 }
 
 
@@ -1243,35 +1346,60 @@ function invoiceToDb(i: Invoice) {
 
 // ─── Upsert to Supabase ───────────────────────────────────────────────────────
 
-export async function deleteRecordFromSupabase(table: string, id: string): Promise<void> {
+export async function deleteRecordFromSupabase(table: string, id: string, tenantId?: string): Promise<void> {
   // Si la tabla es open_tabs, el ID en Supabase se almacena textualmente en la columna id
   const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
-  if (error) console.error(`[sync] delete ${table} error:`, error);
+  if (error) {
+    console.error(`[sync] delete ${table} error:`, error);
+    return;
+  }
+  if (tenantId) {
+    broadcastTenantChange(tenantId, [table]);
+  }
 }
-
 
 export async function upsertCustomers(customers: Customer[]): Promise<void> {
   if (customers.length === 0) return;
   const { error } = await supabaseAdmin.from("customers").upsert(customers.map(customerToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert customers:", error);
+  if (error) {
+    console.error("[sync] upsert customers:", error);
+    return;
+  }
+  const tenantId = customers[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["customers"]);
 }
 
 export async function upsertVehicles(vehicles: Vehicle[]): Promise<void> {
   if (vehicles.length === 0) return;
   const { error } = await supabaseAdmin.from("vehicles").upsert(vehicles.map(vehicleToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert vehicles:", error);
+  if (error) {
+    console.error("[sync] upsert vehicles:", error);
+    return;
+  }
+  const tenantId = vehicles[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["vehicles"]);
 }
 
 export async function upsertMaintenanceItems(items: MaintenanceItem[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("maintenance_items").upsert(items.map(maintenanceItemToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert maintenance_items:", error);
+  if (error) {
+    console.error("[sync] upsert maintenance_items:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["maintenance_items"]);
 }
 
 export async function upsertServices(items: Service[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("services").upsert(items.map(serviceToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert services:", error);
+  if (error) {
+    console.error("[sync] upsert services:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["services"]);
 }
 
 export async function upsertProducts(items: Product[]): Promise<void> {
@@ -1282,44 +1410,78 @@ export async function upsertProducts(items: Product[]): Promise<void> {
     const { error } = await supabaseAdmin.from("products").upsert(chunk.map(productToDb), { onConflict: "id" });
     if (error) console.error("[sync] upsert products chunk error:", error);
   }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["products"]);
 }
 
 export async function upsertOrders(items: WorkOrder[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("orders").upsert(items.map(workOrderToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert orders:", error);
+  if (error) {
+    console.error("[sync] upsert orders:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["orders"]);
 }
 
 export async function upsertQuotes(items: Quote[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("quotes").upsert(items.map(quoteToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert quotes:", error);
+  if (error) {
+    console.error("[sync] upsert quotes:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["quotes"]);
 }
 
 export async function upsertInvoices(items: Invoice[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("invoices").upsert(items.map(invoiceToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert invoices:", error);
+  if (error) {
+    console.error("[sync] upsert invoices:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["invoices", "orders", "products"]);
 }
-
 
 export async function upsertCajas(items: Caja[]): Promise<void> {
   if (items.length === 0) return;
   const validItems = items.filter(c => c.tenant_id && c.tenant_id.trim() !== "");
   if (validItems.length === 0) return;
   const { error } = await supabaseAdmin.from("cajas").upsert(validItems.map(cajaToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert cajas:", error);
+  if (error) {
+    console.error("[sync] upsert cajas:", error);
+    return;
+  }
+  const tenantId = validItems[0]?.tenant_id;
+  if (tenantId) broadcastTenantChange(tenantId, ["cajas"]);
 }
+
 export async function upsertMovimientosCaja(items: MovimientoCaja[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("movimientos_caja").upsert(items.map(movimientoCajaToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert movimientos_caja:", error);
+  if (error) {
+    console.error("[sync] upsert movimientos_caja:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenant_id;
+  if (tenantId) broadcastTenantChange(tenantId, ["movimientos_caja", "cajas"]);
 }
+
 export async function upsertTechnicians(items: Technician[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("technicians").upsert(items.map(technicianToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert technicians:", error);
+  if (error) {
+    console.error("[sync] upsert technicians:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["technicians"]);
 }
+
 export async function upsertInventoryMovements(items: InventoryMovement[]): Promise<void> {
   if (items.length === 0) return;
   const CHUNK_SIZE = 100;
@@ -1328,6 +1490,8 @@ export async function upsertInventoryMovements(items: InventoryMovement[]): Prom
     const { error } = await supabaseAdmin.from("movements").upsert(chunk.map(inventoryMovementToDb), { onConflict: "id" });
     if (error) console.error("[sync] upsert movements chunk error:", error);
   }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["movements", "products"]);
 }
 export async function upsertInspections(items: Inspection[]): Promise<void> {
   if (items.length === 0) return;
@@ -1407,13 +1571,23 @@ export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
     };
   });
   const { error } = await supabaseAdmin.from("open_tabs").upsert(dbItems, { onConflict: "id" });
-  if (error) console.error("[sync] upsert open_tabs:", error);
+  if (error) {
+    console.error("[sync] upsert open_tabs:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["open_tabs"]);
 }
 
 export async function upsertInventorySessions(items: InventorySession[]): Promise<void> {
   if (items.length === 0) return;
   const { error } = await supabaseAdmin.from("inventory_sessions").upsert(items.map(inventorySessionToDb), { onConflict: "id" });
-  if (error) console.error("[sync] upsert inventory_sessions:", error);
+  if (error) {
+    console.error("[sync] upsert inventory_sessions:", error);
+    return;
+  }
+  const tenantId = items[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["inventory_sessions"]);
 }
 
 export async function deleteTenantUserFromSupabase(id: string, tenantId?: string): Promise<void> {
@@ -1449,6 +1623,7 @@ export async function deleteTenantUserFromSupabase(id: string, tenantId?: string
         }
       }
     }
+    if (tenantId) broadcastTenantChange(tenantId, ["tenant_users"]);
   } catch (err) {
     console.error("[sync] deleteTenantUserFromSupabase error:", err);
   }
@@ -1481,6 +1656,8 @@ export async function upsertTenantUsers(users: TenantUser[]): Promise<void> {
       console.error("[sync] upsertTenantUsers error:", err);
     }
   }
+  const tenantId = users[0]?.tenantId;
+  if (tenantId) broadcastTenantChange(tenantId, ["tenant_users"]);
 }
 
 export async function syncTenantToSupabase(id: string, updates: Partial<Tenant>): Promise<void> {
@@ -1750,6 +1927,9 @@ export async function syncTableFromSupabase(table: string, tenantId: string): Pr
     }
     default:
       console.warn(`[sync] Tabla '${table}' no mapeada en syncTableFromSupabase`);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("servitracks:table_synced", { detail: { table, tenantId } }));
   }
 }
 

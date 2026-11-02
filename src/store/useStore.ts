@@ -428,8 +428,9 @@ export const useStore = create<AppState>()(
           return { technicians: updated };
         }),
       deleteTechnician: (id) => {
+        const tech = get().technicians.find((t) => t.id === id);
         set((state) => ({ technicians: state.technicians.filter((t) => t.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('technicians', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('technicians', id, tech?.tenantId));
       },
 
       updatePrintSettings: (updates) =>
@@ -468,8 +469,9 @@ export const useStore = create<AppState>()(
           return { customers: updated };
         }),
       deleteCustomer: (id) => {
+        const cust = get().customers.find((c) => c.id === id);
         set((state) => ({ customers: state.customers.filter((c) => c.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('customers', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('customers', id, cust?.tenantId));
       },
 
       addVehicle: (vehicle) => {
@@ -486,8 +488,9 @@ export const useStore = create<AppState>()(
           return { vehicles: updated };
         }),
       deleteVehicle: (id) => {
+        const veh = get().vehicles.find((v) => v.id === id);
         set((state) => ({ vehicles: state.vehicles.filter((v) => v.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('vehicles', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('vehicles', id, veh?.tenantId));
       },
 
       addOrder: (order) => set((state) => {
@@ -548,7 +551,7 @@ export const useStore = create<AppState>()(
 
           const productsToSync = updatedProducts.filter((p) => affectedProductIds.has(p.id));
           import("@/lib/supabaseSync").then((m) => {
-            m.deleteRecordFromSupabase('orders', id);
+            m.deleteRecordFromSupabase('orders', id, ord?.tenantId);
             if (productsToSync.length > 0) m.upsertProducts(productsToSync);
             if (returnMovements.length > 0) m.upsertInventoryMovements(returnMovements);
           });
@@ -612,8 +615,9 @@ export const useStore = create<AppState>()(
           return { products: updated };
         }),
       deleteProduct: (id) => {
+        const prod = get().products.find((p) => p.id === id);
         set((state) => ({ products: state.products.filter((p) => p.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('products', id, prod?.tenantId));
       },
       bulkImportProducts: async (newProducts, updatedProducts, movements = []) => {
         let finalToSync: Product[] = [];
@@ -722,8 +726,9 @@ export const useStore = create<AppState>()(
           return { services: updated };
         }),
       deleteService: (id) => {
+        const srv = get().services.find((s) => s.id === id);
         set((state) => ({ services: state.services.filter((s) => s.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('services', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('services', id, srv?.tenantId));
       },
 
       addMovement: (movement) =>
@@ -767,11 +772,12 @@ export const useStore = create<AppState>()(
         });
       },
       deleteOpenTab: (id) => {
+        const tab = get().openTabs.find((t) => t.id === id);
         set((state) => ({
           openTabs: state.openTabs.filter((t) => t.id !== id),
         }));
         import("@/lib/supabaseSync").then((m) => {
-          m.deleteRecordFromSupabase("open_tabs", id);
+          m.deleteRecordFromSupabase("open_tabs", id, tab?.tenantId);
         });
       },
 
@@ -1116,8 +1122,9 @@ export const useStore = create<AppState>()(
           return { quotes: updated };
         }),
       deleteQuote: (id) => {
+        const q = get().quotes.find((item) => item.id === id);
         set((state) => ({ quotes: state.quotes.filter((q) => q.id !== id) }));
-        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('quotes', id));
+        import("@/lib/supabaseSync").then(m => m.deleteRecordFromSupabase('quotes', id, q?.tenantId));
       },
 
       // ──── PROVEEDORES ────────────────────────────────────────────────────────

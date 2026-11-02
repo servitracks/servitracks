@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { useParams, useRouter } from "@/lib/next-compat";
 import { useStore } from "@/store/useStore";
+import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import {
   Plus,
   Search,
@@ -114,11 +115,11 @@ const statusConfig: Record<QuoteStatus, StatusConfigItem> = {
 
 export default function CotizacionesPage() {
   const router = useRouter();
-  const params = useParams();
-  const tenantSlug = params?.tenant as string;
-  const tenants = useStore((s) => s.tenants);
-  const currentTenant = tenants.find((t) => t.slug === tenantSlug) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+  const { currentTenant, tenantId, tenantSlug } = useCurrentTenant();
+
+
+
+
 
   const allQuotes = useStore((s) => s.quotes);
   const allCustomers = useStore((s) => s.customers);

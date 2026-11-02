@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useStore, Customer, Vehicle } from "@/store/useStore";
+import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import {
   UserPlus, Search, MoreVertical, Car, Phone, Mail, Calendar,
   ChevronRight, Users, TrendingUp, Edit, Trash2, X, User as UserIcon, Upload,
@@ -260,8 +261,8 @@ export default function CustomersPage() {
     tenants,
   } = useStore();
 
-  const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
-  const tenantId = currentTenant?.id ?? "";
+  const { currentTenant, tenantId } = useCurrentTenant();
+
 
   const [activeTab, setActiveTab] = useState<CustomerFilterTab>("all");
   const [search, setSearch] = useState("");
