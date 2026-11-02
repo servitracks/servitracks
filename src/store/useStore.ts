@@ -322,10 +322,29 @@ export const useStore = create<AppState>()(
           return { activityLogs: cleanLogs };
         }
 
+        let safeLogId: string;
+        try {
+          if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            safeLogId = crypto.randomUUID();
+          } else {
+            safeLogId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+              const r = Math.random() * 16 | 0;
+              const v = c === 'x' ? r : (r & 0x3 | 0x8);
+              return v.toString(16);
+            });
+          }
+        } catch {
+          safeLogId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+        }
+
         const newLog: ActivityLog = {
           ...log,
           tenantId,
-          id: crypto.randomUUID(),
+          id: safeLogId,
           userId: user.id,
           userName: user.name,
           userRole: effectiveRole,
@@ -706,63 +725,15 @@ export const useStore = create<AppState>()(
         }),
 
       addOpenTab: (tab) => {
-        const duplicateIdsToDelete: string[] = [];
         let finalTab = tab;
 
-        const getItemsSig = (items: any[]) =>
-          (items || [])
-            .map((i: any) => `${i.productId || i.id}:${i.quantity}:${i.salePrice}`)
-            .sort()
-            .join("|");
-
         set((state) => {
-          const newSig = getItemsSig(tab.items);
           const filtered = state.openTabs.filter((t) => {
             if (t.id === tab.id) return false;
-            if (t.tenantId && tab.tenantId && t.tenantId !== tab.tenantId) return true;
-
-            // 1. Misma orden de trabajo: nunca permitir dos cuentas en espera para la misma orden
-            if (tab.orderId && t.orderId && t.orderId === tab.orderId) {
-              duplicateIdsToDelete.push(t.id);
+            // Solo reemplazar si ambas corresponden a la misma orden de trabajo específica
+            if (tab.orderId && t.orderId && tab.orderId === t.orderId) {
               return false;
             }
-
-            // 2. Mismo cliente registrado (no Consumidor Final): actualizar su cuenta en espera existente
-            const isRegisteredCustomer =
-              Boolean(tab.customerId && tab.customerId !== "walk-in" && tab.customerId !== "none") ||
-              Boolean(tab.tabName && tab.tabName.trim().toLowerCase() !== "consumidor final");
-
-            if (isRegisteredCustomer) {
-              const sameCustomerId =
-                tab.customerId &&
-                tab.customerId !== "walk-in" &&
-                t.customerId === tab.customerId;
-              const sameTabName =
-                tab.tabName &&
-                t.tabName &&
-                t.tabName.trim().toLowerCase() === tab.tabName.trim().toLowerCase() &&
-                tab.tabName.trim().toLowerCase() !== "consumidor final";
-
-              if (sameCustomerId || sameTabName) {
-                duplicateIdsToDelete.push(t.id);
-                return false;
-              }
-            } else {
-              // 3. Consumidor Final: evitar duplicado exacto creado por doble clic o re-pausa inmediata (< 2 min)
-              const timeDiff = Math.abs(
-                new Date(tab.createdAt || Date.now()).getTime() -
-                  new Date(t.createdAt || 0).getTime()
-              );
-              if (
-                t.mechanicId === tab.mechanicId &&
-                getItemsSig(t.items) === newSig &&
-                timeDiff < 120000
-              ) {
-                duplicateIdsToDelete.push(t.id);
-                return false;
-              }
-            }
-
             return true;
           });
 
@@ -773,50 +744,24 @@ export const useStore = create<AppState>()(
 
         import("@/lib/supabaseSync").then((m) => {
           m.upsertOpenTabs([finalTab]);
-          duplicateIdsToDelete.forEach((dupId) => {
-            if (dupId !== finalTab.id) {
-              m.deleteRecordFromSupabase("open_tabs", dupId);
-            }
-          });
         });
       },
       updateOpenTab: (id, updates) => {
         set((state) => {
-          const updated = state.openTabs.map(t => t.id === id ? { ...t, ...updates } : t);
-          const tabToSync = updated.find(t => t.id === id);
+          const updated = state.openTabs.map((t) => (t.id === id ? { ...t, ...updates } : t));
+          const tabToSync = updated.find((t) => t.id === id);
           if (tabToSync) {
-            import("@/lib/supabaseSync").then(m => m.upsertOpenTabs([tabToSync]));
+            import("@/lib/supabaseSync").then((m) => m.upsertOpenTabs([tabToSync]));
           }
           return { openTabs: updated };
         });
       },
       deleteOpenTab: (id) => {
-        const extraIdsToDelete: string[] = [];
-        set((state) => {
-          const target = state.openTabs.find((t) => t.id === id);
-          const remaining = state.openTabs.filter((t) => {
-            if (t.id === id) return false;
-            if (target) {
-              if (target.orderId && t.orderId === target.orderId) {
-                extraIdsToDelete.push(t.id);
-                return false;
-              }
-              if (
-                target.customerId &&
-                target.customerId !== "walk-in" &&
-                t.customerId === target.customerId
-              ) {
-                extraIdsToDelete.push(t.id);
-                return false;
-              }
-            }
-            return true;
-          });
-          return { openTabs: remaining };
-        });
+        set((state) => ({
+          openTabs: state.openTabs.filter((t) => t.id !== id),
+        }));
         import("@/lib/supabaseSync").then((m) => {
           m.deleteRecordFromSupabase("open_tabs", id);
-          extraIdsToDelete.forEach((dupId) => m.deleteRecordFromSupabase("open_tabs", dupId));
         });
       },
 
@@ -1015,26 +960,34 @@ export const useStore = create<AppState>()(
         });
       },
 
-      addCaja: (caja) => set((state) => {
-        state.addActivityLog({ action: 'opened_caja', details: `Abrió la caja con RD$ ${caja.monto_inicial}`, module: 'CAJA' });
-        const nowIso = new Date().toISOString();
-        const closedOld: Caja[] = [];
-        const sanitizedExisting = state.cajas.map((c) => {
-          if (c.tenant_id === caja.tenant_id && c.estado === 'ABIERTA') {
-            const closed: Caja = {
-              ...c,
-              estado: 'CERRADA',
-              cerrada_en: c.cerrada_en || nowIso,
-              notas_cierre: c.notas_cierre || 'Cerrado automáticamente al abrir nuevo turno',
-            };
-            closedOld.push(closed);
-            return closed;
-          }
-          return c;
+      addCaja: (caja) => {
+        try {
+          get().addActivityLog({ action: 'opened_caja', details: `Abrió la caja con RD$ ${caja.monto_inicial}`, module: 'CAJA' });
+        } catch (e) {
+          console.warn("[addCaja] No se pudo registrar log de actividad:", e);
+        }
+        set((state) => {
+          const nowIso = new Date().toISOString();
+          const closedOld: Caja[] = [];
+          const sanitizedExisting = state.cajas.map((c) => {
+            if (c.tenant_id === caja.tenant_id && c.estado === 'ABIERTA') {
+              const closed: Caja = {
+                ...c,
+                estado: 'CERRADA',
+                cerrada_en: c.cerrada_en || nowIso,
+                notas_cierre: c.notas_cierre || 'Cerrado automáticamente al abrir nuevo turno',
+              };
+              closedOld.push(closed);
+              return closed;
+            }
+            return c;
+          });
+          import("@/lib/supabaseSync").then(m => m.upsertCajas([caja, ...closedOld])).catch(err => {
+            console.error("[addCaja] Error al sincronizar con Supabase:", err);
+          });
+          return { cajas: [caja, ...sanitizedExisting] };
         });
-        import("@/lib/supabaseSync").then(m => m.upsertCajas([caja, ...closedOld]));
-        return { cajas: [caja, ...sanitizedExisting] };
-      }),
+      },
       updateCaja: (id, updates) =>
         set((state) => {
           if (updates.estado === 'CERRADA') {

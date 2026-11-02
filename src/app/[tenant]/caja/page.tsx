@@ -1403,7 +1403,18 @@ export default function CajaPage() {
     currentUserId
   } = useStore();
 
-  const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
+  const storeTenant = useStore((s) => s.currentTenant);
+  const tenantSlugStr = typeof tenant === 'string' ? tenant : Array.isArray(tenant) ? tenant[0] : '';
+  const currentTenant = useMemo(() => {
+    if (storeTenant && (storeTenant.slug?.toLowerCase() === tenantSlugStr.toLowerCase() || storeTenant.id === tenantSlugStr)) {
+      return storeTenant;
+    }
+    return (
+      tenants.find((t) => t.slug?.toLowerCase() === tenantSlugStr.toLowerCase() || t.id === tenantSlugStr) ||
+      storeTenant ||
+      null
+    );
+  }, [storeTenant, tenants, tenantSlugStr]);
   const tenantId = currentTenant?.id ?? "";
 
   const currentUser = useMemo(() => {
@@ -1412,15 +1423,30 @@ export default function CajaPage() {
     }
     if (typeof window !== 'undefined') {
       try {
-        const sessionStr = localStorage.getItem("servitracks-session");
+        const sessionStr = localStorage.getItem("servitracks-session") || sessionStorage.getItem("servitracks-session");
         if (sessionStr) {
           const sess = JSON.parse(sessionStr);
           if (sess.role === 'superadmin') return { id: 'admin', name: 'Super Administrador', email: 'admin@servitracks.com', role: 'owner' as const, pin: undefined };
           if (sess.user) return sess.user;
+          const sessUserId = sess.user_id || sess.empleado_id;
+          if (sessUserId) {
+            const foundInUsers = users.find((u) => u.id === sessUserId);
+            if (foundInUsers) return foundInUsers;
+            return {
+              id: sessUserId,
+              name: sess.name || (sess.email ? sess.email.split('@')[0] : 'Cajero'),
+              email: sess.email || '',
+              role: (sess.role || 'cashier') as any,
+              pin: undefined
+            };
+          }
         }
       } catch (e) {}
     }
-    return users.find((u) => u.id === currentUserId) || users.find((u) => u.tenantId === tenantId) || { id: currentUserId || 'usr_cajero', name: 'Usuario Actual', role: 'cashier' as const, pin: undefined };
+    const foundById = currentUserId ? users.find((u) => u.id === currentUserId) : null;
+    if (foundById) return foundById;
+    const foundByTenant = tenantId ? users.find((u) => u.tenantId === tenantId) : null;
+    return foundByTenant || { id: currentUserId || 'usr_cajero', name: 'Usuario Actual', role: 'cashier' as const, pin: undefined };
   }, [users, currentUserId, tenantId]);
 
   const tenantUsers = useMemo(() => {
@@ -1431,13 +1457,26 @@ export default function CajaPage() {
     return Array.from(uniqueMap.values());
   }, [users, tenantId, currentUser]);
 
-  // Active caja shift (solo el turno más reciente puede estar abierto)
+  // Active caja shift (cualquier turno activo con estado ABIERTA para este tenant)
   const activeCaja = useMemo(() => {
+    if (!tenantId) return undefined;
     const tenantCajas = cajas
       .filter(c => c.tenant_id === tenantId)
       .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
-    return tenantCajas[0]?.estado === 'ABIERTA' ? tenantCajas[0] : undefined;
+    return tenantCajas.find(c => c.estado === 'ABIERTA');
   }, [cajas, tenantId]);
+
+  // Abrir modal automáticamente si viene con acción de apertura desde POS u otra pantalla
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('action') === 'apertura' || urlParams.get('open') === 'true') {
+        if (!activeCaja) {
+          setIsAperturaOpen(true);
+        }
+      }
+    }
+  }, [activeCaja]);
 
   // Auto-cerrar cualquier turno viejo que haya quedado con estado ABIERTA detrás de un turno más reciente
   useEffect(() => {
@@ -2035,33 +2074,45 @@ export default function CajaPage() {
   // Open Caja Shift
   const handleAperturaSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!tenantId) {
+      toast.error("No se pudo identificar el taller actual. Por favor recarga la página.");
+      return;
+    }
+
     const monto = parseAmount(aperturaMonto);
     if (isNaN(monto) || monto < 0) {
       toast.error("Por favor, ingrese un monto inicial válido");
       return;
     }
 
+    const safeEmpId = currentUser?.id?.trim() || "usr_cajero";
+
     const nuevaCaja: Caja = {
       id: `caja-${Date.now()}`,
       tenant_id: tenantId,
-      empleado_id: currentUser?.id || "usr_cajero",
+      empleado_id: safeEmpId,
       monto_inicial: monto,
       estado: 'ABIERTA',
       abierta_en: new Date().toISOString(),
       notas_apertura: aperturaNotas ? `Turno: ${aperturaTurno} | ${aperturaNotas}` : `Turno: ${aperturaTurno}`
     };
 
-    addCaja(nuevaCaja);
-    setIsAperturaOpen(false);
-    setAperturaMonto("");
-    setAperturaNotas("");
-    toast.success("¡Caja abierta exitosamente!", {
-      action: {
-        label: "Ir a Facturación",
-        onClick: () => router.push(`/${tenant}/pos`),
-      },
-      duration: 8000,
-    });
+    try {
+      addCaja(nuevaCaja);
+      setIsAperturaOpen(false);
+      setAperturaMonto("");
+      setAperturaNotas("");
+      toast.success("¡Caja abierta exitosamente!", {
+        action: {
+          label: "Ir a Facturación",
+          onClick: () => router.push(`/${tenant}/pos`),
+        },
+        duration: 8000,
+      });
+    } catch (err: any) {
+      console.error("[handleAperturaSubmit] Error al abrir caja:", err);
+      toast.error("Error al abrir caja: " + (err?.message || "Intenta nuevamente"));
+    }
   };
 
   // Submit quick cash movement

@@ -560,73 +560,54 @@ export async function loadOpenTabsFromSupabase(tenantId: string): Promise<OpenTa
         .order("created_at", { ascending: false })
         .order("id", { ascending: true })
         .range(from, to),
-    (row: any) => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      tabName: row.tab_name,
-      customerId: row.customer_id,
-      mechanicId: row.mechanic_id,
-      orderId: row.order_id,
-      discount: row.discount || undefined,
-      discountType: row.discount_type || undefined,
-      items: row.items || [],
-      createdAt: row.created_at,
-      updatedAt: row.updated_at
-    })
+    (row: any) => {
+      const rawItems = Array.isArray(row.items)
+        ? row.items
+        : typeof row.items === "string"
+        ? (() => { try { return JSON.parse(row.items); } catch { return []; } })()
+        : [];
+      const meta = rawItems.find((i: any) => i && i._isTabMeta);
+      const cleanItems = rawItems.filter((i: any) => i && !i._isTabMeta);
+      const discount = meta?.discount !== undefined ? meta.discount : (row.discount || 0);
+      const discountType = meta?.discountType || row.discount_type || "fixed";
+
+      return {
+        id: row.id,
+        tenantId: row.tenant_id,
+        tabName: row.tab_name || "Consumidor Final",
+        customerId: row.customer_id || "walk-in",
+        mechanicId: row.mechanic_id || "none",
+        orderId: row.order_id || null,
+        discount: discount > 0 ? discount : undefined,
+        discountType: discountType || "fixed",
+        items: cleanItems,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      };
+    }
   );
 
-  // Ordenar de más reciente a más antigua para conservar siempre la versión más actual y eliminar duplicadas
+  // Ordenar de más reciente a más antigua
   const sorted = [...rows].sort(
     (a, b) =>
       new Date(b.updatedAt || b.createdAt || 0).getTime() -
       new Date(a.updatedAt || a.createdAt || 0).getTime()
   );
 
+  // Conservar todas las cuentas únicas por ID (y por orderId si pertenece a una misma orden específica)
   const seenIds = new Set<string>();
   const seenOrderIds = new Set<string>();
-  const seenCustomerIds = new Set<string>();
-  const seenCustomerNames = new Set<string>();
   const deduped: OpenTab[] = [];
-  const duplicateIdsToDelete: string[] = [];
 
   for (const tab of sorted) {
     if (!tab.id || seenIds.has(tab.id)) continue;
-    seenIds.add(tab.id);
-
     const orderKey = tab.orderId?.trim();
-    const custIdKey =
-      tab.customerId && tab.customerId !== "walk-in" && tab.customerId !== "none"
-        ? tab.customerId.trim()
-        : "";
-    const custNameKey =
-      tab.tabName && tab.tabName.trim().toLowerCase() !== "consumidor final"
-        ? tab.tabName.trim().toLowerCase()
-        : "";
-
-    let isDuplicate = false;
     if (orderKey && seenOrderIds.has(orderKey)) {
-      isDuplicate = true;
-    } else if (custIdKey && seenCustomerIds.has(custIdKey)) {
-      isDuplicate = true;
-    } else if (custNameKey && seenCustomerNames.has(custNameKey)) {
-      isDuplicate = true;
-    }
-
-    if (isDuplicate) {
-      duplicateIdsToDelete.push(tab.id);
       continue;
     }
-
+    seenIds.add(tab.id);
     if (orderKey) seenOrderIds.add(orderKey);
-    if (custIdKey) seenCustomerIds.add(custIdKey);
-    if (custNameKey) seenCustomerNames.add(custNameKey);
     deduped.push(tab);
-  }
-
-  if (duplicateIdsToDelete.length > 0) {
-    duplicateIdsToDelete.forEach((dupId) => {
-      deleteRecordFromSupabase("open_tabs", dupId).catch(() => {});
-    });
   }
 
   return deduped;
@@ -688,7 +669,23 @@ function dbToCaja(row: any): Caja {
   return { id: row.id, tenant_id: row.tenant_id, empleado_id: row.empleado_id, monto_inicial: row.monto_inicial, estado: row.estado, abierta_en: row.abierta_en, cerrada_en: row.cerrada_en, monto_esperado_efectivo: row.monto_esperado_efectivo, monto_contado_efectivo: row.monto_contado_efectivo, monto_contado_tarjeta: row.monto_contado_tarjeta, monto_contado_transferencia: row.monto_contado_transferencia, diferencia: row.diferencia, notas_apertura: row.notas_apertura, notas_cierre: row.notas_cierre };
 }
 function cajaToDb(c: Caja) {
-  return { id: c.id, tenant_id: c.tenant_id, empleado_id: c.empleado_id, monto_inicial: c.monto_inicial, estado: c.estado, abierta_en: c.abierta_en, cerrada_en: c.cerrada_en, monto_esperado_efectivo: c.monto_esperado_efectivo, monto_contado_efectivo: c.monto_contado_efectivo, monto_contado_tarjeta: c.monto_contado_tarjeta, monto_contado_transferencia: c.monto_contado_transferencia, diferencia: c.diferencia, notas_apertura: c.notas_apertura, notas_cierre: c.notas_cierre };
+  const safeEmpleadoId = c.empleado_id?.trim() ? c.empleado_id : 'cajero';
+  return {
+    id: c.id,
+    tenant_id: c.tenant_id,
+    empleado_id: safeEmpleadoId,
+    monto_inicial: Number(c.monto_inicial || 0),
+    estado: c.estado || 'ABIERTA',
+    abierta_en: c.abierta_en || new Date().toISOString(),
+    cerrada_en: c.cerrada_en || null,
+    monto_esperado_efectivo: c.monto_esperado_efectivo !== undefined && c.monto_esperado_efectivo !== null ? Number(c.monto_esperado_efectivo) : null,
+    monto_contado_efectivo: c.monto_contado_efectivo !== undefined && c.monto_contado_efectivo !== null ? Number(c.monto_contado_efectivo) : null,
+    monto_contado_tarjeta: c.monto_contado_tarjeta !== undefined && c.monto_contado_tarjeta !== null ? Number(c.monto_contado_tarjeta) : null,
+    monto_contado_transferencia: c.monto_contado_transferencia !== undefined && c.monto_contado_transferencia !== null ? Number(c.monto_contado_transferencia) : null,
+    diferencia: c.diferencia !== undefined && c.diferencia !== null ? Number(c.diferencia) : null,
+    notas_apertura: c.notas_apertura || '',
+    notas_cierre: c.notas_cierre || ''
+  };
 }
 
 function dbToMovimientoCaja(row: any): MovimientoCaja {
@@ -851,7 +848,18 @@ function dbToActivityLog(row: any): ActivityLog {
   return { id: row.id, tenantId: row.tenant_id, userId: row.user_id, userName: row.user_name, userRole: row.user_role, action: row.action, details: row.details, module: row.module, createdAt: row.created_at };
 }
 function activityLogToDb(log: ActivityLog) {
-  return { id: log.id, tenant_id: log.tenantId, user_id: log.userId, user_name: log.userName, user_role: log.userRole, action: log.action, details: log.details, module: log.module, created_at: log.createdAt };
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(log.userId || '');
+  return {
+    id: log.id,
+    tenant_id: log.tenantId,
+    user_id: isUuid ? log.userId : null,
+    user_name: log.userName,
+    user_role: log.userRole,
+    action: log.action,
+    details: log.details,
+    module: log.module,
+    created_at: log.createdAt || new Date().toISOString()
+  };
 }
 
 function dbToInventorySession(row: any): InventorySession {
@@ -1297,7 +1305,9 @@ export async function upsertInvoices(items: Invoice[]): Promise<void> {
 
 export async function upsertCajas(items: Caja[]): Promise<void> {
   if (items.length === 0) return;
-  const { error } = await supabaseAdmin.from("cajas").upsert(items.map(cajaToDb), { onConflict: "id" });
+  const validItems = items.filter(c => c.tenant_id && c.tenant_id.trim() !== "");
+  if (validItems.length === 0) return;
+  const { error } = await supabaseAdmin.from("cajas").upsert(validItems.map(cajaToDb), { onConflict: "id" });
   if (error) console.error("[sync] upsert cajas:", error);
 }
 export async function upsertMovimientosCaja(items: MovimientoCaja[]): Promise<void> {
@@ -1373,19 +1383,29 @@ export async function upsertActivityLogs(items: ActivityLog[]): Promise<void> {
 }
 export async function upsertOpenTabs(items: OpenTab[]): Promise<void> {
   if (items.length === 0) return;
-  const dbItems = items.map(t => ({
-    id: t.id,
-    tenant_id: t.tenantId,
-    tab_name: t.tabName,
-    customer_id: t.customerId,
-    mechanic_id: t.mechanicId,
-    order_id: t.orderId || null,
-    items: t.items,
-    discount: t.discount || 0,
-    discount_type: t.discountType || "fixed",
-    created_at: t.createdAt,
-    updated_at: t.updatedAt
-  }));
+  const dbItems = items.map(t => {
+    const cleanItems = Array.isArray(t.items) ? t.items.filter((i: any) => !i._isTabMeta) : [];
+    const itemsPayload = [...cleanItems];
+    if ((t.discount && t.discount > 0) || (t.discountType && t.discountType !== "fixed")) {
+      itemsPayload.push({
+        _isTabMeta: true,
+        discount: t.discount || 0,
+        discountType: t.discountType || "fixed",
+      } as any);
+    }
+
+    return {
+      id: t.id,
+      tenant_id: t.tenantId,
+      tab_name: t.tabName || "Consumidor Final",
+      customer_id: t.customerId || "walk-in",
+      mechanic_id: t.mechanicId || "none",
+      order_id: t.orderId || null,
+      items: itemsPayload,
+      created_at: t.createdAt || new Date().toISOString(),
+      updated_at: t.updatedAt || new Date().toISOString()
+    };
+  });
   const { error } = await supabaseAdmin.from("open_tabs").upsert(dbItems, { onConflict: "id" });
   if (error) console.error("[sync] upsert open_tabs:", error);
 }
@@ -1639,8 +1659,17 @@ export async function syncTableFromSupabase(table: string, tenantId: string): Pr
       break;
     }
     case "open_tabs": {
-      const openTabs = await loadOpenTabsFromSupabase(tenantId);
-      store.setState({ openTabs });
+      const remoteTabs = await loadOpenTabsFromSupabase(tenantId);
+      const currentLocal = store.getState().openTabs || [];
+      const remoteIds = new Set(remoteTabs.map(t => t.id));
+      const now = Date.now();
+      // Preservar cuentas creadas localmente en los últimos 15s que aún no figuren en Supabase
+      const pendingLocal = currentLocal.filter(t => {
+        if (remoteIds.has(t.id)) return false;
+        const age = now - new Date(t.createdAt || 0).getTime();
+        return age >= 0 && age < 15000;
+      });
+      store.setState({ openTabs: [...pendingLocal, ...remoteTabs] });
       break;
     }
     case "inventory_sessions": {

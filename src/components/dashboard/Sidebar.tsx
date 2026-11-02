@@ -34,12 +34,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export const navigation = [
-  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'receptionist', 'superadmin'] },
-  { name: "Órdenes de Servicio", href: "/orders", icon: Wrench, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
-  { name: "Órdenes", href: "/ordenes", icon: ClipboardList, roles: ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
-  { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'cashier', 'receptionist', 'superadmin'] },
-  { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'cashier'] },
-  { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'cashier'] },
+  { name: "Dashboard", href: "", icon: LayoutDashboard, roles: ['owner', 'admin', 'receptionist', 'superadmin'] },
+  { name: "Órdenes de Servicio", href: "/orders", icon: Wrench, roles: ['owner', 'admin', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
+  { name: "Órdenes", href: "/ordenes", icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'] },
+  { name: "Cotizaciones", href: "/cotizaciones", icon: FileText, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Facturación POS", href: "/pos", icon: ReceiptText, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
+  { name: "Control de Caja", href: "/caja", icon: Wallet, roles: ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'] },
   { name: "Conversaciones", href: "/conversaciones", icon: MessageCircle, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Recordatorios", href: "/reminders", icon: Bell, roles: ['owner', 'cashier', 'receptionist'] },
   { name: "Clientes", href: "/customers", icon: Users, roles: ['owner', 'cashier', 'receptionist'] },

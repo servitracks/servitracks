@@ -165,13 +165,14 @@ export default function MisComisionesPage() {
 
   // Turno de caja abierto (para registrar egreso al liquidar si hay caja abierta)
   const activeCaja = useMemo(() => {
+    if (!tenantId) return undefined;
     const tenantCajas = (cajas || [])
       .filter((c) => c.tenant_id === tenantId)
       .sort(
         (a, b) =>
           new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime()
       );
-    return tenantCajas[0]?.estado === "ABIERTA" ? tenantCajas[0] : undefined;
+    return tenantCajas.find((c) => c.estado === "ABIERTA");
   }, [cajas, tenantId]);
 
   // Resolver técnico efectivo de cada factura (incluyendo vínculo con Orden de Trabajo si existía)

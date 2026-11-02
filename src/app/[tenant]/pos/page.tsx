@@ -149,14 +149,26 @@ export default function POSPage() {
   const quoteId = searchParams.get("quoteId");
   
   const { products, tenants, updateTenant, addInvoice, orders, services, technicians, invoices, updateOrder, cajas, addCajaMovement, updateProduct, addMovement, printSettings, customers, openTabs, addOpenTab, updateOpenTab, deleteOpenTab, quotes, updateQuote } = useStore();
-  const currentTenant = tenants.find(t => t.slug === tenant) ?? null;
+  const storeTenant = useStore((s) => s.currentTenant);
+  const tenantSlugStr = typeof tenant === 'string' ? tenant : Array.isArray(tenant) ? tenant[0] : '';
+  const currentTenant = useMemo(() => {
+    if (storeTenant && (storeTenant.slug?.toLowerCase() === tenantSlugStr.toLowerCase() || storeTenant.id === tenantSlugStr)) {
+      return storeTenant;
+    }
+    return (
+      tenants.find((t) => t.slug?.toLowerCase() === tenantSlugStr.toLowerCase() || t.id === tenantSlugStr) ||
+      storeTenant ||
+      null
+    );
+  }, [storeTenant, tenants, tenantSlugStr]);
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const tenantId = currentTenant?.id ?? "";
   const activeCaja = useMemo(() => {
+    if (!tenantId) return undefined;
     const tenantCajas = (cajas || [])
       .filter(c => c.tenant_id === tenantId)
-      .sort((a, b) => new Date(b.abierta_en).getTime() - new Date(a.abierta_en).getTime());
-    return tenantCajas[0]?.estado === 'ABIERTA' ? tenantCajas[0] : undefined;
+      .sort((a, b) => new Date(b.abierta_en || 0).getTime() - new Date(a.abierta_en || 0).getTime());
+    return tenantCajas.find(c => c.estado === 'ABIERTA');
   }, [cajas, tenantId]);
   const isProcessingCheckoutRef = useRef(false);
 
@@ -182,29 +194,13 @@ export default function POSPage() {
     );
     const seenIds = new Set<string>();
     const seenOrders = new Set<string>();
-    const seenCustomers = new Set<string>();
-    const seenNames = new Set<string>();
     const unique: typeof raw = [];
 
     for (const t of sorted) {
       if (!t.id || seenIds.has(t.id)) continue;
+      if (t.orderId && seenOrders.has(t.orderId)) continue;
       seenIds.add(t.id);
-
-      const orderKey = t.orderId?.trim();
-      const custKey = t.customerId && t.customerId !== "walk-in" && t.customerId !== "none" ? t.customerId.trim() : "";
-      const nameKey = t.tabName && t.tabName.trim().toLowerCase() !== "consumidor final" ? t.tabName.trim().toLowerCase() : "";
-
-      if (
-        (orderKey && seenOrders.has(orderKey)) ||
-        (custKey && seenCustomers.has(custKey)) ||
-        (nameKey && seenNames.has(nameKey))
-      ) {
-        continue;
-      }
-
-      if (orderKey) seenOrders.add(orderKey);
-      if (custKey) seenCustomers.add(custKey);
-      if (nameKey) seenNames.add(nameKey);
+      if (t.orderId) seenOrders.add(t.orderId);
       unique.push(t);
     }
 
@@ -412,7 +408,7 @@ export default function POSPage() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "F1") { e.preventDefault(); searchRef.current?.focus(); }
-      if (e.key === "F4") { e.preventDefault(); router.push(`/${tenant}/caja`); }
+      if (e.key === "F4") { e.preventDefault(); router.push(`/${tenant}/caja?action=apertura`); }
       if (e.key === "F12") { 
         e.preventDefault(); 
         if (cart.length > 0) {
@@ -420,7 +416,7 @@ export default function POSPage() {
             toast.error("Debe abrir la caja antes de registrar ventas", {
               action: {
                 label: "Abrir Caja (F4)",
-                onClick: () => router.push(`/${tenant}/caja`),
+                onClick: () => router.push(`/${tenant}/caja?action=apertura`),
               },
               duration: 6000,
             });
@@ -2332,9 +2328,10 @@ export default function POSPage() {
                       cart.find((i: any) => i._fromTabId)?._fromTabId ||
                       `tab-${Date.now()}`;
 
+                    const finalTenantId = currentTenant?.id || tenantId || "general";
                     const newTab = {
                       id: tabIdToUse,
-                      tenantId: tenantId || currentTenant?.id || currentTenant?.slug || "general",
+                      tenantId: finalTenantId,
                       tabName,
                       customerId: effectiveCustomerId || "walk-in",
                       mechanicId: effectiveMechanicId || "none",
@@ -2375,7 +2372,7 @@ export default function POSPage() {
                     toast.error("Debe abrir la caja antes de registrar ventas", {
                       action: {
                         label: "Abrir Caja (F4)",
-                        onClick: () => router.push(`/${tenant}/caja`),
+                        onClick: () => router.push(`/${tenant}/caja?action=apertura`),
                       },
                       duration: 6000,
                     });
@@ -2944,32 +2941,62 @@ export default function POSPage() {
             onOpenChange={setIsOpenTabsDialogOpen}
             tenantId={tenantId}
             onLoadTab={(tab) => {
-              // Limpiar la mesa
-              clearSale();
-              
-              // Cargar datos del cliente, técnico y descuento
-              setPosCustomerId(tab.customerId === "walk-in" ? "" : tab.customerId);
-              setPosMechanicId(tab.mechanicId === "none" ? "" : tab.mechanicId);
-              if (tab.discount && tab.discount > 0) {
-                setDiscount(tab.discount);
-                setDiscountType(tab.discountType || "fixed");
-              } else {
-                setDiscount(0);
-                setDiscountType("fixed");
+              try {
+                // Limpiar la mesa
+                clearSale();
+                
+                // Cargar datos del cliente, técnico y descuento
+                const safeCustId = tab.customerId && tab.customerId !== "walk-in" && tab.customerId !== "none" ? tab.customerId : "";
+                const safeTechId = tab.mechanicId && tab.mechanicId !== "none" ? tab.mechanicId : "";
+                setPosCustomerId(safeCustId);
+                setPosMechanicId(safeTechId);
+                if (tab.discount && tab.discount > 0) {
+                  setDiscount(tab.discount);
+                  setDiscountType(tab.discountType || "fixed");
+                } else {
+                  setDiscount(0);
+                  setDiscountType("fixed");
+                }
+                setActiveOrderId(tab.orderId || null);
+                setActiveTabId(tab.id);
+
+                const rawTabItems = Array.isArray(tab.items)
+                  ? tab.items
+                  : typeof (tab as any).items === "string"
+                  ? (() => { try { return JSON.parse((tab as any).items); } catch { return []; } })()
+                  : [];
+
+                const loadedCart = rawTabItems.map((i: any) => {
+                  const targetId = i.productId || i.id;
+                  const masterProd = products.find((p) => p.id === targetId || p.id === i.id);
+                  const masterServ = services.find((s) => s.id === targetId || s.id === i.id);
+                  const isLabor = i.id?.startsWith?.("labor-") || i.sku === "MANO-OBRA" || masterServ;
+                  const taxVal = (typeof i.tax === 'number' && i.tax >= 0 && i.tax <= 30)
+                    ? i.tax
+                    : (isLabor ? 0 : 18);
+                  
+                  return {
+                    ...masterProd,
+                    ...masterServ,
+                    ...i,
+                    id: targetId || i.id || `item-${Date.now()}`,
+                    productId: targetId || i.id,
+                    name: i.name || masterProd?.name || masterServ?.name || "Artículo",
+                    salePrice: typeof i.salePrice === 'number' ? i.salePrice : (masterProd?.salePrice || masterServ?.price || 0),
+                    quantity: Number(i.quantity) || 1,
+                    tax: taxVal,
+                    alreadyDeducted: true,
+                    _fromTabId: tab.id,
+                  } as any;
+                });
+
+                setCart(loadedCart);
+                setIsOpenTabsDialogOpen(false);
+                toast.info(`Cuenta de ${tab.tabName || "Consumidor Final"} recuperada`);
+              } catch (err) {
+                console.error("[POS] Error al ejecutar cuenta en espera:", err);
+                toast.error("Error al cargar la cuenta en espera");
               }
-              setActiveOrderId(tab.orderId);
-              setActiveTabId(tab.id);
-              setCart(tab.items.map(i => ({
-                ...i,
-                // Preservar tax (0% para mano de obra/exentos, 18% por defecto para productos)
-                tax: (typeof i.tax === 'number' && i.tax >= 0 && i.tax <= 30) ? i.tax : ((i.id?.startsWith?.("labor-") || i.sku === "MANO-OBRA") ? 0 : 18),
-                // El item ya fue descontado por su cantidad original al pausar.
-                alreadyDeducted: true,
-                _fromTabId: tab.id, 
-              } as any)));
-              
-              setIsOpenTabsDialogOpen(false);
-              toast.info(`Cuenta de ${tab.tabName} recuperada`);
             }}
           />
         )}

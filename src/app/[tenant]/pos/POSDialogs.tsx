@@ -1945,62 +1945,38 @@ interface OpenTabsDialogProps {
 
 export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: OpenTabsDialogProps) {
   const { openTabs, deleteOpenTab, updateProduct, addMovement, tenants, products, technicians, customers } = useStore();
-  const currentTenant = tenants.find(t => t.id === tenantId);
+  const currentTenant = tenants.find(t => t.id === tenantId || t.slug === tenantId);
+  const targetTenantId = currentTenant?.id || tenantId;
   const currentTenantConfig = currentTenant?.config;
-  const rawTabs = openTabs.filter(t => (
-    t.tenantId === tenantId ||
-    (currentTenant?.slug && t.tenantId === currentTenant.slug) ||
-    !t.tenantId
-  ));
+  
+  const tabs = useMemo(() => {
+    const rawTabs = openTabs.filter(t => (
+      !t.tenantId ||
+      t.tenantId === targetTenantId ||
+      t.tenantId === tenantId ||
+      (currentTenant?.slug && t.tenantId === currentTenant.slug)
+    ));
 
-  // Deduplicar cuentas en espera repetidas por orden o por cliente registrado (conservando la más reciente)
-  const { tabs, duplicateIds } = (() => {
     const sorted = [...rawTabs].sort(
       (a, b) =>
         new Date(b.updatedAt || b.createdAt || 0).getTime() -
         new Date(a.updatedAt || a.createdAt || 0).getTime()
     );
+
     const seenIds = new Set<string>();
     const seenOrders = new Set<string>();
-    const seenCustomers = new Set<string>();
-    const seenNames = new Set<string>();
     const unique: OpenTab[] = [];
-    const dups: string[] = [];
 
     for (const t of sorted) {
       if (!t.id || seenIds.has(t.id)) continue;
+      if (t.orderId && seenOrders.has(t.orderId)) continue;
       seenIds.add(t.id);
-
-      const orderKey = t.orderId?.trim();
-      const custKey = t.customerId && t.customerId !== "walk-in" && t.customerId !== "none" ? t.customerId.trim() : "";
-      const customerObj = custKey ? customers.find(c => c.id === custKey) : null;
-      const resolvedName = (customerObj?.name || t.tabName || "").trim().toLowerCase();
-      const nameKey = resolvedName && resolvedName !== "consumidor final" ? resolvedName : "";
-
-      if (
-        (orderKey && seenOrders.has(orderKey)) ||
-        (custKey && seenCustomers.has(custKey)) ||
-        (nameKey && seenNames.has(nameKey))
-      ) {
-        dups.push(t.id);
-        continue;
-      }
-
-      if (orderKey) seenOrders.add(orderKey);
-      if (custKey) seenCustomers.add(custKey);
-      if (nameKey) seenNames.add(nameKey);
+      if (t.orderId) seenOrders.add(t.orderId);
       unique.push(t);
     }
 
-    return { tabs: unique, duplicateIds: dups };
-  })();
-
-  // Limpiar automáticamente de la base de datos y del store cualquier duplicado residual al abrir el modal
-  useEffect(() => {
-    if (open && duplicateIds.length > 0) {
-      duplicateIds.forEach((id) => deleteOpenTab(id));
-    }
-  }, [open, duplicateIds.length]);
+    return unique;
+  }, [openTabs, targetTenantId, tenantId, currentTenant?.slug]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2078,20 +2054,22 @@ export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: Open
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            if (currentTenantConfig?.autoDeductInventory) {
+                            if (currentTenantConfig?.autoDeductInventory && Array.isArray(tab.items)) {
                               tab.items.forEach((item) => {
-                                if (item.id.startsWith('labor-') || item.sku === 'MANO-OBRA' || item.category === 'Servicios') return;
-                                const currentProduct = products.find(p => p.id === item.id);
-                                if (currentProduct) {
-                                  updateProduct(currentProduct.id, { stock: currentProduct.stock + item.deductedQuantity });
+                                if (item.id?.startsWith('labor-') || item.sku === 'MANO-OBRA' || item.category === 'Servicios') return;
+                                const targetId = item.productId || item.id;
+                                const currentProduct = products.find(p => p.id === targetId || p.id === item.id);
+                                const qtyToReturn = Number(item.deductedQuantity) || Number(item.quantity) || 0;
+                                if (currentProduct && qtyToReturn > 0) {
+                                  updateProduct(currentProduct.id, { stock: currentProduct.stock + qtyToReturn });
                                   addMovement({
                                     id: `m-pos-tab-cancel-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                                    tenantId,
-                                    productId: item.id,
-                                    productName: item.name,
+                                    tenantId: targetTenantId,
+                                    productId: currentProduct.id,
+                                    productName: currentProduct.name,
                                     type: 'in',
-                                    quantity: item.deductedQuantity,
-                                    reason: `Anulación Cuenta en Espera - ${tab.tabName}`,
+                                    quantity: qtyToReturn,
+                                    reason: `Anulación Cuenta en Espera - ${tab.tabName || 'Consumidor Final'}`,
                                     date: new Date().toISOString(),
                                   });
                                 }
@@ -2100,16 +2078,22 @@ export function OpenTabsDialog({ open, onOpenChange, tenantId, onLoadTab }: Open
                             deleteOpenTab(tab.id);
                             toast.success('Cuenta anulada y stock reintegrado');
                           }}
-                          className="h-8 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
+                          className="h-8 px-3 text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200 cursor-pointer"
                         >
                           Anular
                         </Button>
                         <Button
                           onClick={() => {
-                            onLoadTab(tab);
-                            deleteOpenTab(tab.id);
+                            try {
+                              onLoadTab(tab);
+                              deleteOpenTab(tab.id);
+                              onOpenChange(false);
+                            } catch (e) {
+                              console.error("[POS] Error al ejecutar cuenta en espera:", e);
+                              toast.error("Error al recuperar la cuenta en espera");
+                            }
                           }}
-                          className="h-8 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold"
+                          className="h-8 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold cursor-pointer"
                         >
                           Recuperar
                         </Button>

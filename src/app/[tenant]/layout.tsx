@@ -181,12 +181,12 @@ export default function DashboardLayout() {
 
     // Mapa de permisos por subruta
     const pathPermissions: Record<string, string[]> = {
-      "": ['owner', 'receptionist', 'superadmin'],
-      "/orders": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
-      "/ordenes": ['owner', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
-      "/cotizaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
-      "/pos": ['owner', 'cashier', 'superadmin'],
-      "/caja": ['owner', 'cashier', 'superadmin'],
+      "": ['owner', 'admin', 'receptionist', 'superadmin'],
+      "/orders": ['owner', 'admin', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
+      "/ordenes": ['owner', 'admin', 'cashier', 'warehouse', 'mechanic', 'receptionist', 'superadmin'],
+      "/cotizaciones": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
+      "/pos": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
+      "/caja": ['owner', 'admin', 'cashier', 'receptionist', 'superadmin'],
       "/conversaciones": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/reminders": ['owner', 'cashier', 'receptionist', 'superadmin'],
       "/customers": ['owner', 'cashier', 'receptionist', 'superadmin'],
