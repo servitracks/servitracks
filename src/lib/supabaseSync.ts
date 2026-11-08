@@ -3,7 +3,37 @@
  * Maps snake_case Supabase columns ↔ camelCase store types.
  */
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { saveTenantProductsToCache, clearTenantProductsCache } from "@/lib/productsCache";
 import type { Customer, Vehicle, MaintenanceItem, Quote, Invoice, Service, Product, WorkOrder, Caja, MovimientoCaja, Technician, InventoryMovement, Inspection, Supplier, SupplierProduct, PurchaseOrder, GoodsReceipt, AccountPayable, QuoteRequest, MaintenanceAlert, MaintenanceHistoryItem, ActivityLog, OpenTab, InventorySession, Tenant, TenantUser } from "@/store/types";
+
+// ─── Remote Sync Guards (prevent upload storms & unload wipeouts) ─────────────
+
+let remoteSyncDepth = 0;
+let isPageUnloading = false;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    isPageUnloading = true;
+  });
+}
+
+export function isRemoteSyncActive(): boolean {
+  return remoteSyncDepth > 0;
+}
+
+export function isBrowserUnloading(): boolean {
+  return isPageUnloading;
+}
+
+export function applyRemoteStoreUpdate(updater: () => void): void {
+  if (isPageUnloading) return;
+  remoteSyncDepth += 1;
+  try {
+    updater();
+  } finally {
+    remoteSyncDepth = Math.max(0, remoteSyncDepth - 1);
+  }
+}
 
 // ─── Instant Real-time Broadcast & Synchronization ───────────────────────────
 
@@ -209,24 +239,53 @@ async function fetchAllRowsPaginated<T>(
   mapper: (row: any) => T,
   pageSize = 1000
 ): Promise<T[]> {
-  let allRows: T[] = [];
+  const allRows: T[] = [];
   let from = 0;
+  let currentStep = pageSize;
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await fetchPage(from, from + pageSize - 1);
-    if (error) {
-      console.error("[sync] pagination error:", error);
-      break;
+    if (isPageUnloading) {
+      throw new Error("Page unloading — aborting remote table sync");
     }
-    if (data && data.length > 0) {
-      for (let i = 0; i < data.length; i++) {
-        allRows.push(mapper(data[i]));
+
+    let lastError: any = null;
+    let pageData: any[] | null = null;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (isPageUnloading) {
+        throw new Error("Page unloading — aborting remote table sync");
       }
-      if (data.length < pageSize) {
+      const stepToUse = attempt === 0 ? currentStep : Math.max(150, Math.floor(currentStep / (attempt + 1)));
+      const { data, error } = await fetchPage(from, from + stepToUse - 1);
+      if (!error) {
+        pageData = data;
+        currentStep = stepToUse;
+        lastError = null;
+        break;
+      }
+      lastError = error;
+      console.warn(`[sync] pagination retry ${attempt + 1}/3 at offset ${from}:`, error?.message || error);
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+
+    if (lastError) {
+      console.error("[sync] pagination failed after retries:", lastError);
+      throw lastError;
+    }
+
+    if (pageData && pageData.length > 0) {
+      for (let i = 0; i < pageData.length; i++) {
+        try {
+          allRows.push(mapper(pageData[i]));
+        } catch (mapErr) {
+          console.warn("[sync] row mapper skipped malformed row:", mapErr);
+        }
+      }
+      if (pageData.length < currentStep) {
         hasMore = false;
       } else {
-        from += pageSize;
+        from += pageData.length;
       }
     } else {
       hasMore = false;
@@ -290,59 +349,170 @@ export async function loadServicesFromSupabase(tenantId: string): Promise<Servic
   );
 }
 
-export async function loadProductsFromSupabase(tenantId: string): Promise<Product[]> {
-  const rows = await fetchAllRowsPaginated(
-    (from, to) =>
-      supabaseAdmin
+const inFlightProductLoads = new Map<string, Promise<Product[]>>();
+
+async function fetchProductChunkWithFallback(
+  tenantId: string,
+  from: number,
+  to: number,
+  wantCount = false
+): Promise<{ rows: Product[]; count: number | null }> {
+  const runSingleQuery = async (start: number, end: number, includeCount: boolean) => {
+    let res = await supabaseAdmin
+      .from("products")
+      .select("*", includeCount ? { count: "exact" } : undefined)
+      .eq("tenant_id", tenantId)
+      .order("id", { ascending: true })
+      .range(start, end);
+
+    if (res.error && !isPageUnloading) {
+      res = await supabase
         .from("products")
-        .select("*")
+        .select("*", includeCount ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("id", { ascending: true })
-        .range(from, to),
-    dbToProduct
-  );
-  
-  // Consolidación automática y transparente: cero duplicados, existencias sumadas
-  const bySku = new Map<string, Product>();
-  const byBarcode = new Map<string, Product>();
-  const byName = new Map<string, Product>();
-  const byId = new Map<string, Product>();
-  const consolidated: Product[] = [];
-
-  for (const p of rows) {
-    const s = (p.sku || "").trim().toLowerCase();
-    const b = (p.barcode || "").trim().toLowerCase();
-    const n = (p.name || "").trim().toLowerCase();
-
-    const existing =
-      (s && s !== "n/a" && s !== "-" && s !== "null" ? bySku.get(s) : null) ||
-      (b && b !== "n/a" && b !== "-" && b !== "null" ? byBarcode.get(b) : null) ||
-      (n && n.length >= 3 ? byName.get(n) : null) ||
-      byId.get(p.id);
-
-    if (existing) {
-      // Consolidar existencias y metadatos en el registro maestro
-      existing.stock = (Number(existing.stock) || 0) + (Number(p.stock) || 0);
-      if ((!existing.barcode || existing.barcode === "null") && p.barcode && p.barcode !== "null") {
-        existing.barcode = p.barcode;
-        byBarcode.set(p.barcode.trim().toLowerCase(), existing);
-      }
-      if (!existing.brand && p.brand) existing.brand = p.brand;
-      if (!existing.supplier && p.supplier) existing.supplier = p.supplier;
-      if (!existing.location && p.location) existing.location = p.location;
-      if (Number(existing.costPrice) <= 0 && Number(p.costPrice) > 0) existing.costPrice = Number(p.costPrice);
-      if (Number(existing.salePrice) <= 0 && Number(p.salePrice) > 0) existing.salePrice = Number(p.salePrice);
-    } else {
-      const copy = { ...p };
-      consolidated.push(copy);
-      byId.set(copy.id, copy);
-      if (s && s !== "n/a" && s !== "-" && s !== "null") bySku.set(s, copy);
-      if (b && b !== "n/a" && b !== "-" && b !== "null") byBarcode.set(b, copy);
-      if (n && n.length >= 3) byName.set(n, copy);
+        .range(start, end);
     }
+    return res;
+  };
+
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (isPageUnloading) throw new Error("Page unloading");
+    const res = await runSingleQuery(from, to, wantCount && attempt === 0);
+    if (!res.error) {
+      const mapped: Product[] = [];
+      for (const r of res.data || []) {
+        try {
+          mapped.push(dbToProduct(r));
+        } catch (e) {
+          console.warn("[sync] Malformed product row skipped:", e);
+        }
+      }
+      return { rows: mapped, count: res.count ?? null };
+    }
+    lastErr = res.error;
+    await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
   }
 
-  return consolidated;
+  // Fallback: subdividir el rango en bloques más pequeños de 150 filas si hubo timeout por tamaño (ej. imágenes base64)
+  const span = to - from + 1;
+  if (span > 150 && !isPageUnloading) {
+    const subRows: Product[] = [];
+    const subStep = 150;
+    for (let cursor = from; cursor <= to; cursor += subStep) {
+      const subEnd = Math.min(to, cursor + subStep - 1);
+      const subRes = await runSingleQuery(cursor, subEnd, false);
+      if (subRes.error) {
+        throw subRes.error;
+      }
+      const data = subRes.data || [];
+      for (const r of data) {
+        try {
+          subRows.push(dbToProduct(r));
+        } catch (e) {
+          console.warn("[sync] Malformed product row skipped:", e);
+        }
+      }
+      if (data.length < subEnd - cursor + 1) break;
+    }
+    return { rows: subRows, count: null };
+  }
+
+  throw lastErr;
+}
+
+export async function loadProductsFromSupabase(tenantId: string): Promise<Product[]> {
+  if (!tenantId) return [];
+  const existingPromise = inFlightProductLoads.get(tenantId);
+  if (existingPromise) return existingPromise;
+
+  const task = (async () => {
+    const PAGE_SIZE = 500;
+    const firstPage = await fetchProductChunkWithFallback(tenantId, 0, PAGE_SIZE - 1, true);
+    const rows: Product[] = [...firstPage.rows];
+
+    if (firstPage.rows.length === PAGE_SIZE) {
+      if (firstPage.count && firstPage.count > PAGE_SIZE) {
+        const ranges: Array<{ from: number; to: number }> = [];
+        for (let offset = PAGE_SIZE; offset < firstPage.count; offset += PAGE_SIZE) {
+          ranges.push({ from: offset, to: offset + PAGE_SIZE - 1 });
+        }
+        const CONCURRENCY = 3;
+        for (let i = 0; i < ranges.length; i += CONCURRENCY) {
+          const batch = ranges.slice(i, i + CONCURRENCY);
+          const batchResults = await Promise.all(
+            batch.map((rg) => fetchProductChunkWithFallback(tenantId, rg.from, rg.to, false))
+          );
+          for (const br of batchResults) {
+            rows.push(...br.rows);
+          }
+        }
+      } else {
+        // Sin conteo exacto disponible: paginación secuencial segura
+        let offset = PAGE_SIZE;
+        while (true) {
+          const next = await fetchProductChunkWithFallback(tenantId, offset, offset + PAGE_SIZE - 1, false);
+          rows.push(...next.rows);
+          if (next.rows.length < PAGE_SIZE) break;
+          offset += PAGE_SIZE;
+        }
+      }
+    }
+
+    // Consolidación automática y transparente: cero duplicados, existencias sumadas
+    const bySku = new Map<string, Product>();
+    const byBarcode = new Map<string, Product>();
+    const byName = new Map<string, Product>();
+    const byId = new Map<string, Product>();
+    const consolidated: Product[] = [];
+
+    for (const p of rows) {
+      const s = (p.sku || "").trim().toLowerCase();
+      const b = (p.barcode || "").trim().toLowerCase();
+      const n = (p.name || "").trim().toLowerCase();
+
+      const existing =
+        (s && s !== "n/a" && s !== "-" && s !== "null" ? bySku.get(s) : null) ||
+        (b && b !== "n/a" && b !== "-" && b !== "null" ? byBarcode.get(b) : null) ||
+        (n && n.length >= 3 ? byName.get(n) : null) ||
+        byId.get(p.id);
+
+      if (existing) {
+        // Consolidar existencias y metadatos en el registro maestro
+        existing.stock = (Number(existing.stock) || 0) + (Number(p.stock) || 0);
+        if ((!existing.barcode || existing.barcode === "null") && p.barcode && p.barcode !== "null") {
+          existing.barcode = p.barcode;
+          byBarcode.set(p.barcode.trim().toLowerCase(), existing);
+        }
+        if (!existing.brand && p.brand) existing.brand = p.brand;
+        if (!existing.supplier && p.supplier) existing.supplier = p.supplier;
+        if (!existing.location && p.location) existing.location = p.location;
+        if (Number(existing.costPrice) <= 0 && Number(p.costPrice) > 0) existing.costPrice = Number(p.costPrice);
+        if (Number(existing.salePrice) <= 0 && Number(p.salePrice) > 0) existing.salePrice = Number(p.salePrice);
+      } else {
+        const copy = { ...p };
+        consolidated.push(copy);
+        byId.set(copy.id, copy);
+        if (s && s !== "n/a" && s !== "-" && s !== "null") bySku.set(s, copy);
+        if (b && b !== "n/a" && b !== "-" && b !== "null") byBarcode.set(b, copy);
+        if (n && n.length >= 3) byName.set(n, copy);
+      }
+    }
+
+    if (consolidated.length > 0) {
+      saveTenantProductsToCache(tenantId, consolidated).catch(() => {});
+    }
+
+    return consolidated;
+  })();
+
+  inFlightProductLoads.set(tenantId, task);
+  try {
+    return await task;
+  } finally {
+    inFlightProductLoads.delete(tenantId);
+  }
 }
 
 export async function loadOrdersFromSupabase(tenantId: string): Promise<WorkOrder[]> {
@@ -696,16 +866,22 @@ export async function loadInventorySessionsFromSupabase(tenantId: string): Promi
   );
 }
 
+function unwrapSettled<T>(res: PromiseSettledResult<T>, label: string): T | undefined {
+  if (res.status === "fulfilled") return res.value;
+  console.warn(`[sync] Fallo parcial cargando '${label}' (se conserva copia local):`, res.reason);
+  return undefined;
+}
+
 /**
  * Descarga prioritaria y ultra rápida (<150ms) de las entidades operativas esenciales.
- * Permite que el Dashboard del Administrador, Órdenes, POS, Caja y Clientes se
- * muestren inmediatamente en pantalla sin esperar tablas pesadas o historiales.
+ * Usa Promise.allSettled para que un fallo o latencia en una tabla secundaria NUNCA
+ * bloquee ni borre los artículos del inventario ni el resto del estado operativo.
  */
 export async function downloadCoreStateFromSupabase(tenantId: string) {
   const [
     customers, vehicles, services, products, orders, quotes, invoices,
     cajas, cajaMovements, technicians, users, openTabs
-  ] = await Promise.all([
+  ] = await Promise.allSettled([
     loadCustomersFromSupabase(tenantId),
     loadVehiclesFromSupabase(tenantId),
     loadServicesFromSupabase(tenantId),
@@ -721,8 +897,18 @@ export async function downloadCoreStateFromSupabase(tenantId: string) {
   ]);
 
   return {
-    customers, vehicles, services, products, orders, quotes, invoices,
-    cajas, cajaMovements, technicians, users, openTabs
+    customers: unwrapSettled(customers, "customers"),
+    vehicles: unwrapSettled(vehicles, "vehicles"),
+    services: unwrapSettled(services, "services"),
+    products: unwrapSettled(products, "products"),
+    orders: unwrapSettled(orders, "orders"),
+    quotes: unwrapSettled(quotes, "quotes"),
+    invoices: unwrapSettled(invoices, "invoices"),
+    cajas: unwrapSettled(cajas, "cajas"),
+    cajaMovements: unwrapSettled(cajaMovements, "movimientos_caja"),
+    technicians: unwrapSettled(technicians, "technicians"),
+    users: unwrapSettled(users, "users"),
+    openTabs: unwrapSettled(openTabs, "open_tabs"),
   };
 }
 
@@ -734,7 +920,7 @@ export async function downloadBackgroundStateFromSupabase(tenantId: string) {
     maintenanceItems, movements, inspections, maintenanceAlerts, maintenanceHistory,
     suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable,
     quoteRequests, activityLogs, inventorySessions
-  ] = await Promise.all([
+  ] = await Promise.allSettled([
     loadMaintenanceItemsFromSupabase(tenantId),
     loadInventoryMovementsFromSupabase(tenantId),
     loadInspectionsFromSupabase(tenantId),
@@ -751,9 +937,19 @@ export async function downloadBackgroundStateFromSupabase(tenantId: string) {
   ]);
 
   return {
-    maintenanceItems, movements, inspections, maintenanceAlerts, maintenanceHistory,
-    suppliers, supplierProducts, purchaseOrders, goodsReceipts, accountsPayable,
-    quoteRequests, activityLogs, inventorySessions
+    maintenanceItems: unwrapSettled(maintenanceItems, "maintenance_items"),
+    movements: unwrapSettled(movements, "movements"),
+    inspections: unwrapSettled(inspections, "inspections"),
+    maintenanceAlerts: unwrapSettled(maintenanceAlerts, "maintenance_alerts"),
+    maintenanceHistory: unwrapSettled(maintenanceHistory, "maintenance_history"),
+    suppliers: unwrapSettled(suppliers, "suppliers"),
+    supplierProducts: unwrapSettled(supplierProducts, "supplier_products"),
+    purchaseOrders: unwrapSettled(purchaseOrders, "purchase_orders"),
+    goodsReceipts: unwrapSettled(goodsReceipts, "goods_receipts"),
+    accountsPayable: unwrapSettled(accountsPayable, "accounts_payable"),
+    quoteRequests: unwrapSettled(quoteRequests, "quote_requests"),
+    activityLogs: unwrapSettled(activityLogs, "activity_logs"),
+    inventorySessions: unwrapSettled(inventorySessions, "inventory_sessions"),
   };
 }
 
@@ -1027,21 +1223,42 @@ function serviceToDb(s: Service) {
 }
 
 function dbToProduct(row: any): Product {
+  let parsedCompatibilities: any = undefined;
+  let resolvedVehicleMake: string | undefined = undefined;
+  if (typeof row.vehicle_make === "string" && row.vehicle_make.trim()) {
+    const trimmed = row.vehicle_make.trim();
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          parsedCompatibilities = parsed;
+          resolvedVehicleMake = parsed[0]?.make || undefined;
+        } else {
+          resolvedVehicleMake = trimmed;
+        }
+      } catch {
+        resolvedVehicleMake = trimmed;
+      }
+    } else {
+      resolvedVehicleMake = trimmed;
+    }
+  }
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
-    name: row.name,
-    sku: row.sku,
+    name: row.name || "Artículo sin nombre",
+    sku: row.sku || "",
     barcode: row.barcode || undefined,
-    category: row.category,
+    category: row.category || "Otros",
     brand: row.brand || undefined,
     type: row.type || undefined,
-    costPrice: row.cost_price,
-    salePrice: row.sale_price,
-    laborPrice: row.labor_price || undefined,
-    stock: row.stock,
-    minStock: row.min_stock,
-    tax: (typeof row.tax === 'number' && row.tax > 0 && row.tax <= 30) ? row.tax : 18,
+    costPrice: Number(row.cost_price) || 0,
+    salePrice: Number(row.sale_price) || 0,
+    laborPrice: row.labor_price != null ? Number(row.labor_price) : undefined,
+    stock: Number(row.stock) || 0,
+    minStock: Number(row.min_stock) || 0,
+    tax: (typeof row.tax === 'number' && row.tax >= 0 && row.tax <= 30) ? row.tax : 18,
     image: row.image || undefined,
     supplier: row.supplier || undefined,
     location: row.location || undefined,
@@ -1050,10 +1267,10 @@ function dbToProduct(row: any): Product {
     maintenanceCategory: row.maintenance_category || undefined,
     lifespanKm: row.lifespan_km || undefined,
     lifespanDays: row.lifespan_days || undefined,
-    vehicleMake: (row.vehicle_make && row.vehicle_make.startsWith('[')) ? (JSON.parse(row.vehicle_make)[0]?.make || undefined) : (row.vehicle_make || undefined),
+    vehicleMake: resolvedVehicleMake,
     vehicleModel: row.vehicle_model || undefined,
     vehicleYear: row.vehicle_year || undefined,
-    vehicleCompatibilities: (row.vehicle_make && row.vehicle_make.startsWith('[')) ? JSON.parse(row.vehicle_make) : undefined,
+    vehicleCompatibilities: parsedCompatibilities,
     isCombo: row.is_combo || undefined,
     comboItems: row.combo_items || undefined,
   };
@@ -1789,147 +2006,161 @@ export async function syncStoreToSupabase(
  * Esto evita re-descargar todo el sistema cuando solo cambió un pedido, factura, producto o caja.
  */
 export async function syncTableFromSupabase(table: string, tenantId: string): Promise<void> {
+  if (!tenantId || isPageUnloading) return;
   const store = (await import("@/store/useStore")).useStore;
-  switch (table) {
-    case "products": {
-      const products = await loadProductsFromSupabase(tenantId);
-      store.setState({ products });
-      break;
+  try {
+    switch (table) {
+      case "products": {
+        const products = await loadProductsFromSupabase(tenantId);
+        const otherTenants = (store.getState().products || []).filter(
+          (p) => p.tenantId && p.tenantId !== tenantId
+        );
+        applyRemoteStoreUpdate(() => {
+          store.setState({ products: [...otherTenants, ...products] });
+        });
+        break;
+      }
+      case "orders": {
+        const orders = await loadOrdersFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ orders }));
+        break;
+      }
+      case "invoices": {
+        const invoices = await loadInvoicesFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ invoices }));
+        break;
+      }
+      case "cajas": {
+        const cajas = await loadCajasFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ cajas }));
+        break;
+      }
+      case "movimientos_caja": {
+        const cajaMovements = await loadMovimientosCajaFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ cajaMovements }));
+        break;
+      }
+      case "customers": {
+        const customers = await loadCustomersFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ customers }));
+        break;
+      }
+      case "vehicles": {
+        const vehicles = await loadVehiclesFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ vehicles }));
+        break;
+      }
+      case "quotes": {
+        const quotes = await loadQuotesFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ quotes }));
+        break;
+      }
+      case "movements": {
+        const movements = await loadInventoryMovementsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ movements }));
+        break;
+      }
+      case "technicians": {
+        const technicians = await loadTechniciansFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ technicians }));
+        break;
+      }
+      case "services": {
+        const services = await loadServicesFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ services }));
+        break;
+      }
+      case "suppliers": {
+        const suppliers = await loadSuppliersFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ suppliers }));
+        break;
+      }
+      case "purchase_orders": {
+        const purchaseOrders = await loadPurchaseOrdersFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ purchaseOrders }));
+        break;
+      }
+      case "goods_receipts": {
+        const goodsReceipts = await loadGoodsReceiptsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ goodsReceipts }));
+        break;
+      }
+      case "accounts_payable": {
+        const accountsPayable = await loadAccountsPayableFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ accountsPayable }));
+        break;
+      }
+      case "open_tabs": {
+        const remoteTabs = await loadOpenTabsFromSupabase(tenantId);
+        const currentLocal = store.getState().openTabs || [];
+        const remoteIds = new Set(remoteTabs.map((t) => t.id));
+        const now = Date.now();
+        // Preservar cuentas creadas localmente en los últimos 15s que aún no figuren en Supabase
+        const pendingLocal = currentLocal.filter((t) => {
+          if (remoteIds.has(t.id)) return false;
+          const age = now - new Date(t.createdAt || 0).getTime();
+          return age >= 0 && age < 15000;
+        });
+        applyRemoteStoreUpdate(() => {
+          store.setState({ openTabs: [...pendingLocal, ...remoteTabs] });
+        });
+        break;
+      }
+      case "inventory_sessions": {
+        const inventorySessions = await loadInventorySessionsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ inventorySessions }));
+        break;
+      }
+      case "inspections": {
+        const inspections = await loadInspectionsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ inspections }));
+        break;
+      }
+      case "maintenance_items": {
+        const maintenanceItems = await loadMaintenanceItemsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ maintenanceItems }));
+        break;
+      }
+      case "maintenance_alerts": {
+        const maintenanceAlerts = await loadMaintenanceAlertsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ maintenanceAlerts }));
+        break;
+      }
+      case "maintenance_history": {
+        const maintenanceHistory = await loadMaintenanceHistoryFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ maintenanceHistory }));
+        break;
+      }
+      case "activity_logs": {
+        const activityLogs = await loadActivityLogsFromSupabase(tenantId);
+        applyRemoteStoreUpdate(() => store.setState({ activityLogs }));
+        break;
+      }
+      case "tenant_users": {
+        const remoteUsers = await loadUsersFromSupabase(tenantId);
+        const currentUsers = store.getState().users || [];
+        const otherTenantUsers = currentUsers.filter((u) => u.tenantId !== tenantId);
+        const tenantLocal = currentUsers.filter((u) => u.tenantId === tenantId);
+        const remoteIds = new Set(remoteUsers.map((u) => u.id));
+        const now = Date.now();
+        const pendingLocal = tenantLocal.filter((u) => {
+          if (remoteIds.has(u.id)) return false;
+          const age = now - new Date(u.createdAt || 0).getTime();
+          return age >= 0 && age < 15000;
+        });
+        applyRemoteStoreUpdate(() => {
+          store.setState({ users: [...otherTenantUsers, ...pendingLocal, ...remoteUsers] });
+        });
+        break;
+      }
+      default:
+        console.warn(`[sync] Tabla '${table}' no mapeada en syncTableFromSupabase`);
     }
-    case "orders": {
-      const orders = await loadOrdersFromSupabase(tenantId);
-      store.setState({ orders });
-      break;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("servitracks:table_synced", { detail: { table, tenantId } }));
     }
-    case "invoices": {
-      const invoices = await loadInvoicesFromSupabase(tenantId);
-      store.setState({ invoices });
-      break;
-    }
-    case "cajas": {
-      const cajas = await loadCajasFromSupabase(tenantId);
-      store.setState({ cajas });
-      break;
-    }
-    case "movimientos_caja": {
-      const cajaMovements = await loadMovimientosCajaFromSupabase(tenantId);
-      store.setState({ cajaMovements });
-      break;
-    }
-    case "customers": {
-      const customers = await loadCustomersFromSupabase(tenantId);
-      store.setState({ customers });
-      break;
-    }
-    case "vehicles": {
-      const vehicles = await loadVehiclesFromSupabase(tenantId);
-      store.setState({ vehicles });
-      break;
-    }
-    case "quotes": {
-      const quotes = await loadQuotesFromSupabase(tenantId);
-      store.setState({ quotes });
-      break;
-    }
-    case "movements": {
-      const movements = await loadInventoryMovementsFromSupabase(tenantId);
-      store.setState({ movements });
-      break;
-    }
-    case "technicians": {
-      const technicians = await loadTechniciansFromSupabase(tenantId);
-      store.setState({ technicians });
-      break;
-    }
-    case "services": {
-      const services = await loadServicesFromSupabase(tenantId);
-      store.setState({ services });
-      break;
-    }
-    case "suppliers": {
-      const suppliers = await loadSuppliersFromSupabase(tenantId);
-      store.setState({ suppliers });
-      break;
-    }
-    case "purchase_orders": {
-      const purchaseOrders = await loadPurchaseOrdersFromSupabase(tenantId);
-      store.setState({ purchaseOrders });
-      break;
-    }
-    case "goods_receipts": {
-      const goodsReceipts = await loadGoodsReceiptsFromSupabase(tenantId);
-      store.setState({ goodsReceipts });
-      break;
-    }
-    case "accounts_payable": {
-      const accountsPayable = await loadAccountsPayableFromSupabase(tenantId);
-      store.setState({ accountsPayable });
-      break;
-    }
-    case "open_tabs": {
-      const remoteTabs = await loadOpenTabsFromSupabase(tenantId);
-      const currentLocal = store.getState().openTabs || [];
-      const remoteIds = new Set(remoteTabs.map(t => t.id));
-      const now = Date.now();
-      // Preservar cuentas creadas localmente en los últimos 15s que aún no figuren en Supabase
-      const pendingLocal = currentLocal.filter(t => {
-        if (remoteIds.has(t.id)) return false;
-        const age = now - new Date(t.createdAt || 0).getTime();
-        return age >= 0 && age < 15000;
-      });
-      store.setState({ openTabs: [...pendingLocal, ...remoteTabs] });
-      break;
-    }
-    case "inventory_sessions": {
-      const inventorySessions = await loadInventorySessionsFromSupabase(tenantId);
-      store.setState({ inventorySessions });
-      break;
-    }
-    case "inspections": {
-      const inspections = await loadInspectionsFromSupabase(tenantId);
-      store.setState({ inspections });
-      break;
-    }
-    case "maintenance_items": {
-      const maintenanceItems = await loadMaintenanceItemsFromSupabase(tenantId);
-      store.setState({ maintenanceItems });
-      break;
-    }
-    case "maintenance_alerts": {
-      const maintenanceAlerts = await loadMaintenanceAlertsFromSupabase(tenantId);
-      store.setState({ maintenanceAlerts });
-      break;
-    }
-    case "maintenance_history": {
-      const maintenanceHistory = await loadMaintenanceHistoryFromSupabase(tenantId);
-      store.setState({ maintenanceHistory });
-      break;
-    }
-    case "activity_logs": {
-      const activityLogs = await loadActivityLogsFromSupabase(tenantId);
-      store.setState({ activityLogs });
-      break;
-    }
-    case "tenant_users": {
-      const remoteUsers = await loadUsersFromSupabase(tenantId);
-      const currentUsers = store.getState().users || [];
-      const otherTenantUsers = currentUsers.filter(u => u.tenantId !== tenantId);
-      const tenantLocal = currentUsers.filter(u => u.tenantId === tenantId);
-      const remoteIds = new Set(remoteUsers.map(u => u.id));
-      const now = Date.now();
-      const pendingLocal = tenantLocal.filter(u => {
-        if (remoteIds.has(u.id)) return false;
-        const age = now - new Date(u.createdAt || 0).getTime();
-        return age >= 0 && age < 15000;
-      });
-      store.setState({ users: [...otherTenantUsers, ...pendingLocal, ...remoteUsers] });
-      break;
-    }
-    default:
-      console.warn(`[sync] Tabla '${table}' no mapeada en syncTableFromSupabase`);
-  }
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("servitracks:table_synced", { detail: { table, tenantId } }));
+  } catch (err) {
+    console.warn(`[sync] No se aplicó actualización de '${table}' por error transitorio (se conserva estado local):`, err);
   }
 }
 
@@ -2011,6 +2242,7 @@ export async function wipeEntireInventoryFromSupabase(tenantId: string): Promise
       throw new Error(`Quedaron ${finalCount} productos sin poder eliminarse en Supabase.`);
     }
 
+    await clearTenantProductsCache(tenantId);
     console.log(`[wipeInventory] ✅ Vaciado total completado con éxito para tenant ${tenantId}.`);
     return { success: true };
   } catch (err: any) {

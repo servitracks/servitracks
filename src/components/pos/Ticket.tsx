@@ -432,10 +432,11 @@ export function Ticket({
         {/* FRANJA SUPERIOR COPIA INTERNA */}
         {esCopiaInterna && (
           <div
-            className="w-full text-center font-black uppercase text-xs sm:text-sm py-2 px-4 mb-6 tracking-widest text-white bg-black rounded"
+            className="internal-copy-banner w-full text-center font-black uppercase text-xs sm:text-sm py-2 px-4 mb-6 tracking-widest text-white bg-black rounded"
             style={{
               backgroundColor: "#000000",
               color: "#ffffff",
+              boxShadow: "inset 0 0 0 1000px #000000",
               WebkitPrintColorAdjust: "exact",
               printColorAdjust: "exact",
             }}
@@ -692,7 +693,7 @@ export function Ticket({
   // =========================================================================
   return (
     <div
-      className={`thermal-ticket mx-auto ${w} ${cols} bg-white px-2.5 py-1 text-[11px] leading-snug text-black`}
+      className={`thermal-ticket mx-auto ${w} ${cols} bg-white px-2.5 ${esCopiaInterna ? "pt-0 pb-1" : "py-1"} text-[11px] leading-snug text-black`}
       style={{
         fontFamily: '"Plus Jakarta Sans", sans-serif',
         WebkitPrintColorAdjust: "exact",
@@ -702,14 +703,15 @@ export function Ticket({
       {/* FRANJA SUPERIOR COPIA INTERNA */}
       {esCopiaInterna && (
         <div
-          className="text-center font-black uppercase text-[12px] py-1.5 px-2 mb-2 tracking-widest text-white bg-black -mx-2.5 -mt-1 block"
+          className="internal-copy-banner text-center font-black uppercase text-[12px] py-1.5 px-2 mb-2 tracking-widest text-white bg-black -mx-2.5 block"
           style={{
             backgroundColor: "#000000",
             color: "#ffffff",
+            boxShadow: "inset 0 0 0 1000px #000000",
             width: "calc(100% + 1.25rem)",
             marginLeft: "-0.625rem",
             marginRight: "-0.625rem",
-            marginTop: "-0.25rem",
+            marginTop: "0rem",
             WebkitPrintColorAdjust: "exact",
             printColorAdjust: "exact",
           }}

@@ -11,6 +11,8 @@ import { useStore } from "@/store/useStore";
 import { useNominaStore } from "@/store/useNominaStore";
 import { useHydration } from "@/store/useHydration";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { applyRemoteStoreUpdate, isRemoteSyncActive } from "@/lib/supabaseSync";
+import { loadTenantProductsFromCache } from "@/lib/productsCache";
 import React from "react";
 
 import { CreditCard, ShieldAlert, Sparkles, CheckCircle2, RefreshCw, Shield, MessageCircle, LogOut, Phone } from "lucide-react";
@@ -197,14 +199,14 @@ export default function DashboardLayout() {
       try {
         let res = await supabaseAdmin
           .from("tenants")
-          .select("estado, trial_hasta, plan_id, status")
+          .select("estado, trial_hasta, plan_id, status, config")
           .eq("id", currentTenant!.id)
           .single();
 
         if (res.error) {
           res = await supabase
             .from("tenants")
-            .select("estado, trial_hasta, plan_id, status")
+            .select("estado, trial_hasta, plan_id, status, config")
             .eq("id", currentTenant!.id)
             .single();
         }
@@ -220,6 +222,23 @@ export default function DashboardLayout() {
           const remoteTs = data.trial_hasta ? new Date(data.trial_hasta).getTime() : 0;
           if (remoteTs !== currentTs && data.trial_hasta) {
             updates.trial_hasta = data.trial_hasta;
+          }
+
+          if (data.config && typeof data.config === "object") {
+            const mergedConfig = { ...(currentTenant!.config || {}), ...data.config };
+            if (JSON.stringify(mergedConfig) !== JSON.stringify(currentTenant!.config || {})) {
+              updates.config = mergedConfig;
+            }
+            if (data.config.printSettings) {
+              useStore.setState((state) => ({
+                printSettings: { ...state.printSettings, ...data.config.printSettings },
+              }));
+            }
+            if (data.config.barcodeSettings) {
+              useStore.setState((state) => ({
+                barcodeSettings: { ...state.barcodeSettings, ...data.config.barcodeSettings },
+              }));
+            }
           }
           
           if (Object.keys(updates).length > 0) {
@@ -410,54 +429,64 @@ export default function DashboardLayout() {
       try {
         const { downloadFullStateFromSupabase } = await import("@/lib/supabaseSync");
         const dbState = await downloadFullStateFromSupabase(currentTenant!.id);
-        // Marcar que este setState viene de DB → no relanzar el upload spy
         syncDisabledRef.current = true;
-        useStore.setState({
-          customers: dbState.customers,
-          vehicles: dbState.vehicles,
-          maintenanceItems: dbState.maintenanceItems,
-          services: dbState.services,
-          products: dbState.products,
-          orders: dbState.orders,
-          quotes: dbState.quotes,
-          invoices: dbState.invoices,
-          cajas: dbState.cajas,
-          cajaMovements: dbState.cajaMovements,
-          technicians: dbState.technicians,
-          movements: dbState.movements,
-          inspections: dbState.inspections,
-          maintenanceAlerts: dbState.maintenanceAlerts,
-          maintenanceHistory: dbState.maintenanceHistory,
-          suppliers: dbState.suppliers,
-          supplierProducts: dbState.supplierProducts,
-          purchaseOrders: dbState.purchaseOrders,
-          goodsReceipts: dbState.goodsReceipts,
-          accountsPayable: dbState.accountsPayable,
-          quoteRequests: dbState.quoteRequests,
-          activityLogs: dbState.activityLogs,
-          users: dbState.users,
-          openTabs: dbState.openTabs,
-          inventorySessions: dbState.inventorySessions,
+        applyRemoteStoreUpdate(() => {
+          useStore.setState((prev) => {
+            const patch: Record<string, any> = {};
+            const keys = [
+              "customers", "vehicles", "maintenanceItems", "services",
+              "orders", "quotes", "invoices", "cajas", "cajaMovements",
+              "technicians", "movements", "inspections", "maintenanceAlerts",
+              "maintenanceHistory", "suppliers", "supplierProducts",
+              "purchaseOrders", "goodsReceipts", "accountsPayable",
+              "quoteRequests", "activityLogs", "users", "openTabs", "inventorySessions",
+            ] as const;
+            for (const k of keys) {
+              if ((dbState as any)[k] !== undefined) {
+                patch[k] = (dbState as any)[k];
+              }
+            }
+            if (dbState.products !== undefined) {
+              const otherTenants = (prev.products || []).filter(
+                (p) => p.tenantId && p.tenantId !== currentTenant!.id
+              );
+              patch.products = [...otherTenants, ...dbState.products];
+            }
+            return patch;
+          });
         });
 
         // Aplicar configuraciones de impresión y código de barras si existen en el tenant
-        if (currentTenant?.config?.printSettings) {
-          useStore.setState({ printSettings: currentTenant.config.printSettings });
+        const latestTenant = useStore.getState().currentTenant || currentTenant;
+        const remotePrintSettings = latestTenant?.config?.printSettings;
+        if (remotePrintSettings) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((state) => ({
+              printSettings: { ...state.printSettings, ...remotePrintSettings },
+            }));
+          });
         }
-        if (currentTenant?.config?.barcodeSettings) {
-          useStore.setState({ barcodeSettings: currentTenant.config.barcodeSettings });
+        const remoteBarcodeSettings = latestTenant?.config?.barcodeSettings;
+        if (remoteBarcodeSettings) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((state) => ({
+              barcodeSettings: { ...state.barcodeSettings, ...remoteBarcodeSettings },
+            }));
+          });
         }
         
         // Nomina Remote Sync
         const { loadEmpleadosFromSupabase, loadNominasFromSupabase } = await import("@/lib/nominaSync");
         const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
         const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
-        useNominaStore.setState({
-          empleados: dbEmpleados,
-          nominas: dbNominas
+        applyRemoteStoreUpdate(() => {
+          useNominaStore.setState({
+            empleados: dbEmpleados,
+            nominas: dbNominas
+          });
         });
         
-        setTimeout(() => { syncDisabledRef.current = false; }, 1000);
+        setTimeout(() => { syncDisabledRef.current = false; }, 300);
         console.log("[RT Sync] ✅ Estado remoto aplicado al store");
       } catch (err) {
         console.error("[RT Sync] ❌ Error al descargar estado remoto:", err);
@@ -584,61 +613,127 @@ export default function DashboardLayout() {
       })
       .subscribe();
 
-    // 2. Descarga Inicial Progresiva (Ultra rápida: Core en <150ms + Background)
+    // 2. Descarga Inicial Progresiva (Ultra rápida: IndexedDB Cache + Artículos Prioritarios + Core + Background)
     if (!initialSyncDone) {
       async function loadData() {
+        const activeTenantId = currentTenant!.id;
         try {
+          // Fase 0: Si localStorage no tenía los artículos (por cuota de 5MB), restaurarlos en <15ms desde IndexedDB
+          const currentLocalProducts = (useStore.getState().products || []).filter(
+            (p) => p.tenantId === activeTenantId
+          );
+          if (currentLocalProducts.length === 0) {
+            loadTenantProductsFromCache(activeTenantId)
+              .then((cachedProducts) => {
+                if (cachedProducts.length > 0) {
+                  const latestNow = (useStore.getState().products || []).filter(
+                    (p) => p.tenantId === activeTenantId
+                  );
+                  if (latestNow.length === 0) {
+                    applyRemoteStoreUpdate(() => {
+                      useStore.setState((prev) => ({
+                        products: [
+                          ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== activeTenantId),
+                          ...cachedProducts,
+                        ],
+                      }));
+                    });
+                  }
+                }
+              })
+              .catch(() => {});
+          }
+
           const {
+            loadProductsFromSupabase,
             downloadCoreStateFromSupabase,
             downloadBackgroundStateFromSupabase
           } = await import("@/lib/supabaseSync");
 
+          // Vía rápida exclusiva para artículos: en cuanto lleguen, pintarlos sin esperar las otras 11 tablas
+          loadProductsFromSupabase(activeTenantId)
+            .then((freshProducts) => {
+              applyRemoteStoreUpdate(() => {
+                useStore.setState((prev) => ({
+                  products: [
+                    ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== activeTenantId),
+                    ...freshProducts,
+                  ],
+                }));
+              });
+            })
+            .catch((err) => {
+              console.warn("[Initial Sync] Error en vía rápida de artículos:", err);
+            });
+
           // Fase 1: Descarga y renderizado inmediato del estado operativo crítico
-          const coreState = await downloadCoreStateFromSupabase(currentTenant!.id);
+          const coreState = await downloadCoreStateFromSupabase(activeTenantId);
           
-          useStore.setState({
-            customers: coreState.customers,
-            vehicles: coreState.vehicles,
-            services: coreState.services,
-            products: coreState.products,
-            orders: coreState.orders,
-            quotes: coreState.quotes,
-            invoices: coreState.invoices,
-            cajas: coreState.cajas,
-            cajaMovements: coreState.cajaMovements,
-            technicians: coreState.technicians,
-            users: coreState.users,
-            openTabs: coreState.openTabs,
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((prev) => {
+              const patch: Record<string, any> = {};
+              const coreKeys = [
+                "customers", "vehicles", "services", "orders",
+                "quotes", "invoices", "cajas", "cajaMovements",
+                "technicians", "users", "openTabs",
+              ] as const;
+              for (const k of coreKeys) {
+                if ((coreState as any)[k] !== undefined) {
+                  patch[k] = (coreState as any)[k];
+                }
+              }
+              if (coreState.products !== undefined) {
+                const otherTenants = (prev.products || []).filter(
+                  (p) => p.tenantId && p.tenantId !== activeTenantId
+                );
+                patch.products = [...otherTenants, ...coreState.products];
+              }
+              return patch;
+            });
           });
 
           // Indicar que la sincronización inicial está lista para que la interfaz se muestre de inmediato
           setInitialSyncDone(true);
-          console.log("[Initial Sync] ⚡ Datos operativos principales cargados al instante (<150ms)");
+          console.log("[Initial Sync] ⚡ Datos operativos principales cargados al instante");
 
           // Aplicar configuraciones si existen en el tenant
-          if (currentTenant?.config?.printSettings) {
-            useStore.setState({ printSettings: currentTenant.config.printSettings });
+          const latestTenant = useStore.getState().currentTenant || currentTenant;
+          const remotePrintSettings = latestTenant?.config?.printSettings;
+          if (remotePrintSettings) {
+            applyRemoteStoreUpdate(() => {
+              useStore.setState((state) => ({
+                printSettings: { ...state.printSettings, ...remotePrintSettings },
+              }));
+            });
           }
-          if (currentTenant?.config?.barcodeSettings) {
-            useStore.setState({ barcodeSettings: currentTenant.config.barcodeSettings });
+          const remoteBarcodeSettings = latestTenant?.config?.barcodeSettings;
+          if (remoteBarcodeSettings) {
+            applyRemoteStoreUpdate(() => {
+              useStore.setState((state) => ({
+                barcodeSettings: { ...state.barcodeSettings, ...remoteBarcodeSettings },
+              }));
+            });
           }
 
           // Fase 2: Descarga en segundo plano de tablas secundarias e historiales (no bloqueante)
-          downloadBackgroundStateFromSupabase(currentTenant!.id).then((bgState) => {
-            useStore.setState({
-              maintenanceItems: bgState.maintenanceItems,
-              movements: bgState.movements,
-              inspections: bgState.inspections,
-              maintenanceAlerts: bgState.maintenanceAlerts,
-              maintenanceHistory: bgState.maintenanceHistory,
-              suppliers: bgState.suppliers,
-              supplierProducts: bgState.supplierProducts,
-              purchaseOrders: bgState.purchaseOrders,
-              goodsReceipts: bgState.goodsReceipts,
-              accountsPayable: bgState.accountsPayable,
-              quoteRequests: bgState.quoteRequests,
-              activityLogs: bgState.activityLogs,
-              inventorySessions: bgState.inventorySessions,
+          downloadBackgroundStateFromSupabase(activeTenantId).then((bgState) => {
+            applyRemoteStoreUpdate(() => {
+              useStore.setState(() => {
+                const bgPatch: Record<string, any> = {};
+                const bgKeys = [
+                  "maintenanceItems", "movements", "inspections",
+                  "maintenanceAlerts", "maintenanceHistory", "suppliers",
+                  "supplierProducts", "purchaseOrders", "goodsReceipts",
+                  "accountsPayable", "quoteRequests", "activityLogs",
+                  "inventorySessions",
+                ] as const;
+                for (const k of bgKeys) {
+                  if ((bgState as any)[k] !== undefined) {
+                    bgPatch[k] = (bgState as any)[k];
+                  }
+                }
+                return bgPatch;
+              });
             });
             console.log("[Initial Sync] ✅ Historiales y datos secundarios cargados en segundo plano");
           }).catch((err) => {
@@ -647,9 +742,11 @@ export default function DashboardLayout() {
 
           // Fase 3: Nómina en segundo plano
           import("@/lib/nominaSync").then(async ({ loadEmpleadosFromSupabase, loadNominasFromSupabase }) => {
-            const dbEmpleados = await loadEmpleadosFromSupabase(currentTenant!.id);
-            const dbNominas = await loadNominasFromSupabase(currentTenant!.id);
-            useNominaStore.setState({ empleados: dbEmpleados, nominas: dbNominas });
+            const dbEmpleados = await loadEmpleadosFromSupabase(activeTenantId);
+            const dbNominas = await loadNominasFromSupabase(activeTenantId);
+            applyRemoteStoreUpdate(() => {
+              useNominaStore.setState({ empleados: dbEmpleados, nominas: dbNominas });
+            });
           }).catch(() => {});
 
         } catch (err) {
@@ -663,7 +760,7 @@ export default function DashboardLayout() {
     // 3. Espía de Cambios Locales → sincronización incremental y diferencial hacia Supabase
     let pendingChangesPayload: any = {};
     const unsubscribe = useStore.subscribe((state, prevState) => {
-      if (syncDisabledRef.current) return; // Ignorar cambios que vinieron de la DB (evitar loop)
+      if (syncDisabledRef.current || isRemoteSyncActive()) return; // Ignorar cambios que vinieron de la DB (evitar loop)
 
       let hasNewChanges = false;
 
@@ -987,7 +1084,7 @@ export default function DashboardLayout() {
 
     // 4. Espía de Cambios Locales de Nomina
     const unsubscribeNomina = useNominaStore.subscribe((state, prevState) => {
-      if (syncDisabledRef.current) return;
+      if (syncDisabledRef.current || isRemoteSyncActive()) return;
       const changed = state.empleados !== prevState.empleados || state.nominas !== prevState.nominas;
       if (!changed) return;
       

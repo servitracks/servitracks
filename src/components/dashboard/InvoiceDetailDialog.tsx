@@ -5,7 +5,7 @@ import { useStore, Invoice } from "@/store/useStore";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Printer, FileText, Receipt, MessageSquare } from "lucide-react";
+import { Printer, FileText, Receipt, MessageSquare, Wrench, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Ticket, translatePaymentMethod } from "@/components/pos/Ticket";
 import { useParams } from "@/lib/next-compat";
@@ -17,24 +17,25 @@ interface InvoiceDetailDialogProps {
   onClose: () => void;
   invoice: Invoice | null;
   defaultEdit?: boolean;
+  onOpenOrder?: (orderId: string) => void;
 }
 
-export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDialogProps) {
+export function InvoiceDetailDialog({ open, onClose, invoice, onOpenOrder }: InvoiceDetailDialogProps) {
   const { tenant } = useParams();
   const { customers, tenants, printSettings, vehicles } = useStore();
   const currentTenant = tenants.find((t) => t.slug === tenant) ?? null;
   const taller = currentTenant ?? { name: "ServiTracks", phone: "", address: "", rnc: "", logo: "" };
   const printRef = useRef<HTMLDivElement>(null);
 
-  const [paperFormat, setPaperFormat] = useState<"80mm" | "A4">(() =>
-    printSettings?.paperSize === "A4" ? "A4" : "80mm"
+  const [paperFormat, setPaperFormat] = useState<"80mm" | "57mm" | "A4">(() =>
+    printSettings?.paperSize === "A4" ? "A4" : printSettings?.paperSize === "58mm" ? "57mm" : "80mm"
   );
 
   useEffect(() => {
     if (printSettings?.paperSize === "A4") {
       setPaperFormat("A4");
     } else {
-      setPaperFormat("80mm");
+      setPaperFormat(printSettings?.paperSize === "58mm" ? "57mm" : "80mm");
     }
   }, [printSettings?.paperSize]);
 
@@ -157,8 +158,10 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
 
       <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
         <DialogContent
+          overlayClassName="z-[240] bg-black/40 backdrop-blur-xs"
           className={cn(
             modalWidth,
+            "z-[250]",
             "w-[96vw] sm:w-full rounded-3xl p-0 bg-white overflow-hidden h-[86vh] max-h-[88vh] flex flex-col shadow-2xl transition-all duration-200 border border-neutral-200/80"
           )}
         >
@@ -181,6 +184,28 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                   >
                     {statusLabel}
                   </span>
+                  {invoice.orderId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (onOpenOrder && invoice.orderId) {
+                          onClose();
+                          onOpenOrder(invoice.orderId);
+                        }
+                      }}
+                      className={cn(
+                        "inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border transition-all",
+                        onOpenOrder
+                          ? "bg-blue-50 text-blue-700 border-blue-200/90 hover:bg-blue-100 hover:border-blue-300 cursor-pointer shadow-2xs"
+                          : "bg-neutral-100 text-neutral-700 border-neutral-200"
+                      )}
+                      title={onOpenOrder ? "Ver e imprimir orden asociada" : "Orden asociada"}
+                    >
+                      <Wrench className="h-2.5 w-2.5" />
+                      <span>Orden #{invoice.orderId.slice(0, 6).toUpperCase()}</span>
+                      {onOpenOrder && <ExternalLink className="h-2.5 w-2.5 opacity-70" />}
+                    </button>
+                  )}
                 </div>
                 {customer?.name && (
                   <p className="text-[11px] text-neutral-500 truncate mt-0.5" title={customer.name}>
@@ -331,15 +356,8 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                 esCopiaInterna={false}
               />
 
-              {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
               {printSettings?.printInternalCopy && (
-                <>
-                  <div
-                    className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
-                    style={{ pageBreakBefore: "always", breakBefore: "page" }}
-                  >
-                    ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
-                  </div>
+                <div className="hidden" aria-hidden="true">
                   <Ticket
 
                 invoiceId={invoice.id}
@@ -460,10 +478,12 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                     };
                   }),
                 }}
-                    esCopiaInterna={true}
-                  />
-                </>
+                esCopiaInterna={true}
+              />
+                </div>
               )}
+
+              
             </div>
           </div>
 
@@ -483,6 +503,19 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
               >
                 <Receipt className="h-3.5 w-3.5" />
                 <span>Ticket 80mm</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaperFormat("57mm")}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer",
+                  paperFormat === "57mm"
+                    ? "bg-white text-neutral-900 shadow-xs"
+                    : "text-neutral-500 hover:text-neutral-900"
+                )}
+              >
+                <Receipt className="h-3.5 w-3.5" />
+                <span>Ticket 57mm</span>
               </button>
 
               <button
@@ -522,7 +555,7 @@ export function InvoiceDetailDialog({ open, onClose, invoice }: InvoiceDetailDia
                 className="rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 font-semibold cursor-pointer h-9 px-4 text-xs gap-1.5 shadow-xs active:scale-[0.98] transition-all"
               >
                 <Printer className="h-3.5 w-3.5" />
-                <span>Imprimir ({paperFormat === "A4" ? "A4" : "80mm"})</span>
+                <span>Imprimir ({paperFormat})</span>
               </Button>
 
               <Button

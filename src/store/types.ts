@@ -76,6 +76,7 @@ export interface PrintSettings {
   warrantyText?: string;
   showWarranty?: boolean;
   printInternalCopy?: boolean;
+  autoPrint?: boolean;
   physicalPrinter?: {
     connectionType: 'usb' | 'bluetooth' | 'serial' | null;
     printProfile: 'basic' | 'standard' | 'complete';

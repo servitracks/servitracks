@@ -29,6 +29,7 @@ import MisComisionesPage from "./app/[tenant]/mis-comisiones/page";
 import CotizacionesPage from "./app/[tenant]/cotizaciones/page";
 import MovimientosPage from "./app/[tenant]/movimientos/page";
 import InventoryScannerPage from "./app/[tenant]/inventory/scanner/page";
+import BulkPrintLabelsPreviewPage from "./app/[tenant]/inventory/print-labels/page";
 import ActivityPage from "./app/[tenant]/activity/page";
 import Admin from "./app/admin/page";
 import BlogIndex from "./app/blog/page";
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="/legal/cookies" element={<CookiesPage />} />
 
         {/* Dashboard Routes wrapped in DashboardLayout */}
+        <Route path="/:tenant/inventory/print-labels" element={<BulkPrintLabelsPreviewPage />} />
         <Route path="/:tenant" element={<DashboardLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="orders" element={<OrdersPage />} />

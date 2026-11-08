@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
+import { saveAllProductsByTenantToCache } from '@/lib/productsCache';
 import type {
   Tenant, TenantUser, PrintSettings, BarcodeSettings, Customer, Vehicle,
   Service, Product, InventoryMovement, WorkOrder, Invoice, OpenTab,
@@ -255,6 +256,7 @@ export const useStore = create<AppState>()(
         warrantyText: 'Garantía: 30 días en mano de obra.',
         showWarranty: true,
         printInternalCopy: false,
+        autoPrint: true,
         physicalPrinter: {
           connectionType: 'usb',
           printProfile: 'basic',
@@ -447,6 +449,18 @@ export const useStore = create<AppState>()(
           if (curTenant) {
             const newConfig = { ...(curTenant.config || {}), printSettings: newPrintSettings };
             import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(curTenant.id, { config: newConfig }));
+            const updatedTenants = state.tenants.map((t) =>
+              t.id === curTenant.id ? { ...t, config: newConfig } : t
+            );
+            const updatedCurrentTenant =
+              state.currentTenant?.id === curTenant.id
+                ? { ...state.currentTenant, config: newConfig }
+                : state.currentTenant;
+            return {
+              printSettings: newPrintSettings,
+              tenants: updatedTenants,
+              currentTenant: updatedCurrentTenant,
+            };
           }
           return { printSettings: newPrintSettings };
         }),
@@ -458,6 +472,18 @@ export const useStore = create<AppState>()(
           if (curTenant) {
             const newConfig = { ...(curTenant.config || {}), barcodeSettings: newBarcodeSettings };
             import("@/lib/supabaseSync").then(m => m.syncTenantToSupabase(curTenant.id, { config: newConfig }));
+            const updatedTenants = state.tenants.map((t) =>
+              t.id === curTenant.id ? { ...t, config: newConfig } : t
+            );
+            const updatedCurrentTenant =
+              state.currentTenant?.id === curTenant.id
+                ? { ...state.currentTenant, config: newConfig }
+                : state.currentTenant;
+            return {
+              barcodeSettings: newBarcodeSettings,
+              tenants: updatedTenants,
+              currentTenant: updatedCurrentTenant,
+            };
           }
           return { barcodeSettings: newBarcodeSettings };
         }),
@@ -1678,6 +1704,94 @@ export const useStore = create<AppState>()(
     { 
       name: 'servitracks-storage',
       version: 3,
+      storage: createJSONStorage((): StateStorage => {
+        let idbSaveTimer: ReturnType<typeof setTimeout> | null = null;
+        return {
+          getItem: (name: string): string | null => {
+            if (typeof window === 'undefined') return null;
+            try {
+              return window.localStorage.getItem(name);
+            } catch {
+              return null;
+            }
+          },
+          setItem: (name: string, value: string): void => {
+            if (typeof window === 'undefined') return;
+
+            // Respaldo asíncrono en IndexedDB (sin límite de 5MB) para proteger el catálogo de artículos
+            if (idbSaveTimer) clearTimeout(idbSaveTimer);
+            idbSaveTimer = setTimeout(() => {
+              try {
+                const parsed = JSON.parse(value);
+                const prods = parsed?.state?.products;
+                if (Array.isArray(prods) && prods.length > 0) {
+                  saveAllProductsByTenantToCache(prods).catch(() => {});
+                }
+              } catch {}
+            }, 600);
+
+            try {
+              window.localStorage.setItem(name, value);
+              return;
+            } catch {
+              // Cuota de 5MB de localStorage excedida: respaldar productos completos en IndexedDB y compactar copia de localStorage
+              try {
+                const parsed = JSON.parse(value);
+                const st = parsed?.state || {};
+                if (Array.isArray(st.products) && st.products.length > 0) {
+                  saveAllProductsByTenantToCache(st.products).catch(() => {});
+                }
+
+                // Nivel 1: recortar historiales pesados y omitir base64 grandes en localStorage conservando TODOS los artículos
+                const slimProducts = Array.isArray(st.products)
+                  ? st.products.map((p: any) =>
+                      p?.image && typeof p.image === 'string' && p.image.length > 512
+                        ? { ...p, image: undefined }
+                        : p
+                    )
+                  : [];
+
+                const level1 = {
+                  ...parsed,
+                  state: {
+                    ...st,
+                    products: slimProducts,
+                    movements: Array.isArray(st.movements) ? st.movements.slice(-100) : [],
+                    activityLogs: Array.isArray(st.activityLogs) ? st.activityLogs.slice(0, 50) : [],
+                    whatsappLogs: Array.isArray(st.whatsappLogs) ? st.whatsappLogs.slice(-50) : [],
+                    invoices: Array.isArray(st.invoices) ? st.invoices.slice(0, 200) : [],
+                  },
+                };
+
+                try {
+                  window.localStorage.setItem(name, JSON.stringify(level1));
+                  return;
+                } catch {
+                  // Nivel 2: catálogo masivo (>20k ítems) -> delegar productos a IndexedDB y asegurar sesión/ajustes en localStorage
+                  const level2 = {
+                    ...level1,
+                    state: {
+                      ...level1.state,
+                      products: [],
+                      orders: Array.isArray(st.orders) ? st.orders.slice(0, 150) : [],
+                      customers: Array.isArray(st.customers) ? st.customers.slice(0, 300) : [],
+                    },
+                  };
+                  window.localStorage.setItem(name, JSON.stringify(level2));
+                }
+              } catch (fallbackErr) {
+                console.warn('[useStore] No se pudo compactar almacenamiento local:', fallbackErr);
+              }
+            }
+          },
+          removeItem: (name: string): void => {
+            if (typeof window === 'undefined') return;
+            try {
+              window.localStorage.removeItem(name);
+            } catch {}
+          },
+        };
+      }),
       migrate: (_persistedState: any, fromVersion: number) => {
         // Version 3: deduplicate users array (fixes double "Dueño" bug)
         if (fromVersion < 3 && _persistedState?.users) {

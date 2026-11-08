@@ -159,6 +159,7 @@ export default function OrdersPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
+  const [autoPrintNewOrder, setAutoPrintNewOrder] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<Plan | null>(null);
 
   useEffect(() => {
@@ -983,12 +984,27 @@ export default function OrdersPage() {
 
       {/* Lazy-loaded Dialogs */}
       <Suspense fallback={null}>
-        {isCreateOpen && <LazyCreateDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />}
+        {isCreateOpen && (
+          <LazyCreateDialog
+            open={isCreateOpen}
+            onOpenChange={setIsCreateOpen}
+            onOrderCreated={(newOrder) => {
+              setSelectedOrder(newOrder);
+              setAutoPrintNewOrder(true);
+              setIsDetailOpen(true);
+            }}
+          />
+        )}
         {selectedOrder && isDetailOpen && (
           <LazyDetailDialog
             open={isDetailOpen}
-            onOpenChange={setIsDetailOpen}
+            onOpenChange={(v) => {
+              setIsDetailOpen(v);
+              if (!v) setAutoPrintNewOrder(false);
+            }}
             order={allOrders.find((o) => o.id === selectedOrder.id) || selectedOrder}
+            autoPrintOnOpen={autoPrintNewOrder}
+            onAutoPrintDone={() => setAutoPrintNewOrder(false)}
           />
         )}
       </Suspense>

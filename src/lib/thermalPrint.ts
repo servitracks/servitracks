@@ -1,7 +1,10 @@
 /**
  * Utility for thermal receipt and document printing.
- * Dynamically computes content height to prevent continuous roll thermal printers
- * from feeding unnecessary blank paper before cutting.
+ * Uses Klynn's proven `atomic-print-target` + `printBrowserElementsIndividually` architecture:
+ * mounts each `.thermal-ticket` onto `document.body` and dispatches an independent `window.print()`
+ * job per ticket (1st: Original Cliente, 2nd: COPIA INTERNA) with proper bottom cutter clearance,
+ * ensuring Windows thermal printer drivers execute `DrvEndDoc` (hardware blade auto-cut)
+ * cleanly after EVERY ticket.
  */
 
 export interface ThermalPrintOptions {
@@ -11,273 +14,296 @@ export interface ThermalPrintOptions {
   onComplete?: () => void;
 }
 
+let printQueue: Promise<void> = Promise.resolve();
+
+function waitForPaintFrames(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(resolve, 60);
+      });
+    });
+  });
+}
+
+function triggerSingleWindowPrint(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    let maxSafetyTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("afterprint", onAfterPrint);
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      if (maxSafetyTimer) clearTimeout(maxSafetyTimer);
+      // Margen para que el Spooler de Windows cierre EndDoc y ejecute el corte físico
+      // antes de lanzar el segundo ticket o desmontar el nodo de impresión.
+      setTimeout(resolve, 450);
+    };
+
+    const onAfterPrint = () => {
+      finish();
+    };
+
+    window.addEventListener("afterprint", onAfterPrint, { once: true });
+
+    try {
+      window.focus();
+      window.print();
+    } catch (err) {
+      console.error("Error al disparar window.print():", err);
+      finish();
+      return;
+    }
+
+    // En modo --kiosk-printing (impresión silenciosa sin ventana que robe el foco),
+    // si afterprint se disparó sincrónicamente o no se emitió, continuar tras 1200ms (igual que Klynn).
+    const checkSilentFallback = () => {
+      if (settled) return;
+      if (document.hasFocus()) {
+        finish();
+      } else {
+        fallbackTimer = setTimeout(checkSilentFallback, 800);
+      }
+    };
+
+    fallbackTimer = setTimeout(checkSilentFallback, 1200);
+    maxSafetyTimer = setTimeout(finish, 60000);
+  });
+}
+
 export function printThermalDocument({
   element,
   title = "Documento",
   paperSize = "80mm",
   onComplete,
 }: ThermalPrintOptions) {
-  if (!element || typeof window === "undefined") return;
+  if (!element || typeof window === "undefined" || typeof document === "undefined") return;
 
   const isA4 = paperSize === "A4";
-  const rollWidth = paperSize === "58mm" ? "58mm" : paperSize === "57mm" ? "57mm" : "80mm";
+  const is58 = paperSize === "58mm" || paperSize === "57mm";
+  const rollMaxWidth = isA4 ? "210mm" : is58 ? "54mm" : "72mm";
 
-  // Limpiar cualquier iframe de impresión previo huérfano en el DOM
-  document.querySelectorAll(".thermal-print-frame").forEach((el) => {
-    try {
-      el.remove();
-    } catch (_) {}
-  });
+  // Extraer cada ticket individualmente en el momento de la llamada (antes de cualquier cierre de modal)
+  const ticketNodes = Array.from(element.querySelectorAll<HTMLElement>(".thermal-ticket"));
+  const rawJobsHtml: string[] =
+    ticketNodes.length > 0
+      ? ticketNodes.map(
+          (node) =>
+            `${node.outerHTML}${
+              !isA4 ? '<div class="thermal-cut-feed" aria-hidden="true">.</div>' : ""
+            }`
+        )
+      : [
+          `${element.innerHTML}${
+            !isA4 ? '<div class="thermal-cut-feed" aria-hidden="true">.</div>' : ""
+          }`,
+        ];
 
-  // Crear iframe invisible pero con el ancho exacto del rollo para cálculo milimétrico
-  const iframe = document.createElement("iframe");
-  iframe.className = "thermal-print-frame";
-  iframe.style.position = "fixed";
-  iframe.style.top = "0";
-  iframe.style.left = "-9999px";
-  iframe.style.width = isA4 ? "210mm" : rollWidth;
-  iframe.style.height = "2500px"; // Altura holgada para renderizado natural sin scrollbars internos
-  iframe.style.border = "none";
-  iframe.style.opacity = "0";
-  iframe.style.pointerEvents = "none";
-  iframe.setAttribute("aria-hidden", "true");
+  printQueue = printQueue
+    .catch(() => {})
+    .then(async () => {
+      const originalTitle = document.title;
 
-  document.body.appendChild(iframe);
+      // Limpiar cualquier contenedor o iframe residual previo
+      document
+        .querySelectorAll(
+          ".thermal-print-frame, #servitracks-atomic-print-root, #servitracks-atomic-print-style"
+        )
+        .forEach((el) => {
+          try {
+            el.remove();
+          } catch (_) {}
+        });
 
-  // Extraer todas las hojas de estilo aplicadas (Tailwind, tipografías, componentes)
-  const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-    .map((tag) => tag.outerHTML)
-    .join("\n");
+      const pageRule = isA4
+        ? `@page { size: A4 portrait; margin: 8mm !important; }`
+        : `@page { margin: 0 !important; }`;
 
-  const doc = iframe.contentWindow?.document;
-  const win = iframe.contentWindow;
-  if (!doc || !win) {
-    if (document.body.contains(iframe)) document.body.removeChild(iframe);
-    return;
-  }
-
-  // Regla inicial de tamaño de página
-  const initialPageRule = isA4
-    ? `@page { size: A4; margin: 8mm !important; }`
-    : `@page { size: ${rollWidth} auto; margin: 0mm !important; }`;
-
-  doc.open();
-  doc.write(`
-    <!DOCTYPE html>
-    <html lang="es">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>${title}</title>
-        ${styles}
-        <style id="thermal-page-style">
-          ${initialPageRule}
-          @media print {
-            ${initialPageRule}
-            * {
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              border-color: black !important;
-              -webkit-font-smoothing: antialiased !important;
-            }
-            .text-white, [class*="text-white"], [style*="color: white"], [style*="color: rgb(255, 255, 255)"], [style*="color:#fff"] {
-              color: white !important;
-            }
-            .bg-black, [class*="bg-black"], [style*="background-color: black"], [style*="background-color: #000"] {
-              background-color: black !important;
-            }
-            img {
-              filter: grayscale(100%) contrast(150%) !important;
-            }
+      const styleEl = document.createElement("style");
+      styleEl.id = "servitracks-atomic-print-style";
+      styleEl.textContent = `
+        @media screen {
+          #servitracks-atomic-print-root {
+            position: fixed !important;
+            top: 0 !important;
+            left: -10000px !important;
+            width: ${isA4 ? "210mm" : is58 ? "58mm" : "80mm"} !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            z-index: -9999 !important;
+            overflow: hidden !important;
           }
-          html, body {
-            background: white !important;
-            color: black !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: ${isA4 ? "210mm" : rollWidth} !important;
+        }
+        @media print {
+          ${pageRule}
+          html,
+          body.servitracks-printing {
+            background: #ffffff !important;
+            color: #000000 !important;
+            width: 100% !important;
             height: auto !important;
             min-height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
             overflow: visible !important;
+            display: block !important;
           }
-          .thermal-ticket {
-            box-shadow: none !important;
+          body.servitracks-printing > *:not(#servitracks-atomic-print-root) {
+            display: none !important;
+          }
+          #servitracks-atomic-print-root {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            position: relative !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            max-width: ${rollMaxWidth} !important;
             margin: 0 auto !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+            box-sizing: border-box !important;
+          }
+          #servitracks-atomic-print-root * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            border-color: black !important;
+            -webkit-font-smoothing: antialiased !important;
+          }
+          #servitracks-atomic-print-root .text-white,
+          #servitracks-atomic-print-root [class*="text-white"],
+          #servitracks-atomic-print-root [style*="color: white"],
+          #servitracks-atomic-print-root [style*="color: rgb(255, 255, 255)"],
+          #servitracks-atomic-print-root [style*="color:#fff"],
+          #servitracks-atomic-print-root [style*="color: #ffffff"] {
+            color: #ffffff !important;
+          }
+          #servitracks-atomic-print-root .bg-black,
+          #servitracks-atomic-print-root [class*="bg-black"],
+          #servitracks-atomic-print-root [style*="background-color: black"],
+          #servitracks-atomic-print-root [style*="background-color: #000"],
+          #servitracks-atomic-print-root [style*="background-color: rgb(0, 0, 0)"] {
+            background-color: #000000 !important;
+          }
+          #servitracks-atomic-print-root .internal-copy-banner {
+            background-color: #000000 !important;
+            color: #ffffff !important;
+            box-shadow: inset 0 0 0 1000px #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          #servitracks-atomic-print-root img {
+            filter: grayscale(100%) contrast(150%) !important;
+          }
+          #servitracks-atomic-print-root .atomic-ticket-job {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          #servitracks-atomic-print-root .thermal-ticket {
+            display: block !important;
+            position: relative !important;
+            width: 100% !important;
+            max-width: ${rollMaxWidth} !important;
+            margin: 0 auto !important;
+            box-shadow: none !important;
             border: none !important;
+            box-sizing: border-box !important;
+            padding-bottom: ${isA4 ? "12mm" : "5mm"} !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
-        </style>
-      </head>
-      <body>
-        <div id="print-root">
-          ${element.innerHTML}
-        </div>
-      </body>
-    </html>
-  `);
-  doc.close();
-
-  const cleanup = () => {
-    if (document.body.contains(iframe)) {
-      document.body.removeChild(iframe);
-    }
-    if (onComplete) {
-      onComplete();
-    }
-  };
-
-  win.addEventListener("afterprint", cleanup);
-  setTimeout(cleanup, 120000);
-
-  // Proceso autónomo de medición de contenido y disparo de impresión
-  const startPrint = async () => {
-    try {
-      // 1. Esperar a que las fuentes se encuentren listas
-      if (doc.fonts && doc.fonts.ready) {
-        try {
-          await doc.fonts.ready;
-        } catch (_) {}
-      }
-
-      // 2. Esperar a que las imágenes (logos, QR, etc.) terminen de cargar completamente
-      const images = Array.from(doc.images || []);
-      if (images.length > 0) {
-        await Promise.all(
-          images.map((img) => {
-            if (img.complete) return Promise.resolve();
-            return new Promise((resolve) => {
-              img.onload = () => resolve(true);
-              img.onerror = () => resolve(true);
-              setTimeout(() => resolve(true), 1200); // Límite de seguridad
-            });
-          })
-        );
-      }
-
-      // 3. Breve pausa para asegurar reflujo completo de layout en el navegador
-      await new Promise((resolve) => setTimeout(resolve, 80));
-
-      if (!isA4) {
-        // Medir el contenedor real de impresión (soportando tickets simples o consecutivos con copia interna)
-        const printRoot = doc.getElementById("print-root") as HTMLElement;
-        const allTickets = Array.from(doc.querySelectorAll(".thermal-ticket")) as HTMLElement[];
-
-        let contentPx = 0;
-        if (allTickets.length > 1) {
-          const sumTickets = allTickets.reduce(
-            (acc, t) => acc + (t.scrollHeight || t.offsetHeight || 0),
-            0
-          );
-          contentPx = Math.ceil(
-            Math.max(
-              printRoot?.scrollHeight || 0,
-              printRoot?.offsetHeight || 0,
-              sumTickets + (allTickets.length - 1) * 35
-            )
-          );
-        } else {
-          const ticketEl =
-            allTickets[0] ||
-            (printRoot?.firstElementChild as HTMLElement) ||
-            printRoot;
-
-          if (ticketEl) {
-            const rect = ticketEl.getBoundingClientRect();
-            contentPx = Math.ceil(
-              Math.max(
-                rect.height,
-                ticketEl.scrollHeight || 0,
-                ticketEl.offsetHeight || 0
-              )
-            );
+          #servitracks-atomic-print-root .thermal-cut-feed {
+            display: block !important;
+            margin-top: 8mm !important;
+            padding-bottom: 2mm !important;
+            font-size: 6px !important;
+            line-height: 1 !important;
+            text-align: center !important;
+            color: #000000 !important;
+            opacity: 0.25 !important;
+            user-select: none !important;
+          }
+          #servitracks-atomic-print-root .ticket-separator {
+            display: none !important;
           }
         }
+      `;
 
-        if (contentPx > 0) {
-            // Conversión exacta: 96 DPI (1 in = 25.4 mm)
-            // + 3mm de margen de seguridad para que la cuchilla física corte después de la última línea
-            const calculatedMm = Math.ceil((contentPx * 25.4) / 96) + 3;
+      const printRoot = document.createElement("div");
+      printRoot.id = "servitracks-atomic-print-root";
+      printRoot.setAttribute("aria-hidden", "true");
 
-            const finalPageCss = `
-              @page {
-                size: ${rollWidth} ${calculatedMm}mm;
-                margin: 0mm !important;
-              }
-              @media print {
-                @page {
-                  size: ${rollWidth} ${calculatedMm}mm;
-                  margin: 0mm !important;
-                }
-                * {
-                  -webkit-print-color-adjust: exact !important;
-                  print-color-adjust: exact !important;
-                  border-color: black !important;
-                  -webkit-font-smoothing: antialiased !important;
-                }
-                .text-white, [class*="text-white"], [style*="color: white"], [style*="color: rgb(255, 255, 255)"], [style*="color:#fff"] {
-                  color: white !important;
-                }
-                .bg-black, [class*="bg-black"], [style*="background-color: black"], [style*="background-color: #000"] {
-                  background-color: black !important;
-                }
-                img {
-                  filter: grayscale(100%) contrast(150%) !important;
-                }
-                html, body {
-                  width: ${rollWidth} !important;
-                  height: ${calculatedMm}mm !important;
-                  max-height: ${calculatedMm}mm !important;
-                  margin: 0mm !important;
-                  padding: 0mm !important;
-                  overflow: hidden !important;
-                }
-                .thermal-ticket {
-                  box-shadow: none !important;
-                  margin: 0 auto !important;
-                  border: none !important;
-                }
-              }
-              html, body {
-                background: white !important;
-                color: black !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                width: ${rollWidth} !important;
-                height: ${calculatedMm}mm !important;
-                max-height: ${calculatedMm}mm !important;
-                overflow: hidden !important;
-              }
-            `;
+      const jobWrappers: HTMLDivElement[] = rawJobsHtml.map((jobHtml, idx) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "atomic-ticket-job";
+        wrapper.dataset.printJobIndex = String(idx);
+        wrapper.style.display = idx === 0 ? "block" : "none";
+        wrapper.innerHTML = jobHtml;
+        printRoot.appendChild(wrapper);
+        return wrapper;
+      });
 
-            let styleEl = doc.getElementById("thermal-page-style");
-            if (styleEl) {
-              styleEl.innerHTML = finalPageCss;
-            } else {
-              const newStyle = doc.createElement("style");
-              newStyle.id = "thermal-page-style";
-              newStyle.innerHTML = finalPageCss;
-              doc.head.appendChild(newStyle);
-            }
-          }
-        }
+      document.head.appendChild(styleEl);
+      document.body.appendChild(printRoot);
+      document.body.classList.add("servitracks-printing");
 
-      // 4. Invocar el diálogo nativo de impresión
-      setTimeout(() => {
-        try {
-          win.focus();
-          win.print();
-        } catch (err) {
-          console.error("Error al disparar impresión en iframe:", err);
-        }
-      }, 100);
-    } catch (err) {
-      console.error("Error al preparar documento para impresión:", err);
       try {
-        win.focus();
-        win.print();
-      } catch (_) {}
-    }
-  };
+        // 1. Esperar tipografías listas
+        if (document.fonts && document.fonts.ready) {
+          try {
+            await document.fonts.ready;
+          } catch (_) {}
+        }
 
-  // Ejecutar proceso de medición autónoma
-  startPrint();
+        // 2. Esperar carga completa de logos e imágenes dentro del contenedor de impresión
+        const images = Array.from(printRoot.querySelectorAll("img"));
+        if (images.length > 0) {
+          await Promise.all(
+            images.map((img) => {
+              if (img.complete) return Promise.resolve();
+              return new Promise((resolve) => {
+                img.onload = () => resolve(true);
+                img.onerror = () => resolve(true);
+                setTimeout(() => resolve(true), 1200);
+              });
+            })
+          );
+        }
+
+        // 3. Imprimir cada ticket como un trabajo independiente (EndDoc por ticket => corte físico en ambos)
+        for (let i = 0; i < jobWrappers.length; i++) {
+          jobWrappers.forEach((w, idx) => {
+            w.style.setProperty("display", idx === i ? "block" : "none", "important");
+          });
+          document.title = i === 0 ? title : `${title}_Copia_Interna`;
+          await waitForPaintFrames();
+          await triggerSingleWindowPrint();
+        }
+      } catch (err) {
+        console.error("Error durante secuencia de impresión térmica:", err);
+      } finally {
+        document.title = originalTitle;
+        // Conservar brevemente el nodo en el DOM tras el último afterprint para no abortar el spooler
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        document.body.classList.remove("servitracks-printing");
+        try {
+          if (document.body.contains(printRoot)) document.body.removeChild(printRoot);
+        } catch (_) {}
+        try {
+          if (document.head.contains(styleEl)) document.head.removeChild(styleEl);
+        } catch (_) {}
+        if (onComplete) {
+          onComplete();
+        }
+      }
+    });
 }

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { Ticket } from "@/components/pos/Ticket";
+import { printThermalDocument } from "@/lib/thermalPrint";
 import { useStore } from "@/store/useStore";
 import { 
   Trash2, Edit2, User as UserIcon, Car as CarIcon, UserCog, Save, X, 
   PackageOpen, Plus, Minus, Shield, FileText, Building2, Search, Check, ChevronsUpDown,
-  Wrench, Calendar, Gauge
+  Wrench, Calendar, Gauge, Printer
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,9 +25,12 @@ interface OrderDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   order: WorkOrder;
+  disableInternalCopy?: boolean;
+  autoPrintOnOpen?: boolean;
+  onAutoPrintDone?: () => void;
 }
 
-export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDetailDialogProps) {
+export default function OrderDetailDialog({ open, onOpenChange, order, disableInternalCopy, autoPrintOnOpen, onAutoPrintDone }: OrderDetailDialogProps) {
   const allOrders = useStore((s) => s.orders);
   const currentOrder = allOrders.find((o) => o.id === order.id) || order;
   const customers = useStore((s) => s.customers);
@@ -37,6 +42,10 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
   const updateOrder = useStore((s) => s.updateOrder);
   const updateProduct = useStore((s) => s.updateProduct);
   const addMovement = useStore((s) => s.addMovement);
+  const tenants = useStore((s) => s.tenants);
+  const currentTenant = useStore((s) => s.currentTenant);
+  const printSettings = useStore((s) => s.printSettings);
+  const orderTicketRef = useRef<HTMLDivElement>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [isInspectionOpen, setIsInspectionOpen] = useState(false);
@@ -171,6 +180,165 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
   };
 
   const orderFinancials = computeOrderFinancials(currentOrder.parts || []);
+
+  const activeTenant = useMemo(
+    () => tenants.find((t) => t.id === currentOrder.tenantId || t.slug === currentOrder.tenantId) || currentTenant,
+    [tenants, currentOrder.tenantId, currentTenant]
+  );
+  const activeCustomer = useMemo(
+    () => customers.find((c) => c.id === currentOrder.customerId),
+    [customers, currentOrder.customerId]
+  );
+  const activeVehicle = useMemo(
+    () => vehicles.find((v) => v.id === currentOrder.vehicleId),
+    [vehicles, currentOrder.vehicleId]
+  );
+  const activeMechanic = useMemo(
+    () => technicians.find((t) => t.id === currentOrder.mechanicId),
+    [technicians, currentOrder.mechanicId]
+  );
+
+  const ticketItems = useMemo(() => {
+    const list: { id: string; name: string; descripcion: string; quantity: number; cantidad: number; unitPrice: number; precio_unitario: number; salePrice: number; tax: number; is_exento: boolean; total: number }[] = [];
+    (currentOrder.serviceIds || []).forEach((sid) => {
+      const itemOverride = currentOrder.items?.find((it) => it.serviceId === sid);
+      const svc = services.find((s) => s.id === sid);
+      const price = itemOverride ? Number(itemOverride.unitPrice || 0) : Number(svc?.price || 0);
+      const name = svc?.name || "Servicio de taller";
+      list.push({ id: `svc-${sid}`, name, descripcion: name, quantity: 1, cantidad: 1, unitPrice: price, precio_unitario: price, salePrice: price, tax: 0, is_exento: false, total: price });
+    });
+    (currentOrder.customServices || []).forEach((cs, idx) => {
+      const price = Number(cs.price || 0);
+      const name = cs.name || (cs as any).description || "Servicio personalizado";
+      list.push({ id: `csvc-${idx}`, name, descripcion: name, quantity: 1, cantidad: 1, unitPrice: price, precio_unitario: price, salePrice: price, tax: 0, is_exento: false, total: price });
+    });
+    (currentOrder.parts || []).forEach((part, idx) => {
+      const prod = products.find((p) => p.id === part.productId);
+      const price = Number((part as any).price ?? prod?.salePrice ?? 0);
+      const qty = Number(part.quantity || 1);
+      const name = prod?.name || "Repuesto";
+      list.push({ id: `part-${idx}`, name, descripcion: name, quantity: qty, cantidad: qty, unitPrice: price, precio_unitario: price, salePrice: price, tax: 0, is_exento: false, total: price * qty });
+    });
+    (currentOrder.customParts || []).forEach((cp, idx) => {
+      const price = Number(cp.price || 0);
+      const qty = Number(cp.quantity || 1);
+      const name = cp.name || "Repuesto externo";
+      list.push({ id: `cpart-${idx}`, name, descripcion: name, quantity: qty, cantidad: qty, unitPrice: price, precio_unitario: price, salePrice: price, tax: 0, is_exento: false, total: price * qty });
+    });
+    if (list.length === 0) {
+      const fallbackName = currentOrder.description || "Orden de servicio";
+      list.push({
+        id: "main-desc",
+        name: fallbackName,
+        descripcion: fallbackName,
+        quantity: 1,
+        cantidad: 1,
+        unitPrice: orderFinancials.subtotal,
+        precio_unitario: orderFinancials.subtotal,
+        salePrice: orderFinancials.subtotal,
+        tax: orderFinancials.tax,
+        is_exento: orderFinancials.tax === 0,
+        total: orderFinancials.subtotal,
+      });
+    }
+    return list;
+  }, [currentOrder, services, products, orderFinancials]);
+
+  const commonOrderTicketProps = useMemo(() => ({
+    invoiceId: currentOrder.id,
+    createdAt: currentOrder.createdAt,
+    tenant: {
+      nombre: activeTenant?.name || "ServiTracks",
+      name: activeTenant?.name || "ServiTracks",
+      logo: activeTenant?.logo,
+      logo_url: activeTenant?.logo,
+      direccion: activeTenant?.address,
+      address: activeTenant?.address,
+      telefono: activeTenant?.phone,
+      phone: activeTenant?.phone,
+      rnc: activeTenant?.rnc,
+    },
+    customer: {
+      nombre: currentOrder.customerBusinessName || activeCustomer?.name || "Consumidor Final",
+      name: currentOrder.customerBusinessName || activeCustomer?.name || "Consumidor Final",
+      telefono: activeCustomer?.phone,
+      phone: activeCustomer?.phone,
+      rnc: currentOrder.customerRnc || activeCustomer?.rnc,
+      cedula: currentOrder.customerRnc || activeCustomer?.rnc,
+    },
+    vehicle: activeVehicle
+      ? {
+          brand: activeVehicle.brand,
+          model: activeVehicle.model,
+          year: activeVehicle.year,
+          plate: activeVehicle.plate,
+          color: activeVehicle.color,
+          km: currentOrder.km || activeVehicle.km,
+        }
+      : undefined,
+    mechanicName: activeMechanic?.name,
+    items: ticketItems,
+    subtotal: orderFinancials.subtotal,
+    itbis: orderFinancials.tax,
+    total: orderFinancials.total,
+    payMethod: "ORDEN DE SERVICIO",
+    notes: currentOrder.notes || currentOrder.description,
+    formato: (printSettings?.paperSize as any) || "80mm",
+    orden: {
+      numero: currentOrder.id,
+      creado_en: currentOrder.createdAt,
+      subtotal: orderFinancials.subtotal,
+      itbis: orderFinancials.tax,
+      descuento: 0,
+      total: orderFinancials.total,
+      metodo_pago: "ORDEN DE SERVICIO",
+      notas: currentOrder.notes || currentOrder.description,
+      items: ticketItems,
+      vehicle: activeVehicle
+        ? {
+            brand: activeVehicle.brand,
+            model: activeVehicle.model,
+            year: activeVehicle.year,
+            plate: activeVehicle.plate,
+            color: activeVehicle.color,
+            km: currentOrder.km || activeVehicle.km,
+          }
+        : undefined,
+    },
+  }), [currentOrder, activeTenant, activeCustomer, activeVehicle, activeMechanic, ticketItems, orderFinancials, printSettings?.paperSize]);
+
+  const handlePrintOrderTicket = () => {
+    if (!orderTicketRef.current) return;
+    printThermalDocument({
+      element: orderTicketRef.current,
+      title: `Orden_${currentOrder.id}`,
+      paperSize: (printSettings?.paperSize as any) || "80mm",
+    });
+  };
+
+  const autoPrintedOrderIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !autoPrintOnOpen) {
+      if (!open) autoPrintedOrderIdRef.current = null;
+      return;
+    }
+    if (printSettings?.autoPrint === false) return;
+    if (autoPrintedOrderIdRef.current === currentOrder.id) return;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const tryPrint = () => {
+      if (orderTicketRef.current && orderTicketRef.current.innerHTML.trim().length > 0) {
+        autoPrintedOrderIdRef.current = currentOrder.id;
+        handlePrintOrderTicket();
+        if (onAutoPrintDone) onAutoPrintDone();
+      } else if (attempts < 15) {
+        attempts += 1;
+        timer = setTimeout(tryPrint, 80);
+      }
+    };
+    timer = setTimeout(tryPrint, 180);
+    return () => clearTimeout(timer);
+  }, [open, autoPrintOnOpen, currentOrder.id]);
 
   const handleSaveChanges = () => {
     if (!editForm.description) {
@@ -1143,6 +1311,33 @@ export default function OrderDetailDialog({ open, onOpenChange, order }: OrderDe
                   size="sm"
                   className="rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold h-9 px-3.5 gap-1.5 shadow-2xs cursor-pointer"
                   onClick={() => setIsEditing(true)}
+                >
+                  <Edit2 className="h-3.5 w-3.5 text-neutral-500" />
+                  <span>Editar</span>
+                </Button>
+
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="rounded-xl border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold h-9 px-3.5 gap-1.5 shadow-2xs cursor-pointer"
+                  onClick={handlePrintOrderTicket}
+                >
+                  <Printer className="h-3.5 w-3.5 text-neutral-600" />
+                  <span>Imprimir Ticket</span>
+                </Button>
+
+                <div className="hidden" aria-hidden="true">
+                  <div ref={orderTicketRef}>
+                    <Ticket {...commonOrderTicketProps} esCopiaInterna={false} />
+                    {!disableInternalCopy && printSettings?.printInternalCopy && (
+                      <Ticket {...commonOrderTicketProps} esCopiaInterna={true} />
+                    )}
+                  </div>
+                </div>
+
+                <Button 
+                  variant="ghost"
+                  className="hidden"
                 >
                   <Edit2 className="h-3.5 w-3.5 text-neutral-500" />
                   <span>Editar</span>

@@ -1397,6 +1397,7 @@ export default function CajaPage() {
     updateTenant,
     technicians = [],
     invoices = [],
+    orders = [],
     services = [],
     updateInvoice,
     users = [],
@@ -1656,42 +1657,147 @@ export default function CajaPage() {
   const [movsPage, setMovsPage] = useState(1);
   const [histPage, setHistPage] = useState(1);
 
-  const findInvoiceForMovement = (mov: MovimientoCaja) => {
-    // 1. Try to find any sequence of B or E followed by 10-12 digits (NCF/e-CF)
-    const ncfMatch = mov.concepto.match(/([BE]\d{10,12})/i);
+  const findInvoiceForMovement = (mov: MovimientoCaja): Invoice | null => {
+    if (!mov || !mov.concepto) return null;
+    const cLower = mov.concepto.toLowerCase();
+
+    // 1. Direct contains check: does any invoice have its NCF or ID present directly in mov.concepto?
+    const directFound = invoices.find(inv => 
+      (inv.ncf && cLower.includes(inv.ncf.toLowerCase().trim())) ||
+      (inv.id && cLower.includes(inv.id.toLowerCase().trim()))
+    );
+    if (directFound) return directFound;
+
+    // 2. Try to find any sequence of B or E followed by 8-14 digits (NCF/e-CF)
+    const ncfMatch = mov.concepto.match(/([BE]\d{8,14})/i);
     if (ncfMatch) {
-      const code = ncfMatch[1].toLowerCase();
-      const found = invoices.find(inv => inv.ncf && inv.ncf.toLowerCase() === code);
+      const code = ncfMatch[1].toLowerCase().trim();
+      const found = invoices.find(inv => inv.ncf && inv.ncf.toLowerCase().trim() === code);
       if (found) return found;
     }
 
-    // 2. Try to find the word "Factura" followed by some code
+    // 3. Try to find the word 'Factura' followed by some code
     const facturaMatch = mov.concepto.match(/Factura\s+([A-Za-z0-9\-]+)/i);
     if (facturaMatch) {
-      const code = facturaMatch[1].toLowerCase();
+      const code = facturaMatch[1].toLowerCase().trim();
       const found = invoices.find(inv => 
-        (inv.ncf && inv.ncf.toLowerCase() === code) ||
-        inv.id.toLowerCase().endsWith(code) ||
-        inv.id.toLowerCase() === code
+        (inv.ncf && inv.ncf.toLowerCase().trim() === code) ||
+        inv.id.toLowerCase().trim().endsWith(code) ||
+        inv.id.toLowerCase().trim() === code
       );
       if (found) return found;
     }
 
-    // 3. Try to find hash prefix e.g. #abcdef
+    // 4. Try to find hash prefix e.g. #abcdef or #1234
     const idMatch = mov.concepto.match(/#([a-z0-9]+)/i);
     if (idMatch) {
-      const suffix = idMatch[1].toLowerCase();
-      const found = invoices.find(inv => inv.id.toLowerCase().endsWith(suffix));
+      const suffix = idMatch[1].toLowerCase().trim();
+      const found = invoices.find(inv => 
+        inv.id.toLowerCase().endsWith(suffix) ||
+        (inv.orderId && inv.orderId.toLowerCase().endsWith(suffix))
+      );
       if (found) return found;
     }
 
-    // 4. Try fallback matching by exact amount
-    const matches = invoices.filter(inv => Math.abs(inv.total - mov.monto) < 0.01);
-    if (matches.length === 1) return matches[0];
+    // 5. Try to find order references: e.g. 'orden 123', 'orden ORD-0012', 'orden #10'
+    const orderMatch = mov.concepto.match(/orden\s+([A-Za-z0-9\-#]+)/i);
+    if (orderMatch) {
+      const ordCode = orderMatch[1].replace('#', '').toLowerCase().trim();
+      const invOrder = invoices.find(inv => 
+        (inv.orderId && (inv.orderId.toLowerCase().trim() === ordCode || inv.orderId.toLowerCase().trim().endsWith(ordCode))) ||
+        (inv.notes && inv.notes.toLowerCase().includes(ordCode))
+      );
+      if (invOrder) return invOrder;
+
+      const matchedOrder = orders.find(ord => 
+        ord.id.toLowerCase().trim() === ordCode ||
+        ord.id.toLowerCase().trim().endsWith(ordCode) ||
+        (ord as any).numero?.toString().toLowerCase().trim() === ordCode
+      );
+      if (matchedOrder) {
+        const invForOrder = invoices.find(inv => inv.orderId === matchedOrder.id);
+        if (invForOrder) return invForOrder;
+
+        return {
+          id: matchedOrder.id,
+          tenantId: matchedOrder.tenantId || tenantId,
+          customerId: matchedOrder.customerId,
+          vehicleId: matchedOrder.vehicleId,
+          orderId: matchedOrder.id,
+          items: (matchedOrder.items && matchedOrder.items.length > 0)
+            ? matchedOrder.items.map((it) => ({
+                id: it.id || String(Math.random()),
+                name: it.name || it.description || 'Item de orden',
+                quantity: it.quantity || 1,
+                unitPrice: it.unitPrice || it.price || 0,
+                tax: it.tax || 0,
+              }))
+            : [{
+                id: 'item-1',
+                name: matchedOrder.description || `Orden #${matchedOrder.id.slice(-6)}`,
+                quantity: 1,
+                unitPrice: matchedOrder.total || mov.monto,
+                tax: 0,
+              }],
+          subtotal: matchedOrder.subtotal || matchedOrder.total || mov.monto,
+          tax: matchedOrder.tax || 0,
+          discount: 0,
+          total: matchedOrder.total || mov.monto,
+          paymentMethod: (mov.metodo === 'TARJETA' ? 'card' : mov.metodo === 'TRANSFERENCIA' ? 'transfer' : 'cash'),
+          status: 'paid',
+          createdAt: matchedOrder.createdAt || mov.creado_en,
+          notes: matchedOrder.notes,
+        };
+      }
+    }
+
+    // 6. Try fallback matching by exact amount in same tenant
+    const tenantInvs = invoices.filter(inv => !tenantId || inv.tenantId === tenantId);
+    const amountMatches = tenantInvs.filter(inv => Math.abs((inv.total || 0) - mov.monto) < 0.01);
+    if (amountMatches.length === 1) return amountMatches[0];
+    if (amountMatches.length > 1) {
+      const movTime = new Date(mov.creado_en).getTime();
+      const closest = amountMatches.slice().sort((a, b) => {
+        const diffA = Math.abs(new Date(a.createdAt).getTime() - movTime);
+        const diffB = Math.abs(new Date(b.createdAt).getTime() - movTime);
+        return diffA - diffB;
+      })[0];
+      if (Math.abs(new Date(closest.createdAt).getTime() - movTime) < 72 * 3600 * 1000) {
+        return closest;
+      }
+    }
+
+    // 7. Synthetic fallback if it is a sale or invoice movement so ticket preview is never empty
+    if (['VENTA', 'ABONO'].includes(mov.tipo) || /factura|orden|pos|venta/i.test(mov.concepto)) {
+      const ncfExtracted = mov.concepto.match(/([BE]\d{8,14})/i)?.[1];
+      const invIdExtracted = mov.concepto.match(/Factura\s+([A-Za-z0-9\-]+)/i)?.[1] || mov.id;
+      return {
+        id: invIdExtracted,
+        tenantId: mov.tenant_id || tenantId,
+        customerId: undefined,
+        customerName: mov.concepto.includes('-') ? mov.concepto.split('-').pop()?.trim() : undefined,
+        ncf: ncfExtracted,
+        items: [{
+          id: 'item-1',
+          name: mov.concepto,
+          quantity: 1,
+          unitPrice: mov.monto,
+          tax: 0,
+        }],
+        subtotal: mov.monto,
+        tax: 0,
+        discount: 0,
+        total: mov.monto,
+        paymentMethod: (mov.metodo === 'TARJETA' ? 'card' : mov.metodo === 'TRANSFERENCIA' ? 'transfer' : 'cash'),
+        status: 'paid',
+        createdAt: mov.creado_en,
+        notes: `Generado para previsualización de ticket (${mov.concepto})`,
+      };
+    }
 
     return null;
   };
-  
+
   // -- PAGO TECNICO LIQUIDACION --
   const [isPagoTecnicoOpen, setIsPagoTecnicoOpen] = useState(false);
   const [selectedTechToPay, setSelectedTechToPay] = useState("");
@@ -2890,8 +2996,8 @@ export default function CajaPage() {
                                     )}
                                   </div>
                                   {isClickable && (
-                                    <Badge variant="outline" className="text-[10px] font-bold border-neutral-200 bg-neutral-50 text-neutral-700 rounded-md py-0.5 px-2 hover:bg-neutral-100 transition-colors w-fit self-start sm:self-auto gap-1">
-                                      <FileText className="h-3 w-3 text-neutral-400" /> Ver Factura
+                                    <Badge variant="outline" className="text-[10px] font-bold border-neutral-200 bg-neutral-50 text-neutral-800 rounded-md py-0.5 px-2 hover:bg-neutral-100 transition-colors w-fit self-start sm:self-auto gap-1.5 cursor-pointer shadow-2xs">
+                                      <Receipt className="h-3 w-3 text-neutral-500" /> Ver orden
                                     </Badge>
                                   )}
                                 </div>
@@ -4329,15 +4435,7 @@ export default function CajaPage() {
         </DialogContent>
       </Dialog>
 
-      <InvoiceDetailDialog 
-        open={!!selectedInvoice} 
-        onClose={() => {
-          setSelectedInvoice(null);
-          setSelectedInvoiceEdit(false);
-        }} 
-        invoice={selectedInvoice} 
-        defaultEdit={selectedInvoiceEdit}
-      />
+      
       {/* DIALOG 9: Detalles de Tarjetas (KPIs) */}
       <Dialog open={!!detailsModalType} onOpenChange={(open) => {
         if (!open) {
@@ -4426,28 +4524,80 @@ export default function CajaPage() {
                       {filteredDetailsItems.map(mov => {
                         const isIngreso = ['INGRESO', 'VENTA', 'ABONO'].includes(mov.tipo);
                         const tipoLabel = mov.tipo.replace(/_/g, ' ').toLowerCase();
+                        const matchingInvoice = findInvoiceForMovement(mov);
+                        const canViewOrder = !!matchingInvoice;
+
                         return (
-                          <li key={mov.id} className="flex items-center gap-3.5 px-4 py-3 hover:bg-neutral-50/70 transition-colors duration-150">
-                            <span className={cn(
-                              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
-                              isIngreso ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
-                            )}>
-                              {isIngreso ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold text-neutral-900 truncate">{mov.concepto}</p>
-                              <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5">
-                                <span className="tabular-nums">{new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}</span>
-                                <span className="text-neutral-300">·</span>
-                                <span className="capitalize">{tipoLabel}</span>
-                              </p>
+                          <li
+                            key={mov.id}
+                            onClick={() => {
+                              if (matchingInvoice) {
+                                setSelectedInvoice(matchingInvoice);
+                                setSelectedInvoiceEdit(false);
+                              }
+                            }}
+                            className={cn(
+                              "flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 transition-colors duration-150",
+                              canViewOrder ? "hover:bg-neutral-50/90 cursor-pointer" : "hover:bg-neutral-50/50"
+                            )}
+                          >
+                            <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                              <span className={cn(
+                                "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                                isIngreso ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+                              )}>
+                                {isIngreso ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-semibold text-neutral-900 truncate">{mov.concepto}</p>
+                                  {matchingInvoice?.ncf && (
+                                    <span className="font-mono text-[10px] font-semibold text-neutral-600 bg-neutral-100 border border-neutral-200/80 px-1.5 py-0.5 rounded-md">
+                                      {matchingInvoice.ncf}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                  <span className="tabular-nums">{new Date(mov.creado_en).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+                                  <span className="text-neutral-300">·</span>
+                                  <span className="capitalize">{tipoLabel}</span>
+                                  {matchingInvoice?.customerName && (
+                                    <>
+                                      <span className="text-neutral-300">·</span>
+                                      <span className="text-neutral-600 font-medium flex items-center gap-1">
+                                        <User className="h-3 w-3 text-neutral-400" />
+                                        {matchingInvoice.customerName}
+                                      </span>
+                                    </>
+                                  )}
+                                </p>
+                              </div>
                             </div>
-                            <span className={cn(
-                              "text-sm font-bold tabular-nums whitespace-nowrap",
-                              isIngreso ? "text-emerald-600" : "text-rose-600"
-                            )}>
-                              {isIngreso ? "+" : "−"}{formatRD(mov.monto)}
-                            </span>
+
+                            <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pl-12.5 sm:pl-0">
+                              <span className={cn(
+                                "text-sm font-bold tabular-nums whitespace-nowrap",
+                                isIngreso ? "text-emerald-600" : "text-rose-600"
+                              )}>
+                                {isIngreso ? "+" : "−"}{formatRD(mov.monto)}
+                              </span>
+                              {canViewOrder && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedInvoice(matchingInvoice);
+                                    setSelectedInvoiceEdit(false);
+                                  }}
+                                  className="h-8 px-2.5 rounded-xl border-neutral-200/90 bg-white text-xs font-semibold text-neutral-800 hover:bg-neutral-100 hover:text-neutral-900 active:scale-95 shadow-2xs gap-1.5 cursor-pointer whitespace-nowrap"
+                                >
+                                  <Receipt className="h-3.5 w-3.5 text-neutral-500" />
+                                  <span>Ver orden</span>
+                                </Button>
+                              )}
+                            </div>
                           </li>
                         );
                       })}
@@ -4471,6 +4621,17 @@ export default function CajaPage() {
           })()}
         </DialogContent>
       </Dialog>
+
+      {/* MODAL DETALLE DE ORDEN / TICKET PREVIEW */}
+      <InvoiceDetailDialog 
+        open={!!selectedInvoice} 
+        onClose={() => {
+          setSelectedInvoice(null);
+          setSelectedInvoiceEdit(false);
+        }} 
+        invoice={selectedInvoice} 
+        defaultEdit={selectedInvoiceEdit}
+      />
 
       {/* Thermal Print Portals */}
       {selectedPrintCaja && (

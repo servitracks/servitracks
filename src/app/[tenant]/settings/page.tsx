@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useParams, useSearchParams } from "@/lib/next-compat";
 import { EcfSettings } from "@/components/settings/EcfSettings";
 import { PhysicalPrinterSettings } from "@/components/settings/PhysicalPrinterSettings";
+import { downloadWindowsKioskInstaller } from "@/lib/escpos";
 import { getPlans, formatRD, deleteUserDefinitively } from "@/lib/storage";
 import type { Plan } from "@/store/types";
 import { navigation } from "@/components/dashboard/Sidebar";
@@ -443,10 +444,31 @@ export default function SettingsPage() {
     setWaTesting(false);
   };
 
-  // ── Print tab state ──
+  // ── Print & Ticket tab state ──
   const [printTab, setPrintTab] = useState("pos"); // "pos" | "barcode" | "warranty"
   const ps = printSettings;
   const psBarcode = barcodeSettings;
+
+  const persistPrintSettings = async (updates: Partial<typeof printSettings>, showSaveToast = false) => {
+    const newPrintSettings = { ...printSettings, ...updates };
+    updatePrintSettings(updates);
+    if (taller.id) {
+      const newConfig = { ...(taller.config || {}), printSettings: newPrintSettings };
+      updateTenant(taller.id, { config: newConfig });
+      const { error } = await supabaseAdmin
+        .from("tenants")
+        .update({ config: newConfig })
+        .eq("id", taller.id);
+      if (error) {
+        console.error("Error guardando configuración de tickets:", error);
+        if (showSaveToast) toast.warning("Guardado localmente. Error al sincronizar con el servidor.");
+        return;
+      }
+    }
+    if (showSaveToast) {
+      toast.success("Configuración de tickets guardada correctamente");
+    }
+  };
 
   // ── Users tab state ──
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -1447,7 +1469,7 @@ export default function SettingsPage() {
                     aria-checked={Boolean(ps.printInternalCopy)}
                     onClick={() => {
                       const nextVal = !Boolean(ps.printInternalCopy);
-                      updatePrintSettings({ printInternalCopy: nextVal });
+                      persistPrintSettings({ printInternalCopy: nextVal });
                       toast.success(
                         nextVal
                           ? "Copia interna activada: se imprimirán 2 tickets por cada orden."
@@ -1463,6 +1485,81 @@ export default function SettingsPage() {
                       className={cn(
                         "absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition-all duration-200 ease-out",
                         ps.printInternalCopy ? "left-6" : "left-1"
+                      )}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Opción: Impresión Automática y Modo Kiosco */}
+              <div className="p-4 rounded-2xl border border-emerald-200/80 bg-emerald-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Zap className="h-4 w-4 text-emerald-600" />
+                    <span className="font-bold text-neutral-900 text-base">
+                      Imprimir automáticamente (Modo Kiosco)
+                    </span>
+                  </div>
+                  <p className="text-sm text-neutral-600 max-w-xl leading-relaxed">
+                    Envía automáticamente el ticket (y la copia interna con corte independiente si está activa) a la impresora en cuanto se completa el cobro.
+                  </p>
+                  <div className="pt-1.5 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadWindowsKioskInstaller(
+                          typeof window !== "undefined" ? window.location.origin : undefined,
+                          (ps.paperSize as any) || "80mm"
+                        );
+                        toast.success(
+                          "Configurador de Modo Kiosco descargado. Ábrelo para activar la impresión directa sin cuadro de diálogo."
+                        );
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer transition-colors"
+                    >
+                      <Zap className="h-3.5 w-3.5" />
+                      Activar Modo Kiosco en 1 Clic (Windows)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTab("print");
+                        setPrintTab("physical");
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-800 text-xs font-bold cursor-pointer transition-colors"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                      Configurar Impresora Física / Puerto Directo
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs font-semibold text-neutral-500">
+                    {ps.autoPrint !== false ? "Activado" : "Desactivado"}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={ps.autoPrint !== false}
+                    onClick={() => {
+                      const nextAuto = ps.autoPrint === false;
+                      persistPrintSettings({ autoPrint: nextAuto });
+                      toast.success(
+                        nextAuto
+                          ? "Impresión automática activada"
+                          : "Impresión automática desactivada"
+                      );
+                    }}
+                    className={cn(
+                      "h-7 w-12 rounded-full transition-all relative cursor-pointer border-none shadow-inner",
+                      ps.autoPrint !== false ? "bg-emerald-600" : "bg-neutral-300"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition-all duration-200 ease-out",
+                        ps.autoPrint !== false ? "left-6" : "left-1"
                       )}
                     />
                   </button>
@@ -1526,7 +1623,7 @@ export default function SettingsPage() {
                     <button
                       key={size}
                       type="button"
-                      onClick={() => updatePrintSettings({ paperSize: size })}
+                      onClick={() => persistPrintSettings({ paperSize: size })}
                       className={cn(
                         "px-4 py-2 rounded-xl border text-sm font-bold transition-all cursor-pointer",
                         ps.paperSize === size
@@ -1547,7 +1644,7 @@ export default function SettingsPage() {
               <div className="pt-2">
                 <Button
                   type="button"
-                  onClick={() => toast.success("Configuración de tickets guardada y sincronizada")}
+                  onClick={() => persistPrintSettings({}, true)}
                   className="rounded-xl bg-black text-white hover:bg-neutral-800 cursor-pointer h-10 px-5 gap-2"
                 >
                   <Check className="h-4 w-4" />

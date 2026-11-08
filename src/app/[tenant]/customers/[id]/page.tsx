@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import type { Invoice, WorkOrder } from "@/store/types";
+import { InvoiceDetailDialog } from "@/components/dashboard/InvoiceDetailDialog";
 import { useStore, Vehicle } from "@/store/useStore";
 import { useParams, useRouter } from "@/lib/next-compat";
 import { supabaseAdmin } from "@/lib/supabase";
@@ -10,7 +12,7 @@ import {
   Building2, User as UserIcon, Check, Calendar, AlertCircle,
   MessageCircle, ExternalLink, MoreVertical, Trash2, Edit3,
   Gauge, DollarSign, Sparkles, Star, ChevronRight, Hash,
-  CheckCircle2, CreditCard
+  CheckCircle2, CreditCard, Printer, Eye
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,6 +39,8 @@ const COLOR_PALETTE = [
   { name: "Beige", bg: "bg-amber-100", border: "border-amber-300" },
   { name: "Otro", bg: "bg-neutral-200", border: "border-neutral-400" },
 ];
+
+const LazyOrderDetailDialog = lazy(() => import("@/app/[tenant]/orders/OrderDetailDialog"));
 
 export default function CustomerDetailPage() {
   const { id, tenant } = useParams();
@@ -77,9 +81,14 @@ export default function CustomerDetailPage() {
 
   const customerInvoices = useMemo(() => {
     return invoices
-      .filter(i => i.customerId === id && (!tenantId || i.tenantId === tenantId))
+      .filter(i => {
+        if (tenantId && i.tenantId !== tenantId) return false;
+        if (i.customerId === id) return true;
+        if (i.orderId && orders.some(o => o.id === i.orderId && o.customerId === id)) return true;
+        return false;
+      })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [invoices, id, tenantId]);
+  }, [invoices, orders, id, tenantId]);
 
   // Métricas financieras calculadas
   const totalSpent = useMemo(() => {
@@ -135,6 +144,17 @@ export default function CustomerDetailPage() {
   // Modales
   const [addVehicleOpen, setAddVehicleOpen] = useState(false);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<WorkOrder | null>(null);
+
+  const handleOpenOrderById = (orderId: string) => {
+    const found = orders.find((o) => o.id === orderId);
+    if (found) {
+      setSelectedOrder(found);
+    } else {
+      toast.error(`No se encontró la orden de servicio #${orderId.slice(0, 6).toUpperCase()}`);
+    }
+  };
 
   const [profileForm, setProfileForm] = useState({
     name: "",
@@ -794,20 +814,22 @@ export default function CustomerDetailPage() {
                 <div className="border border-neutral-200/80 rounded-3xl bg-white shadow-2xs overflow-hidden divide-y divide-neutral-100">
                   {customerOrders.map((order) => {
                     const isFinished = order.status === "finished" || order.status === "delivered";
+                    const associatedInvoice = customerInvoices.find((i) => i.orderId === order.id);
+                    const orderVehicle = vehicles.find((v) => v.id === order.vehicleId);
 
                     return (
                       <div
                         key={order.id}
-                        onClick={() => router.push(`/${tenant}/orders`)}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 hover:bg-neutral-50/70 transition-colors cursor-pointer gap-3"
+                        onClick={() => setSelectedOrder(order)}
+                        className="group flex flex-col md:flex-row md:items-center justify-between p-4 sm:p-5 hover:bg-neutral-50/90 transition-all cursor-pointer gap-3 sm:gap-4"
                       >
-                        <div className="flex items-start gap-3.5">
+                        <div className="flex items-start gap-3.5 min-w-0">
                           <div
                             className={cn(
-                              "flex h-10 w-10 items-center justify-center rounded-2xl flex-shrink-0 mt-0.5",
+                              "flex h-10 w-10 items-center justify-center rounded-2xl flex-shrink-0 mt-0.5 group-hover:scale-105 transition-all",
                               isFinished
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200/90"
-                                : "bg-neutral-100 text-neutral-700 border border-neutral-200"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200/90 group-hover:bg-emerald-100"
+                                : "bg-neutral-100 text-neutral-700 border border-neutral-200 group-hover:bg-neutral-200/80"
                             )}
                           >
                             {isFinished ? (
@@ -816,14 +838,28 @@ export default function CustomerDetailPage() {
                               <Wrench className="h-5 w-5" />
                             )}
                           </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-neutral-900 text-sm">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-neutral-900 text-sm group-hover:text-blue-700 transition-colors">
                                 {order.description || "Mantenimiento General"}
                               </span>
-                              <span className="font-mono text-[11px] text-neutral-400">
+                              <span className="font-mono text-[11px] text-neutral-500 font-semibold px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200">
                                 #{order.id.slice(0, 6).toUpperCase()}
                               </span>
+                              {associatedInvoice && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedInvoice(associatedInvoice);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 hover:border-emerald-300 transition-all cursor-pointer shadow-2xs"
+                                  title={`Ver comprobante de factura #${associatedInvoice.id.slice(-6).toUpperCase()}`}
+                                >
+                                  <Receipt className="h-2.5 w-2.5" />
+                                  <span>Factura #{associatedInvoice.id.slice(-6).toUpperCase()}</span>
+                                </button>
+                              )}
                             </div>
 
                             <p className="text-xs text-neutral-500 flex flex-wrap items-center gap-2 mt-1">
@@ -841,37 +877,83 @@ export default function CustomerDetailPage() {
                                   <span>{order.items.length} {order.items.length === 1 ? "tarea" : "tareas"}</span>
                                 </>
                               )}
+                              {orderVehicle && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-neutral-500 font-medium flex items-center gap-1">
+                                    <Car className="h-3 w-3" />
+                                    {orderVehicle.brand} {orderVehicle.model} ({orderVehicle.plate})
+                                  </span>
+                                </>
+                              )}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 flex-shrink-0 pl-13 sm:pl-0">
-                          {order.total !== undefined && (
-                            <span className="font-mono font-bold text-sm text-neutral-900">
-                              RD$ {order.total.toLocaleString("es-DO")}
-                            </span>
-                          )}
-                          <Badge
-                            variant="secondary"
-                            className={cn(
-                              "text-[10px] uppercase font-bold border-none px-2.5 py-0.5 rounded-full",
-                              isFinished
-                                ? "bg-emerald-100 text-emerald-800"
-                                : order.status === "repairing"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-neutral-100 text-neutral-700"
+                        {/* Columna Derecha: Monto, Estado y Botones de Acción */}
+                        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between md:justify-end gap-3 flex-shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-neutral-100">
+                          <div className="flex flex-col md:items-end">
+                            {order.total !== undefined && (
+                              <span className="font-mono font-bold text-sm sm:text-base text-neutral-900">
+                                RD$ {order.total.toLocaleString("es-DO")}
+                              </span>
                             )}
-                          >
-                            {order.status === "pending"
-                              ? "Pendiente"
-                              : order.status === "repairing"
-                              ? "En Reparación"
-                              : order.status === "finished"
-                              ? "Finalizado"
-                              : order.status === "delivered"
-                              ? "Entregado"
-                              : order.status}
-                          </Badge>
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                "text-[10px] uppercase font-bold border-none px-2.5 py-0.5 rounded-full mt-0.5 self-start md:self-end",
+                                isFinished
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : order.status === "repairing"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : "bg-neutral-100 text-neutral-700"
+                              )}
+                            >
+                              {order.status === "pending"
+                                ? "Pendiente"
+                                : order.status === "repairing"
+                                ? "En Reparación"
+                                : order.status === "finished"
+                                ? "Finalizado"
+                                : order.status === "delivered"
+                                ? "Entregado"
+                                : order.status}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedOrder(order);
+                              }}
+                              className="h-8.5 px-3 rounded-xl border-neutral-200 bg-white hover:bg-neutral-900 hover:text-white text-neutral-800 text-xs font-semibold gap-1.5 shadow-2xs transition-all cursor-pointer group/btn"
+                              title="Ver detalles e imprimir orden"
+                            >
+                              <Printer className="h-3.5 w-3.5 text-neutral-500 group-hover/btn:text-white transition-colors" />
+                              <span>Ver / Imprimir Orden</span>
+                            </Button>
+
+                            {associatedInvoice && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedInvoice(associatedInvoice);
+                                }}
+                                className="h-8.5 px-2.5 rounded-xl border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold gap-1.5 shadow-2xs transition-all cursor-pointer"
+                                title={`Ver e imprimir factura #${associatedInvoice.id.slice(-6).toUpperCase()}`}
+                              >
+                                <Receipt className="h-3.5 w-3.5 text-emerald-600" />
+                                <span className="hidden lg:inline">Factura</span>
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -912,60 +994,132 @@ export default function CustomerDetailPage() {
                 </div>
               ) : (
                 <div className="border border-neutral-200/80 rounded-3xl bg-white shadow-2xs overflow-hidden divide-y divide-neutral-100">
-                  {customerInvoices.map((inv) => (
-                    <div
-                      key={inv.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 hover:bg-neutral-50/70 transition-colors gap-3"
-                    >
-                      <div className="flex items-start gap-3.5">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 border border-blue-200/90 flex-shrink-0 mt-0.5">
-                          <Receipt className="h-5 w-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-neutral-900 text-sm">
-                              Factura #{inv.id.slice(-6).toUpperCase()}
-                            </span>
-                            {inv.ncf && (
-                              <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-800">
-                                {inv.ncf}
+                  {customerInvoices.map((inv) => {
+                    const associatedOrder = inv.orderId ? orders.find((o) => o.id === inv.orderId) : null;
+                    const associatedVehicle = inv.vehicleId
+                      ? vehicles.find((v) => v.id === inv.vehicleId)
+                      : associatedOrder?.vehicleId
+                      ? vehicles.find((v) => v.id === associatedOrder.vehicleId)
+                      : null;
+
+                    return (
+                      <div
+                        key={inv.id}
+                        onClick={() => setSelectedInvoice(inv)}
+                        className="group flex flex-col md:flex-row md:items-center justify-between p-4 sm:p-5 hover:bg-neutral-50/90 transition-all cursor-pointer gap-3 sm:gap-4"
+                      >
+                        <div className="flex items-start gap-3.5 min-w-0">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 border border-blue-200/90 flex-shrink-0 mt-0.5 group-hover:scale-105 group-hover:bg-blue-100 group-hover:text-blue-800 transition-all">
+                            <Receipt className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-neutral-900 text-sm group-hover:text-blue-700 transition-colors">
+                                Factura #{inv.id.slice(-6).toUpperCase()}
                               </span>
-                            )}
+                              {inv.ncf && (
+                                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-800">
+                                  {inv.ncf}
+                                </span>
+                              )}
+                              {associatedOrder && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedOrder(associatedOrder);
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/80 hover:bg-blue-100 hover:border-blue-300 transition-all cursor-pointer shadow-2xs"
+                                  title={`Ver orden de servicio #${associatedOrder.id.slice(0, 6).toUpperCase()}`}
+                                >
+                                  <Wrench className="h-2.5 w-2.5" />
+                                  <span>Orden #{associatedOrder.id.slice(0, 6).toUpperCase()}</span>
+                                </button>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-neutral-400 flex flex-wrap items-center gap-1.5 mt-1">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {new Date(inv.createdAt).toLocaleDateString("es-DO", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </span>
+                              <span>·</span>
+                              <span>{inv.items.length} {inv.items.length === 1 ? "artículo" : "artículos"}</span>
+                              {associatedVehicle && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-neutral-500 font-medium flex items-center gap-1">
+                                    <Car className="h-3 w-3" />
+                                    {associatedVehicle.brand} {associatedVehicle.model} ({associatedVehicle.plate})
+                                  </span>
+                                </>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Columna Derecha: Monto, Estado y Botones de Acción */}
+                        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between md:justify-end gap-3 flex-shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-neutral-100">
+                          <div className="flex flex-col md:items-end">
+                            <p className="font-bold font-mono text-sm sm:text-base text-neutral-900">
+                              RD$ {inv.total.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+                            </p>
+                            <Badge
+                              variant="secondary"
+                              className={cn(
+                                "text-[9px] uppercase font-bold border-none px-2 py-0.5 rounded-full mt-0.5 self-start md:self-end",
+                                inv.status === "paid"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : inv.status === "cancelled"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-amber-100 text-amber-800"
+                              )}
+                            >
+                              {inv.status === "paid" ? "Pagada" : inv.status === "cancelled" ? "Anulada" : "Pendiente"}
+                            </Badge>
                           </div>
 
-                          <p className="text-xs text-neutral-400 flex items-center gap-1.5 mt-1">
-                            <Clock className="h-3 w-3" />
-                            {new Date(inv.createdAt).toLocaleDateString("es-DO", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            })}
-                            <span>·</span>
-                            <span>{inv.items.length} {inv.items.length === 1 ? "artículo" : "artículos"}</span>
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedInvoice(inv);
+                              }}
+                              className="h-8.5 px-3 rounded-xl border-neutral-200 bg-white hover:bg-neutral-900 hover:text-white text-neutral-800 text-xs font-semibold gap-1.5 shadow-2xs transition-all cursor-pointer group/btn"
+                              title="Ver comprobante e imprimir factura"
+                            >
+                              <Printer className="h-3.5 w-3.5 text-neutral-500 group-hover/btn:text-white transition-colors" />
+                              <span>Ver / Imprimir</span>
+                            </Button>
+
+                            {associatedOrder && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedOrder(associatedOrder);
+                                }}
+                                className="h-8.5 px-2.5 rounded-xl border-neutral-200/80 bg-neutral-50 hover:bg-neutral-100 text-neutral-700 text-xs font-medium gap-1.5 shadow-2xs transition-all cursor-pointer"
+                                title={`Ver orden de trabajo #${associatedOrder.id.slice(0, 6).toUpperCase()}`}
+                              >
+                                <FileText className="h-3.5 w-3.5 text-neutral-500" />
+                                <span className="hidden lg:inline">Orden</span>
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
-
-                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 flex-shrink-0 pl-13 sm:pl-0">
-                        <p className="font-bold font-mono text-sm text-neutral-900">
-                          RD$ {inv.total.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
-                        </p>
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            "text-[9px] uppercase font-bold border-none px-2 py-0.5 rounded-full",
-                            inv.status === "paid"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : inv.status === "cancelled"
-                              ? "bg-rose-100 text-rose-800"
-                              : "bg-amber-100 text-amber-800"
-                          )}
-                        >
-                          {inv.status === "paid" ? "Pagada" : inv.status === "cancelled" ? "Anulada" : "Pendiente"}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1279,6 +1433,37 @@ export default function CustomerDetailPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Detalle / Impresión de Factura */}
+      <InvoiceDetailDialog
+        open={!!selectedInvoice}
+        onClose={() => setSelectedInvoice(null)}
+        invoice={
+          selectedInvoice
+            ? {
+                ...selectedInvoice,
+                customerId: selectedInvoice.customerId || customer.id,
+                customerName: selectedInvoice.customerName || customer.name,
+                customerRnc: selectedInvoice.customerRnc || customer.rnc,
+              }
+            : null
+        }
+        onOpenOrder={handleOpenOrderById}
+      />
+
+      {/* Modal de Detalle / Impresión de Orden */}
+      {selectedOrder && (
+        <Suspense fallback={null}>
+          <LazyOrderDetailDialog
+            open={!!selectedOrder}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setSelectedOrder(null);
+            }}
+            order={selectedOrder}
+            disableInternalCopy={true}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

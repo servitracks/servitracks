@@ -49,9 +49,10 @@ const emptyForm: FormData = {
 interface OrderCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOrderCreated?: (order: WorkOrder) => void;
 }
 
-export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDialogProps) {
+export default function OrderCreateDialog({ open, onOpenChange, onOrderCreated }: OrderCreateDialogProps) {
   const { tenant } = useParams();
   const router = useRouter();
   const tenants = useStore((s) => s.tenants);
@@ -270,6 +271,8 @@ export default function OrderCreateDialog({ open, onOpenChange }: OrderCreateDia
     setForm(emptyForm);
     if (redirectToPos) {
       router.push(`/${tenant}/pos?orderId=${newOrderId}`);
+    } else if (onOrderCreated) {
+      onOrderCreated(newOrder);
     }
   };
 

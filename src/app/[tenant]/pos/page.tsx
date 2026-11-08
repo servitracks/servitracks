@@ -178,6 +178,58 @@ export default function POSPage() {
   const tenantServices = tenantId ? services.filter((s) => s.tenantId === tenantId) : [];
   const tenantTechnicians = tenantId ? technicians.filter((t) => t.tenantId === tenantId) : [];
 
+  const [isSyncingProducts, setIsSyncingProducts] = useState(false);
+  const recoveredProductsTenantRef = useRef<string | null>(null);
+
+  // Recuperación inmediata del catálogo si la memoria local estaba vacía al abrir POS
+  useEffect(() => {
+    if (!tenantId || tenantProducts.length > 0) return;
+    if (recoveredProductsTenantRef.current === tenantId) return;
+    recoveredProductsTenantRef.current = tenantId;
+
+    let cancelled = false;
+    setIsSyncingProducts(true);
+
+    (async () => {
+      try {
+        const [{ loadTenantProductsFromCache }, { loadProductsFromSupabase, applyRemoteStoreUpdate }] =
+          await Promise.all([import("@/lib/productsCache"), import("@/lib/supabaseSync")]);
+
+        const cached = await loadTenantProductsFromCache(tenantId);
+        if (!cancelled && cached.length > 0) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((prev) => ({
+              products: [
+                ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== tenantId),
+                ...cached,
+              ],
+            }));
+          });
+        }
+
+        const remote = await loadProductsFromSupabase(tenantId);
+        if (!cancelled && remote.length > 0) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((prev) => ({
+              products: [
+                ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== tenantId),
+                ...remote,
+              ],
+            }));
+          });
+        }
+      } catch (err) {
+        console.warn("[POS] Error recuperando catálogo de artículos:", err);
+      } finally {
+        if (!cancelled) setIsSyncingProducts(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, tenantProducts.length]);
+
   const tenantOpenTabs = useMemo(() => {
     const raw = openTabs.filter((t) => {
       if (!t) return false;
@@ -243,6 +295,7 @@ export default function POSPage() {
     stock: 9999,
     minStock: 0,
     tax: (typeof s.tax === 'number' && s.tax >= 0 && s.tax <= 30) ? s.tax : 0,
+    ...({ _isService: true } as any),
   });
 
   const [search, setSearch]           = useState("");
@@ -1558,6 +1611,12 @@ export default function POSPage() {
 
           {/* Category tabs */}
           <div className="flex gap-2 px-4 py-2.5 overflow-x-auto shrink-0 custom-scrollbar bg-white/70 border-b border-neutral-200/70 items-center">
+            {isSyncingProducts && (
+              <div className="h-8.5 px-3 rounded-lg text-xs font-semibold bg-neutral-100 text-neutral-700 border border-neutral-200 flex items-center gap-2 shrink-0">
+                <RotateCcw className="h-3.5 w-3.5 animate-spin text-neutral-600" />
+                <span>Cargando artículos...</span>
+              </div>
+            )}
             {CATEGORIES.map((cat) => {
               const isAll = cat === "Todos";
               const details = isAll 
@@ -1601,7 +1660,7 @@ export default function POSPage() {
             )}>
               {filteredProducts.map((product) => {
                 const inCart = cart.find((i) => i.id === product.id);
-                const isService = product.category === "Servicios" || product.stock >= 9000 || product.sku?.startsWith("SRV") || product.name.toLowerCase().includes("alineación") || product.name.toLowerCase().includes("mantenimiento") || product.name.toLowerCase().includes("mano de obra");
+                const isService = Boolean((product as any)._isService) || product.category === "Servicios" || Boolean(product.sku?.startsWith("SRV-")) || product.sku === "MANO-OBRA" || Boolean(product.id?.startsWith("labor-"));
                 const isLowStock = !isService && product.stock > 0 && product.stock <= 5;
                 const isOutOfStock = !isService && product.stock <= 0;
                 const catDetails = getCategoryDetails(product.category, isService);

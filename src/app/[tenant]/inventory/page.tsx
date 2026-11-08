@@ -79,6 +79,7 @@ import ImportWizardModal from "@/components/inventory/ImportWizardModal";
 import { ImportRow } from "@/components/inventory/StepPreviewEditor";
 import QuoteRequestDialog from "@/components/inventory/QuoteRequestDialog";
 import PrintLabelDialog from "@/components/inventory/PrintLabelDialog";
+import BulkPrintLabelsSection from "@/components/inventory/BulkPrintLabelsSection";
 import ComboCreateDialog from "@/components/inventory/ComboCreateDialog";
 
 const CATEGORIES = ["Lubricantes", "Filtros", "Frenos", "Suspensión", "Eléctrico", "Neumáticos", "Transmisión", "Otros"];
@@ -506,6 +507,51 @@ export default function InventoryPage() {
   const purchaseOrders = tenantId ? allPurchaseOrders.filter((po) => po.tenantId === tenantId) : [];
   const products = tenantId ? allProducts.filter((p) => p.tenantId === tenantId) : [];
 
+  const recoveredInventoryTenantRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tenantId || products.length > 0) return;
+    if (recoveredInventoryTenantRef.current === tenantId) return;
+    recoveredInventoryTenantRef.current = tenantId;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const [{ loadTenantProductsFromCache }, { loadProductsFromSupabase, applyRemoteStoreUpdate }] =
+          await Promise.all([import("@/lib/productsCache"), import("@/lib/supabaseSync")]);
+
+        const cached = await loadTenantProductsFromCache(tenantId);
+        if (!cancelled && cached.length > 0) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((prev) => ({
+              products: [
+                ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== tenantId),
+                ...cached,
+              ],
+            }));
+          });
+        }
+
+        const remote = await loadProductsFromSupabase(tenantId);
+        if (!cancelled && remote.length > 0) {
+          applyRemoteStoreUpdate(() => {
+            useStore.setState((prev) => ({
+              products: [
+                ...(prev.products || []).filter((p) => p.tenantId && p.tenantId !== tenantId),
+                ...remote,
+              ],
+            }));
+          });
+        }
+      } catch (err) {
+        console.warn("[Inventory] Error recuperando artículos:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, products.length]);
+
   const allServices = useStore((s) => s.services);
   const services = tenantId ? allServices.filter((s) => s.tenantId === tenantId) : [];
 
@@ -516,7 +562,14 @@ export default function InventoryPage() {
   const suppliers = tenantId ? allSuppliers.filter((s) => s.tenantId === tenantId && (s.status as any) !== "inactivo") : [];
 
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("products");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const tabParam = new URLSearchParams(window.location.search).get("tab");
+      if (tabParam === "labels") return "labels";
+    }
+    return "products";
+  });
+  const [bulkInitialProduct, setBulkInitialProduct] = useState<{ product: Product; qty: number } | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [categoryFilter, setCategoryFilter] = useState("Todos");
   const [kpiFilter, setKpiFilter] = useState<"all" | "low" | "out">("all");
@@ -561,6 +614,7 @@ export default function InventoryPage() {
       }
 
       // 2. Limpiar el estado en memoria de Zustand
+      recoveredInventoryTenantRef.current = tenantId;
       useStore.setState((state) => ({
         products: state.products.filter((p) => p.tenantId !== tenantId),
         movements: state.movements.filter((m) => m.tenantId !== tenantId),
@@ -601,7 +655,7 @@ export default function InventoryPage() {
         console.warn("[Vaciar Inventario] Broadcast notification error:", e);
       }
 
-      toast.success("El inventario ha sido vaciado por completo tanto de Supabase como de la aplicación.");
+      toast.success("El inventario ha sido vaciado por completo.");
       setIsDeleteAllModalOpen(false);
       setConfirmDeleteText("");
     } catch (err: any) {
@@ -1307,6 +1361,15 @@ export default function InventoryPage() {
           <Button 
             variant="outline" 
             className="h-9 px-3.5 rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all"
+            onClick={() => setActiveTab("labels")}
+          >
+            <Printer className="h-3.5 w-3.5" />
+            <span>Imprimir Etiquetas</span>
+          </Button>
+
+          <Button 
+            variant="outline" 
+            className="h-9 px-3.5 rounded-xl border border-neutral-200 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold text-xs gap-1.5 cursor-pointer shadow-2xs transition-all"
             onClick={handleExportCSV}
           >
             <Download className="h-3.5 w-3.5" />
@@ -1442,6 +1505,7 @@ export default function InventoryPage() {
             {([
               { id: "products", label: "Productos", icon: Package, count: products.filter(p => !p.isCombo).length },
               { id: "combos", label: "Combos", icon: Layers, count: products.filter(p => p.isCombo).length },
+              { id: "labels", label: "Imprimir Etiquetas", icon: Printer, count: products.filter(p => !p.isCombo).length },
               { id: "movements", label: "Kardex / Movimientos", icon: ArrowLeftRight, count: movements.length },
               { id: "pedidos", label: "Reabastecimiento", icon: Truck, count: lowStockCount },
             ] as const).map((tab) => {
@@ -2632,6 +2696,17 @@ export default function InventoryPage() {
             </div>
           </div>
         </TabsContent>
+
+        {/* Impresión Masiva de Etiquetas */}
+        <TabsContent value="labels" className="mt-4">
+          <BulkPrintLabelsSection
+            products={products}
+            tenantSlug={tenantSlug}
+            tenantName={currentTenant?.name}
+            initialProduct={bulkInitialProduct}
+            onClearInitialProduct={() => setBulkInitialProduct(null)}
+          />
+        </TabsContent>
       </Tabs>
 
       {/* Create Dialog */}
@@ -2730,6 +2805,10 @@ export default function InventoryPage() {
         open={isPrintLabelOpen}
         onOpenChange={(o) => { if (!o) setIsPrintLabelOpen(false); }}
         product={selectedProduct}
+        onOpenBulkPrint={(prod, qty) => {
+          setBulkInitialProduct({ product: prod, qty });
+          setActiveTab("labels");
+        }}
       />
 
       <ComboCreateDialog

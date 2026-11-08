@@ -1396,7 +1396,12 @@ interface PrintReceiptProps {
 export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total, payMethod, cashNum, change, taller, lastInvoice, mechanicId, warrantyText }: PrintReceiptProps) {
   const technicians = useStore((s) => s.technicians);
   const customers = useStore((s) => s.customers);
+  const currentTenant = useStore((s) => s.currentTenant);
   const printSettings = useStore((s) => s.printSettings);
+  const shouldPrintInternalCopy = Boolean(
+    printSettings?.printInternalCopy ??
+    (currentTenant as any)?.config?.printSettings?.printInternalCopy
+  );
   const techName = mechanicId ? (technicians.find(t => t.id === mechanicId)?.name ?? undefined) : undefined;
 
   const componentRef = useRef<HTMLDivElement>(null);
@@ -1415,12 +1420,28 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
 
   // Generar / lanzar impresión del ticket automáticamente al completar el cobro
   useEffect(() => {
-    if (!open || !lastInvoice?.id) return;
-    if (autoPrintedInvoiceIdRef.current === lastInvoice.id) return;
-    autoPrintedInvoiceIdRef.current = lastInvoice.id;
-    const timer = setTimeout(() => {
-      handlePrint();
-    }, 250);
+    if (!open) {
+      autoPrintedInvoiceIdRef.current = null;
+      return;
+    }
+    if (printSettings.autoPrint === false) return;
+    const invoiceKey = lastInvoice?.id || "pos-receipt-active";
+    if (autoPrintedInvoiceIdRef.current === invoiceKey) return;
+
+    let attempts = 0;
+    const expectedTickets = shouldPrintInternalCopy ? 2 : 1;
+    const tryAutoPrint = () => {
+      const ticketCount = componentRef.current?.querySelectorAll(".thermal-ticket")?.length || 0;
+      if (componentRef.current && ticketCount >= expectedTickets) {
+        autoPrintedInvoiceIdRef.current = invoiceKey;
+        handlePrint();
+      } else if (attempts < 20) {
+        attempts += 1;
+        timer = setTimeout(tryAutoPrint, 80);
+      }
+    };
+    let timer = setTimeout(tryAutoPrint, 180);
+
     return () => clearTimeout(timer);
   }, [open, lastInvoice?.id]);
 
@@ -1497,17 +1518,11 @@ export function PrintReceiptDialog({ open, onClose, cart, subtotal, itbis, total
             {/* Primer ticket: Cliente (original sin modificaciones) */}
             <Ticket {...commonTicketProps} esCopiaInterna={false} />
 
-            {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
-            {printSettings.printInternalCopy && (
-              <>
-                <div
-                  className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
-                  style={{ pageBreakBefore: "always", breakBefore: "page" }}
-                >
-                  ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
-                </div>
+            {/* Segundo ticket: Copia Interna (Negocio) oculta en la vista previa en pantalla */}
+            {shouldPrintInternalCopy && (
+              <div className="hidden" aria-hidden="true">
                 <Ticket {...commonTicketProps} esCopiaInterna={true} />
-              </>
+              </div>
             )}
           </div>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useStore, Invoice, WorkOrder } from "@/store/useStore";
 import { useParams, useRouter } from "@/lib/next-compat";
 import { cn } from "@/lib/utils";
@@ -218,10 +218,42 @@ export default function OrdenesControlPage() {
 
   // Estados de Modales
   const [detailOrder, setDetailOrder] = useState<UnifiedWorkshopOrder | null>(null);
-  const [detailPaperFormat, setDetailPaperFormat] = useState<"80mm" | "A4">(() =>
-    printSettings?.paperSize === "A4" ? "A4" : "80mm"
+  const [detailPaperFormat, setDetailPaperFormat] = useState<"80mm" | "57mm" | "A4">(() =>
+    printSettings?.paperSize === "A4" ? "A4" : printSettings?.paperSize === "58mm" ? "57mm" : "80mm"
   );
+  useEffect(() => {
+    if (printSettings?.paperSize === "A4") setDetailPaperFormat("A4");
+    else if (printSettings?.paperSize === "58mm") setDetailPaperFormat("57mm");
+    else setDetailPaperFormat("80mm");
+  }, [printSettings?.paperSize]);
   const detailPrintRef = useRef<HTMLDivElement>(null);
+  const autoPrintOnOpenRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!detailOrder || !autoPrintOnOpenRef.current) return;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const tryPrint = () => {
+      if (detailPrintRef.current && detailPrintRef.current.innerHTML.trim().length > 0) {
+        autoPrintOnOpenRef.current = false;
+        printThermalDocument({
+          element: detailPrintRef.current,
+          title: `Orden_${detailOrder.numero}`,
+          paperSize: detailPaperFormat,
+          onComplete: () => {
+            if (typeof window !== "undefined" && localStorage.getItem("servitracks_kiosk_configured") === "true") {
+              setDetailOrder(null);
+            }
+          },
+        });
+      } else if (attempts < 15) {
+        attempts += 1;
+        timer = setTimeout(tryPrint, 80);
+      }
+    };
+    timer = setTimeout(tryPrint, 180);
+    return () => clearTimeout(timer);
+  }, [detailOrder, detailPaperFormat]);
 
   const [statusModalOrder, setStatusModalOrder] = useState<UnifiedWorkshopOrder | null>(null);
   const [cobrarModalOrder, setCobrarModalOrder] = useState<UnifiedWorkshopOrder | null>(null);
@@ -935,6 +967,16 @@ export default function OrdenesControlPage() {
         : `Abono registrado: RD$ ${montoAbono.toLocaleString("es-DO")}. Resta RD$ ${nuevoPendiente.toLocaleString("es-DO")}`
     );
     setCobrarModalOrder(null);
+    if (printSettings?.autoPrint !== false) {
+      autoPrintOnOpenRef.current = true;
+      setDetailOrder({
+        ...cobrarModalOrder,
+        paidAmount: nuevoPagado,
+        pendingAmount: nuevoPendiente,
+        paymentStatus: nuevoStatus,
+        paymentMethod: payMethodInternal,
+      });
+    }
   };
 
   // Abrir Modal de Timbrado e-CF con EF2
@@ -2298,6 +2340,19 @@ export default function OrdenesControlPage() {
                               type="button"
                               onClick={() => {
                                 setOpenMenuId(null);
+                                autoPrintOnOpenRef.current = true;
+                                setDetailOrder(o);
+                              }}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-neutral-800 hover:bg-neutral-100 transition-colors cursor-pointer text-left"
+                            >
+                              <Printer className="h-4 w-4 text-neutral-700" />
+                              <span>Imprimir Ticket Ahora</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
                                 setStatusModalOrder(o);
                               }}
                               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-neutral-800 hover:bg-neutral-100 transition-colors cursor-pointer text-left"
@@ -2765,6 +2820,19 @@ export default function OrdenesControlPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => setDetailPaperFormat("57mm")}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer",
+                          detailPaperFormat === "57mm"
+                            ? "bg-white text-neutral-900 shadow-2xs"
+                            : "text-neutral-500 hover:text-neutral-900"
+                        )}
+                      >
+                        <Receipt className="h-3.5 w-3.5" />
+                        Ticket 57mm
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setDetailPaperFormat("A4")}
                         className={cn(
                           "px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer",
@@ -2893,15 +2961,9 @@ export default function OrdenesControlPage() {
                         esCopiaInterna={false}
                       />
 
-                      {/* Segundo ticket: Copia Interna (Negocio) si está activada la opción */}
+                      {/* Segundo ticket: Copia Interna (Negocio) oculta en vista previa, incluida al imprimir */}
                       {printSettings?.printInternalCopy && (
-                        <>
-                          <div
-                            className="ticket-separator my-4 py-2 border-y-2 border-dashed border-neutral-400 text-center text-[10px] font-black text-neutral-600 uppercase tracking-widest bg-neutral-50"
-                            style={{ pageBreakBefore: "always", breakBefore: "page" }}
-                          >
-                            ✂ - - - - - CORTAR AQUÍ (COPIA NEGOCIO) - - - - - ✂
-                          </div>
+                        <div className="hidden" aria-hidden="true">
                           <Ticket
 
                         invoiceId={detailOrder.numero}
@@ -2977,7 +3039,7 @@ export default function OrdenesControlPage() {
                         }}
                             esCopiaInterna={true}
                           />
-                        </>
+                        </div>
                       )}
                     </div>
                   </div>
